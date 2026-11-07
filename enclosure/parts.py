@@ -102,7 +102,10 @@ def millimetres(text: str) -> list[float]:
     return [round(float(v) * 25.4, 3) for v in INCH.findall(text or "")]
 
 
-HEIGHT_NAMES = ("height - seated (max)", "height above board", "height (max)", "height")
+# Names as DigiKey and Mouser list them (checked against live DigiKey answers): a chip
+# capacitor gives its height as "Thickness (Max)", a tactile switch as its actuator's height.
+HEIGHT_NAMES = ("height - seated (max)", "height above board", "height (max)", "height",
+                "thickness (max)", "actuator height off pcb, vertical")
 SIZE_NAMES = ("size / dimension", "dimensions")
 
 

@@ -56,6 +56,11 @@ def test_distributor_values_read_in_millimetres():
     h, size, src = parts.dimensions({"Height - Seated (Max)": '0.130" (3.31mm)',
                                      "Size / Dimension": '0.352" L x 0.289" W (8.94mm x 7.35mm)'})
     assert (h, size) == (3.31, [8.94, 7.35]) and src["height"] == "Height - Seated (Max)"
+    # As DigiKey lists a chip capacitor (seated height "-") and a tactile switch.
+    h, size, src = parts.dimensions({"Size / Dimension": '0.063" L x 0.031" W (1.60mm x 0.80mm)',
+                                     "Height - Seated (Max)": "-", "Thickness (Max)": '0.035" (0.90mm)'})
+    assert (h, size, src["height"]) == (0.9, [1.6, 0.8], "Thickness (Max)")
+    assert parts.dimensions({"Actuator Height off PCB, Vertical": "1.60mm"})[0] == 1.6
 
 
 def test_fetch_from_digikey_then_mouser(tmp_path):
