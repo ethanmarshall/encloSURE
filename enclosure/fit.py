@@ -1,0 +1,360 @@
+"""Checking a board against its enclosure.
+
+The board comes as a STEP file (KiCad: File > Export > STEP, or `kicad-cli pcb export step`),
+in its own frame: the PCB from z = 0 up, parts named by reference. EncloSURE places it on the
+standoffs by matching its mounting holes to them (or where `place` says), then checks the
+mounting holes, collisions, clearance to the walls, headroom under the lid, and that each
+opening has its connector or button lined up behind it.
+
+Moves are given two ways: in the enclosure's frame, and as a KiCad move (KiCad's Y axis points
+down the page, and a KiCad STEP export flips it, so a +Y move in the board's STEP frame is a -Y
+move in KiCad).
+"""
+
+from __future__ import annotations
+
+import math
+from dataclasses import asdict, dataclass, field
+
+from build123d import GeomType, Pos, Rot, Shape
+
+from .geom import Named, bbox, distance, named_solids, overlap_volume
+from .shell import Enclosure, board_hole_for
+
+
+@dataclass
+class Settings:
+    clearance: float = 0.5  # minimum gap from a part or the board edge to the enclosure
+    hole_tolerance: float = 0.15  # a mounting hole this close to its standoff's axis is on it
+    opening_margin: float = 0.25  # an opening clears a connector's face by this on each side
+    max_setback: float = 2.0  # connector face to the outer wall surface: past this, check the plug reaches
+    wall_reach: float = 8.0  # a part this close to a wall is "at" that wall
+
+
+@dataclass
+class Finding:
+    severity: str  # error, warning, info
+    code: str
+    subject: str
+    message: str
+    fix: str | None = None
+    move: list[float] | None = None  # enclosure frame, mm
+    kicad_move: list[float] | None = None  # KiCad board frame, mm
+
+
+@dataclass
+class Placement:
+    rotation: float  # degrees about Z, board frame to enclosure
+    translation: list[float]
+    how: str
+    matched: list[tuple[int, int]] = field(default_factory=list)  # (board hole, boss)
+
+
+@dataclass
+class Fit:
+    placement: Placement
+    findings: list[Finding]
+    headroom: float | None
+    parts: list[dict]
+    pcb: Shape | None = None  # placed in the enclosure
+    placed: list[Named] = field(default_factory=list)
+
+    def to_json(self) -> dict:
+        errors = sum(f.severity == "error" for f in self.findings)
+        warnings = sum(f.severity == "warning" for f in self.findings)
+        return {
+            "fits": errors == 0,
+            "errors": errors,
+            "warnings": warnings,
+            "placement": asdict(self.placement),
+            "headroom": self.headroom,
+            "findings": [asdict(f) for f in self.findings],
+            "parts": self.parts,
+        }
+
+
+def pcb_of(solids: list[Named]) -> Named:
+    """The board itself: a solid named like one, else the thin solid with the largest plan area."""
+    for s in solids:
+        if s.name.upper() in ("PCB", "BOARD") or s.name.lower().endswith(("_pcb", "pcb")):
+            return s
+
+    def plan(s: Named):
+        (x0, y0, z0), (x1, y1, z1) = bbox(s.shape)
+        thin = 0.3 < z1 - z0 < 3.3
+        return (thin, (x1 - x0) * (y1 - y0))
+
+    return max(solids, key=plan)
+
+
+def mounting_holes(pcb: Shape) -> list[tuple[float, float, float]]:
+    """(x, y, diameter) of each round through hole between 1.9 and 5.5 mm."""
+    (_, _, z0), (_, _, z1) = bbox(pcb)
+    thick = z1 - z0
+    holes = []
+    for face in pcb.faces():
+        if face.geom_type != GeomType.CYLINDER:
+            continue
+        (fx0, fy0, fz0), (fx1, fy1, fz1) = bbox(face)
+        if fz1 - fz0 < 0.9 * thick:
+            continue
+        d = ((fx1 - fx0) + (fy1 - fy0)) / 2
+        if not 1.9 <= d <= 5.5 or abs((fx1 - fx0) - (fy1 - fy0)) > 0.1:
+            continue
+        x, y = (fx0 + fx1) / 2, (fy0 + fy1) / 2
+        if not any(math.dist((x, y), h[:2]) < 0.05 for h in holes):
+            holes.append((round(x, 4), round(y, 4), round(d, 3)))
+    return holes
+
+
+def _rot(p, deg):
+    a = math.radians(deg)
+    return (p[0] * math.cos(a) - p[1] * math.sin(a), p[0] * math.sin(a) + p[1] * math.cos(a))
+
+
+def place(holes, enc: Enclosure, pcb_bottom: float, settings: Settings) -> Placement | None:
+    """The rotation (a quarter turn) and translation that put the most holes exactly on standoffs."""
+    bosses = enc.bosses
+    if not holes or not bosses:
+        return None
+    best = None
+    for deg in (0, 90, 180, 270):
+        turned = [_rot(h, deg) for h in holes]
+        for i, h in enumerate(turned):
+            for b in bosses:
+                t = (b.center[0] - h[0], b.center[1] - h[1])
+                pairs = []
+                for k, hk in enumerate(turned):
+                    p = (hk[0] + t[0], hk[1] + t[1])
+                    j = min(range(len(bosses)), key=lambda j: math.dist(p, bosses[j].center[:2]))
+                    if math.dist(p, bosses[j].center[:2]) <= settings.hole_tolerance:
+                        pairs.append((k, j))
+                score = len(pairs)
+                if best is None or score > best[0]:
+                    best = (score, deg, t, pairs)
+    score, deg, t, pairs = best
+    if score < 2 and not (score == 1 and len(holes) == 1):
+        return None
+    # Refine on the holes that are on their standoffs, then pair every hole with its nearest.
+    turned = [_rot(h, deg) for h in holes]
+    tx = sum(bosses[j].center[0] - turned[k][0] for k, j in pairs) / len(pairs)
+    ty = sum(bosses[j].center[1] - turned[k][1] for k, j in pairs) / len(pairs)
+    matched = []
+    for k, hk in enumerate(turned):
+        p = (hk[0] + tx, hk[1] + ty)
+        j = min(range(len(bosses)), key=lambda j: math.dist(p, bosses[j].center[:2]))
+        if math.dist(p, bosses[j].center[:2]) < bosses[j].diameter:
+            matched.append((k, j))
+    top = max(bosses[j].top for _, j in matched)
+    return Placement(deg, [round(tx, 4), round(ty, 4), round(top - pcb_bottom, 4)],
+                     f"{len(pairs)} of {len(holes)} mounting holes on standoffs", matched)
+
+
+def moved(shape: Shape, p: Placement) -> Shape:
+    return Pos(*p.translation) * (Rot(0, 0, p.rotation) * shape)
+
+
+def kicad_move(move, p: Placement):
+    """An enclosure-frame move as a move on the KiCad board: undo the turn, flip Y."""
+    x, y = _rot(move[:2], -p.rotation)
+    return [round(x, 3) + 0.0, round(-y, 3) + 0.0]
+
+
+def _f(severity, code, subject, message, fix=None, move=None, placement=None):
+    km = kicad_move(move, placement) if move is not None and placement is not None else None
+    return Finding(severity, code, subject, message, fix,
+                   [round(v, 3) + 0.0 for v in move] if move is not None else None, km)
+
+
+def check(enc: Enclosure, base: Shape, lid: Shape | None, board,
+          settings: Settings | None = None, placement: Placement | None = None) -> Fit:
+    """*board* is the board's named solids (`geom.step_names`), or one shape."""
+    settings = settings or Settings()
+    solids = list(board) if isinstance(board, (list, tuple)) else named_solids(board)
+    pcb = pcb_of(solids)
+    parts = [s for s in solids if s is not pcb]
+    holes = mounting_holes(pcb.shape)
+    pcb_bottom = bbox(pcb.shape)[0][2]
+    findings: list[Finding] = []
+
+    if placement is None:
+        placement = place(holes, enc, pcb_bottom, settings)
+    if placement is None:
+        raise ValueError(
+            f"cannot place the board: {len(holes)} mounting hole(s) found, {len(enc.bosses)} "
+            "standoff(s); fewer than two line up. Give the placement (place=x,y,z,rotation)."
+        )
+    pcb_shape = moved(pcb.shape, placement)
+    placed = [Named(s.name, moved(s.shape, placement)) for s in parts]
+    p = placement
+
+    # 1. Mounting holes on standoffs.
+    turned = [_rot(h, p.rotation) for h in holes]
+    used = set()
+    for k, j in p.matched:
+        boss = enc.bosses[j]
+        used.add(j)
+        hx, hy = turned[k][0] + p.translation[0], turned[k][1] + p.translation[1]
+        dx, dy = boss.center[0] - hx, boss.center[1] - hy
+        off = math.hypot(dx, dy)
+        name = f"hole at ({holes[k][0]:.2f}, {holes[k][1]:.2f})"
+        if off > settings.hole_tolerance:
+            findings.append(_f("error", "hole_off_standoff", name,
+                               f"{off:.2f} mm off the standoff at ({boss.center[0]:.2f}, {boss.center[1]:.2f})",
+                               "move this hole onto the standoff", [dx, dy, 0], p))
+        want = board_hole_for(boss.hole)
+        if holes[k][2] + 0.05 < want:
+            findings.append(_f("warning", "hole_small", name,
+                               f"Ø{holes[k][2]:.2f} is under the Ø{want:.1f} clearance for the standoff's "
+                               f"{boss.screw or 'screw'}", f"make it Ø{want:.1f}"))
+    for k in range(len(holes)):
+        if k not in {k for k, _ in p.matched}:
+            findings.append(_f("warning", "hole_without_standoff", f"hole at ({holes[k][0]:.2f}, {holes[k][1]:.2f})",
+                               "no standoff under this mounting hole"))
+    for j, boss in enumerate(enc.bosses):
+        if j not in used:
+            findings.append(_f("info", "standoff_unused", f"standoff at ({boss.center[0]:.2f}, {boss.center[1]:.2f})",
+                               "no board hole on this standoff"))
+
+    # 2. The board edge to the walls (by its outline's box).
+    (bx0, by0, _), (bx1, by1, _) = bbox(pcb_shape)
+    (wx0, wy0, _), (wx1, wy1, _) = enc.cavity_bounds
+    for side, gap, move in (("-X", bx0 - wx0, [1, 0, 0]), ("+X", wx1 - bx1, [-1, 0, 0]),
+                            ("-Y", by0 - wy0, [0, 1, 0]), ("+Y", wy1 - by1, [0, -1, 0])):
+        if gap < settings.clearance:
+            need = settings.clearance - gap
+            findings.append(_f("error" if gap < 0 else "warning", "board_edge_clearance", f"board edge {side}",
+                               f"{gap:.2f} mm from the {side} wall (want {settings.clearance:.2f})",
+                               f"pull this edge in {need:.2f} mm", [v * need for v in move], p))
+
+    # 3. Parts against the enclosure: overlaps, clearance, headroom.
+    ceiling = enc.ceiling
+    rows = []
+    headroom = None
+    enclosure_parts = [("base", base)] + ([("lid", lid)] if lid is not None else [])
+    near_wall = {}
+    for part in placed:
+        (x0, y0, z0), (x1, y1, z1) = bbox(part.shape)
+        room = round(ceiling - z1, 3)
+        headroom = room if headroom is None else min(headroom, room)
+        row = {"part": part.name, "top": round(z1, 3), "headroom": room}
+        for label, body in enclosure_parts:
+            vol = overlap_volume(part.shape, body)
+            if vol > 1e-3:
+                over = f"; its top is {-room:.2f} mm above the lid's underside" if label == "lid" and room < 0 else ""
+                findings.append(_f("error", "collision", part.name,
+                                   f"runs into the {label} ({vol:.1f} mm³ overlap){over}",
+                                   (f"a part at most {z1 - z0 + room:.2f} mm tall, or lay it down, or raise the lid"
+                                    if over else "move it clear, or cut the enclosure clear")))
+                row["collides"] = label
+        if "collides" not in row:
+            gap = distance(part.shape, base)
+            row["gap"] = round(gap, 3)
+            if gap < settings.clearance:
+                findings.append(_f("warning", "tight", part.name,
+                                   f"{gap:.2f} mm from the enclosure (want {settings.clearance:.2f})"))
+        if room < 0 and "collides" not in row:
+            findings.append(_f("error", "too_tall", part.name,
+                               f"{-room:.2f} mm above the {'lid' if enc.lid_underside is not None else 'rim'}"))
+        elif 0 <= room < settings.clearance:
+            findings.append(_f("warning", "low_headroom", part.name, f"{room:.2f} mm under the "
+                               f"{'lid' if enc.lid_underside is not None else 'rim'}"))
+        for side, gap in (("-X", x0 - wx0), ("+X", wx1 - x1), ("-Y", y0 - wy0), ("+Y", wy1 - y1)):
+            if gap < settings.wall_reach:
+                near_wall.setdefault(side, []).append(part)
+        rows.append(row)
+
+    # 4. Openings: what sits behind each.
+    behind = set()
+    for o in enc.openings:
+        if o.wall in ("-X", "+X", "-Y", "+Y"):
+            axis = 0 if o.wall in ("-X", "+X") else 1
+            along = 1 - axis
+            best = None
+            for part in near_wall.get(o.wall, []):
+                (a0, a1), (z0, z1) = _span(part.shape, along), _span(part.shape, 2)
+                lo, hi = o.center[along] - o.width / 2, o.center[along] + o.width / 2
+                zlo, zhi = o.center[2] - o.height / 2, o.center[2] + o.height / 2
+                overlap = min(a1, hi) - max(a0, lo)
+                if overlap > 0 and min(z1, zhi) - max(z0, zlo) > 0:
+                    if best is None or overlap > best[0]:
+                        best = (overlap, part, (a0, a1), (z0, z1))
+            if best is None:
+                findings.append(_f("warning", "opening_empty", f"{o.wall} opening at {_xyz(o.center)}",
+                                   f"{o.width:.2f} × {o.height:.2f} mm, nothing behind it"))
+                continue
+            _, part, (a0, a1), (z0, z1) = best
+            behind.add(part.name)
+            m = settings.opening_margin
+            lo, hi = o.center[along] - o.width / 2, o.center[along] + o.width / 2
+            zlo, zhi = o.center[2] - o.height / 2, o.center[2] + o.height / 2
+            shift_a = (o.center[along] - (a0 + a1) / 2)
+            shift_z = (o.center[2] - (z0 + z1) / 2)
+            fits_a = a0 >= lo + m - 1e-6 and a1 <= hi - m + 1e-6
+            fits_z = z0 >= zlo + m - 1e-6 and z1 <= zhi - m + 1e-6
+            move = [0.0, 0.0, 0.0]
+            move[along] = shift_a
+            if not fits_a or not fits_z:
+                too_small = (a1 - a0) + 2 * m > o.width + 1e-6 or (z1 - z0) + 2 * m > o.height + 1e-6
+                if too_small:
+                    want_w = (a1 - a0) + 2 * m
+                    want_h = (z1 - z0) + 2 * m
+                    findings.append(_f("error", "opening_too_small", f"{part.name} at {o.wall} opening",
+                                       f"its face is {a1 - a0:.2f} × {z1 - z0:.2f} mm; the opening is "
+                                       f"{o.width:.2f} × {o.height:.2f}",
+                                       f"open it to at least {want_w:.2f} × {want_h:.2f} mm"))
+                else:
+                    msg = []
+                    if not fits_a:
+                        msg.append(f"{abs(shift_a):.2f} mm off centre sideways")
+                    if not fits_z:
+                        msg.append(f"{abs(shift_z):.2f} mm off centre in height")
+                    fix = f"move {part.name} {abs(shift_a):.2f} mm to centre it" if not fits_a else None
+                    if not fits_z:
+                        fix = ((fix + "; ") if fix else "") + (
+                            f"move the opening {shift_z:+.2f} mm in Z (or change the standoff height)")
+                    findings.append(_f("error", "opening_misaligned", f"{part.name} at {o.wall} opening",
+                                       ", ".join(msg), fix, move if not fits_a else None, p))
+            # How far its face sits back from the outside surface.
+            front = _span(part.shape, axis)[0 if o.wall.startswith("-") else 1]
+            setback = abs(front - o.outer)
+            if setback > settings.max_setback:
+                findings.append(_f("warning", "connector_setback", part.name,
+                                   f"its face is {setback:.2f} mm in from the outside of the {o.wall} wall: "
+                                   "check the mating plug reaches",
+                                   f"bring it {setback - settings.max_setback:.2f} mm closer to the wall"))
+        else:
+            # Floor and lid openings: a part under a lid opening (a button), or over a floor one.
+            under = [part for part in placed
+                     if _span(part.shape, 0)[0] < o.center[0] < _span(part.shape, 0)[1]
+                     and _span(part.shape, 1)[0] < o.center[1] < _span(part.shape, 1)[1]]
+            if o.wall == "lid":
+                if not under:
+                    findings.append(_f("warning", "opening_empty", f"lid opening at {_xyz(o.center)}",
+                                       f"{o.width:.2f} × {o.height:.2f} mm, nothing under it"))
+                for part in under:
+                    behind.add(part.name)
+                    gap = (o.center[2]) - _span(part.shape, 2)[1]
+                    findings.append(_f("info", "under_lid_opening", part.name,
+                                       f"{gap:.2f} mm below the lid at its opening: the cap or actuator spans this"))
+
+    # 5. Connectors at a wall with no opening.
+    for side, ps in near_wall.items():
+        for part in ps:
+            if part.name.upper().startswith(("J", "USB", "P")) and part.name not in behind:
+                findings.append(_f("warning", "connector_no_opening", part.name,
+                                   f"sits at the {side} wall with no opening in front of it"))
+
+    # A connector in its opening sits close to the wall by design: its fit is the opening check.
+    findings = [f for f in findings if not (f.code == "tight" and f.subject in behind)]
+    findings.sort(key=lambda f: ({"error": 0, "warning": 1, "info": 2}[f.severity], f.code, f.subject))
+    return Fit(placement, findings, headroom, rows, pcb_shape, placed)
+
+
+def _span(shape: Shape, axis: int):
+    (a, b) = bbox(shape)
+    return a[axis], b[axis]
+
+
+def _xyz(v):
+    return "(" + ", ".join(f"{c:.2f}" for c in v) + ")"

@@ -1,0 +1,43 @@
+---
+name: enclosure-fit
+description: Fit a KiCad board to its enclosure with EncloSURE. Use when the user gives an enclosure STEP and wants a board outline to design in, or wants to know whether a board fits its enclosure (standoffs, openings, headroom, collisions), and to fix what does not.
+---
+
+# Fitting a board to its enclosure
+
+EncloSURE (`enclosure` on the command line) reads an enclosure STEP (an open-topped base, and
+optionally its lid, in one frame with Z up), and works in millimetres.
+
+## Start a board from the enclosure
+
+```
+enclosure read base.step --lid lid.step            # cavity, standoffs, openings, ceiling
+enclosure limits base.step --lid lid.step -o board.kicad_pcb
+```
+
+`limits` writes the board outline (the cavity inset by 0.5 mm), a mounting hole on each standoff
+sized for its screw with a copper keepout for the head, the tallest part allowed on top and
+underneath (User.1), and a marker at the board edge for each wall opening and over the board for
+each lid opening (User.2), with the opening's height above the board top. Place connectors on
+those markers and keep parts under the heights. Do not move the outline or the holes: they are
+the enclosure's.
+
+## Check the finished board
+
+1. Export the board with its 3D models: `kicad-cli pcb export step -o board.step board.kicad_pcb`.
+   Parts without a 3D model are not in the STEP and cannot be checked; say which.
+2. `enclosure fit base.step board.step --lid lid.step -o fit/` (exit 0 fits, 1 does not).
+3. Read `fit/report.json`. Each finding has `severity`, `code`, `subject` (a reference, J1), a
+   `message`, a `fix`, and where a move fixes it, `kicad_move` [dx, dy] in mm on the KiCad board.
+
+## Fixing
+
+- `opening_misaligned`, `hole_off_standoff`, `board_edge_clearance`: apply `kicad_move` to the
+  footprint (or the hole), then check again.
+- `collision` with the lid, `too_tall`: the part is too tall; the fix names the height allowed.
+  Find a lower part or ask the user; do not change the enclosure without asking.
+- `collision` with the base, `tight`: move the part clear of the wall or standoff.
+- `opening_too_small`, `connector_setback`, `connector_no_opening`: the enclosure needs a change;
+  report the numbers to the user (they edit the enclosure in their CAD).
+- Re-export and re-run `fit` after each round until `fits` is true or only enclosure changes
+  are left. Show the user `fit/view.html` and `fit/punch_list.md`.
