@@ -16,7 +16,7 @@ from __future__ import annotations
 import math
 from dataclasses import asdict, dataclass, field
 
-from build123d import GeomType, Pos, Rot, Shape
+from build123d import Box, GeomType, Pos, Rot, Shape
 
 from .geom import Named, bbox, distance, named_solids, overlap_volume
 from .shell import Enclosure, board_hole_for
@@ -166,16 +166,66 @@ def _f(severity, code, subject, message, fix=None, move=None, placement=None):
                    [round(v, 3) + 0.0 for v in move] if move is not None else None, km)
 
 
+def stand_ins(pcb: Shape, have: set[str], specs: dict, footprints: dict) -> tuple[list[Named], list[str], list[str]]:
+    """Blocks for parts the board STEP lacks (no 3D model), sized from parts.json's `body` and
+    placed from the .kicad_pcb's footprint (KiCad page (x, y) is the STEP's (x, -y)). Returns the
+    blocks, the references given one, and the references that could not be."""
+    (_, _, z0), (_, _, z1) = bbox(pcb)
+    blocks, made, missing = [], [], []
+    for ref, fp in sorted(footprints.items()):
+        if ref in have or ref.startswith(("H", "MH", "TP", "FID")) and not specs.get(ref):
+            continue
+        spec = specs.get(ref)
+        if spec is None or not spec.body:
+            if not fp.get("has_model"):
+                missing.append(ref)
+            continue
+        if ref in have:
+            continue
+        length, width, height = spec.body
+        side = spec.side or fp["side"]
+        zc = z1 + height / 2 if side == "top" else z0 - height / 2
+        block = Pos(fp["at"][0], -fp["at"][1], zc) * (Rot(0, 0, fp["rotation"]) * Box(length, width, height))
+        blocks.append(Named(ref, block))
+        made.append(ref)
+    return blocks, made, missing
+
+
 def check(enc: Enclosure, base: Shape, lid: Shape | None, board,
-          settings: Settings | None = None, placement: Placement | None = None) -> Fit:
-    """*board* is the board's named solids (`geom.step_names`), or one shape."""
+          settings: Settings | None = None, placement: Placement | None = None,
+          specs: dict | None = None, footprints: dict | None = None) -> Fit:
+    """*board* is the board's named solids (`geom.step_names`), or one shape. *specs* are the
+    project's parts (`parts.load`), *footprints* the board's (`parts.from_board`): together they
+    stand in blocks for parts without 3D models, check model heights against datasheets, and
+    hold each connector's opening to its datasheet's recommended cutout."""
     settings = settings or Settings()
+    specs = specs or {}
     solids = list(board) if isinstance(board, (list, tuple)) else named_solids(board)
     pcb = pcb_of(solids)
     parts = [s for s in solids if s is not pcb]
     holes = mounting_holes(pcb.shape)
     pcb_bottom = bbox(pcb.shape)[0][2]
     findings: list[Finding] = []
+    blocks, made, unmodelled = stand_ins(pcb.shape, {s.name for s in parts}, specs, footprints or {})
+    parts += blocks
+    for ref in made:
+        findings.append(_f("info", "datasheet_block", ref,
+                           f"no 3D model: checked as a {' × '.join(f'{v:g}' for v in specs[ref].body)} mm block "
+                           f"from {specs[ref].source.get('body', 'parts.json')}"))
+    for ref in unmodelled:
+        findings.append(_f("warning", "unchecked_part", ref,
+                           "no 3D model and no body in parts.json: not checked",
+                           "add its 3D model in KiCad, or its body from the datasheet to parts.json"))
+    pcb_top = bbox(pcb.shape)[1][2]
+    for part in parts:
+        spec = specs.get(part.name)
+        if spec and spec.height and part.name not in made:
+            (_, _, pz0), (_, _, pz1) = bbox(part.shape)
+            model = pz1 - pcb_top if pz1 > pcb_top else pcb_bottom - pz0
+            if abs(model - spec.height) > 0.3:
+                findings.append(_f("warning", "model_height_differs", part.name,
+                                   f"its 3D model stands {model:.2f} mm; {spec.source.get('height', 'the datasheet')} "
+                                   f"says {spec.height:.2f}", "check the model against the datasheet"))
 
     if placement is None:
         placement = place(holes, enc, pcb_bottom, settings)
@@ -285,7 +335,14 @@ def check(enc: Enclosure, base: Shape, lid: Shape | None, board,
                 continue
             _, part, (a0, a1), (z0, z1) = best
             behind.add(part.name)
-            m = settings.opening_margin
+            spec = specs.get(part.name)
+            cut = spec.cutout if spec else None
+            m = 0.0 if cut else settings.opening_margin
+            if cut and (o.width + 0.05 < cut["width"] or o.height + 0.05 < cut["height"]):
+                findings.append(_f("error", "opening_below_datasheet", f"{part.name} at {o.wall} opening",
+                                   f"the opening is {o.width:.2f} × {o.height:.2f} mm; {spec.source.get('cutout', 'its datasheet')} "
+                                   f"calls for {cut['width']:.2f} × {cut['height']:.2f}",
+                                   f"open it to {cut['width']:.2f} × {cut['height']:.2f} mm"))
             lo, hi = o.center[along] - o.width / 2, o.center[along] + o.width / 2
             zlo, zhi = o.center[2] - o.height / 2, o.center[2] + o.height / 2
             shift_a = (o.center[along] - (a0 + a1) / 2)
@@ -295,7 +352,7 @@ def check(enc: Enclosure, base: Shape, lid: Shape | None, board,
             move = [0.0, 0.0, 0.0]
             move[along] = shift_a
             if not fits_a or not fits_z:
-                too_small = (a1 - a0) + 2 * m > o.width + 1e-6 or (z1 - z0) + 2 * m > o.height + 1e-6
+                too_small = not cut and ((a1 - a0) + 2 * m > o.width + 1e-6 or (z1 - z0) + 2 * m > o.height + 1e-6)
                 if too_small:
                     want_w = (a1 - a0) + 2 * m
                     want_h = (z1 - z0) + 2 * m
@@ -318,11 +375,12 @@ def check(enc: Enclosure, base: Shape, lid: Shape | None, board,
             # How far its face sits back from the outside surface.
             front = _span(part.shape, axis)[0 if o.wall.startswith("-") else 1]
             setback = abs(front - o.outer)
-            if setback > settings.max_setback:
+            limit = (cut or {}).get("max_setback", settings.max_setback)
+            if setback > limit:
                 findings.append(_f("warning", "connector_setback", part.name,
                                    f"its face is {setback:.2f} mm in from the outside of the {o.wall} wall: "
                                    "check the mating plug reaches",
-                                   f"bring it {setback - settings.max_setback:.2f} mm closer to the wall"))
+                                   f"bring it {setback - limit:.2f} mm closer to the wall"))
         else:
             # Floor and lid openings: a part under a lid opening (a button), or over a floor one.
             under = [part for part in placed

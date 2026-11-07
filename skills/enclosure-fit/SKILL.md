@@ -22,11 +22,27 @@ each lid opening (User.2), with the opening's height above the board top. Place 
 those markers and keep parts under the heights. Do not move the outline or the holes: they are
 the enclosure's.
 
+## Real parts
+
+Before checking, build `parts.json` (next to the board):
+
+1. `enclosure parts --pcb board.kicad_pcb` (MPNs from footprint fields) or `--set REF=MPN`.
+   With DigiKey or Mouser keys in the environment it fills manufacturer, datasheet (saved to
+   `datasheets/`), height and size, and lists what is still missing.
+2. For each part in `need_body_from_datasheet` that has no 3D model, and each connector in
+   `connectors_without_cutout`, open its datasheet PDF and read the mechanical drawing: write
+   `body` [length, width, height above board] and, for a connector, `cutout` {width, height,
+   max_setback} (the recommended panel opening). Put the page in `source`, e.g.
+   `"cutout": "datasheet p.2, recommended panel cutout"`. If the drawing does not give a value,
+   leave it out; never estimate one.
+3. Pass `--parts parts.json --pcb board.kicad_pcb` to `fit`.
+
 ## Check the finished board
 
 1. Export the board with its 3D models: `kicad-cli pcb export step -o board.step board.kicad_pcb`.
    Parts without a 3D model are not in the STEP and cannot be checked; say which.
-2. `enclosure fit base.step board.step --lid lid.step -o fit/` (exit 0 fits, 1 does not).
+2. `enclosure fit base.step board.step --lid lid.step --pcb board.kicad_pcb --parts parts.json -o fit/`
+   (exit 0 fits, 1 does not).
 3. Read `fit/report.json`. Each finding has `severity`, `code`, `subject` (a reference, J1), a
    `message`, a `fix`, and where a move fixes it, `kicad_move` [dx, dy] in mm on the KiCad board.
 
@@ -37,7 +53,9 @@ the enclosure's.
 - `collision` with the lid, `too_tall`: the part is too tall; the fix names the height allowed.
   Find a lower part or ask the user; do not change the enclosure without asking.
 - `collision` with the base, `tight`: move the part clear of the wall or standoff.
-- `opening_too_small`, `connector_setback`, `connector_no_opening`: the enclosure needs a change;
+- `unchecked_part`: add its 3D model in KiCad, or its `body` from the datasheet.
+- `model_height_differs`: the 3D model may be the wrong variant; tell the user.
+- `opening_too_small`, `opening_below_datasheet`, `connector_setback`, `connector_no_opening`: the enclosure needs a change;
   report the numbers to the user (they edit the enclosure in their CAD).
 - Re-export and re-run `fit` after each round until `fits` is true or only enclosure changes
   are left. Show the user `fit/view.html` and `fit/punch_list.md`.
