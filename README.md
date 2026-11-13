@@ -21,6 +21,10 @@ is a skill an agent there can follow to run the check, apply the KiCad moves, an
 
 ![3D view of the sample](docs/sample_view.png)
 
+It also works the other way round: give it a finished board and it designs the box around it
+(`enclosure frompcb`), and when a fit check asks for KiCad moves, `enclosure fix` applies them to
+the `.kicad_pcb` for you.
+
 ## Just a box
 
 Not every project needs the board side. `enclosure box` makes an enclosure from a size and a
@@ -55,6 +59,9 @@ snap -o my_box_v2` rebuilds it with one thing changed.
 | Hanging | `--keyholes M3/M4`, `--keyhole-spacing`: two keyholes in the floor | none |
 | DIN rail | `--din-rail`: a TS35 clip under the floor (print a test first; the latch is sprung plastic) | off |
 | Labels | `--label FACE:TEXT@a,b[:size[:depth]]`: raised text, or recessed with a negative depth | none |
+| Snap-in pins | `standoff_hole: "pin"` in box.json, or "Snap-in pins" on the page: a split peg with a barb goes up through each mounting hole and the board clicks down | screws |
+| Card guides | `card_slots: [x, ...]`, `board_thickness`: rails on the front and back walls hold a board standing across the box | none |
+| Windows | `windows: [{face, size, at, panel, panel_t}]`: an opening with a recess behind it for a clear panel or a display's glass, glued in from inside | none |
 | Printing | `--no-teardrop` (round wall holes get a 45° peak by default, to print without support), `--bottom-chamfer` (against first-layer squish), `--no-ribs` (gussets at the standoffs' feet) | on, 0.4 mm, on |
 | Output | `--format step` (STEP and STL), `onshape` (an Onshape custom feature), or `both`; `--no-stl` | step |
 
@@ -102,11 +109,55 @@ settings as its defaults. To use it:
 
 It makes the Base and Lid as parts, and every setting stays editable in the feature's dialog:
 size, walls, corner radius, screw or friction lid, lip, corner posts, a rectangle of board
-standoffs, and round or rectangular cutouts on any face. It covers the core of the box, not all
-of it: gaskets, vents, feet, keyholes, the DIN clip, labels, ears, gussets, the bottom chamfer,
-teardrops and rounded cutout corners are in the STEP only, and the command lists which of your
-settings the feature leaves out. Run `--format both` to have both. The geometry was checked in
+standoffs, and round or rectangular cutouts (with rounded corners) on any face. Vents, feet,
+windows, card guides and the bottom chamfer come along too, at the sizes you set, and follow the box
+when its size changes in the dialog. Gaskets, keyholes, the DIN clip, labels, ears, gussets, pins
+and teardrops are in the STEP only, and the command lists which of your settings the feature leaves
+out. Run `--format both` to have both. The geometry was checked in
 Onshape against the STEP build (the base's volume matches within 0.01%).
+
+## A box around a board
+
+```
+enclosure frompcb board.step --lid friction -o my_box     # KiCad's STEP export, with 3D models
+```
+
+The box is sized around the board: a gap each side (1 mm), less on an edge with a connector so its
+face sits close to the outside where a plug reaches it; a standoff under every mounting hole for the
+screw it takes, tall enough to clear parts underneath; the inside height clears the tallest part plus
+headroom and the lid's lip; and an opening in front of every part that reaches an edge, its face plus
+0.5 mm a side (or the datasheet cutout from `--parts parts.json`). A screw lid's corner posts would
+land on a board that fills the box, so with a screw lid the box grows along one axis to clear them
+(the notes say which); a press-fit or snap lid doesn't need that. The board is then checked inside
+the box (`my_box/fit/`), and `my_box/box.json` holds every setting to change with `enclosure box --from`.
+
+## Fixing the board
+
+```
+enclosure fit base.step board.step --lid lid.step -o fit
+enclosure fix board.kicad_pcb fit/report.json -o board_fixed.kicad_pcb
+```
+
+`fix` moves each footprint the report asks to move (a connector onto its opening, a mounting hole
+onto its standoff) and writes a new file; the original is left alone. Re-export the STEP from KiCad
+and check again. Problems a move can't fix (a part too tall, an opening too small) are listed.
+
+## Fit test print
+
+`enclosure coupon -o coupon` (or "Print a fit test" on the page) writes a plate of pockets and six
+plugs, each smaller by a different gap per side from 0.10 to 0.35 mm, the gap printed on each. Print
+both, try each plug, and set the box's fit gap to the one that fits the way you want.
+
+## Drawings
+
+```
+enclosure drawing my_box --standard asme --part-number ENC-001 -o drawings
+```
+
+An ASME (inch, Y14.5) or ISO (mm) drawing of the base and lid as PDF and SVG, made by the
+[draftwright fork](https://github.com/ethanmarshall/draftwright-rust): build it (`cargo build
+--release`) and set `DRAFTWRIGHT` to the binary. It works on a drilled bought box too, for a
+machinist. It runs where draftwright is installed, so it is on the command line, not the web page.
 
 ## A box you bought
 
@@ -139,6 +190,12 @@ extent: measure from the bottom edge and the centre line.
   KiCad board to design in; then upload KiCad's STEP export (plus the .kicad_pcb and parts.json
   if you have them) to check the fit, with each problem's fix, the KiCad move, and a 3D view.
 - **Bought box**: holes in a maker's STEP and the drilling templates.
+
+"Start from a finished board" on the Quick box tab designs the box around an uploaded board STEP and
+fills in the form. A fit check with the `.kicad_pcb` uploaded hands back a fixed copy. "Copy share
+link" puts every setting in the link, "Open box.json" loads a saved design, and the page remembers
+your last box in that browser. Set `ENCLOSURE_PASSWORD` on the server to make the page ask for a
+password (any user name).
 
 ```
 pip install -e ".[web]"

@@ -95,6 +95,10 @@
   .error { color: var(--err); font-weight: 600; }
   .notes { color: var(--muted); font-size: 12px; margin: 4px 0 0; padding-left: 16px; }
   details summary { cursor: pointer; font-size: 12.5px; color: var(--muted); margin: 4px 0; }
+  .startbox { border: 1px solid var(--line); border-radius: 7px; padding: 6px 10px 10px; margin: 8px 0 4px; background: var(--soft); }
+  .startbox summary { font-weight: 600; color: var(--ink); font-size: 13px; }
+  a { color: var(--accent); }
+  .links.small button.plain { padding: 4px 9px; font-size: 12.5px; }
   .links { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
   [hidden] { display: none !important; }
   @media (max-width: 860px) {
@@ -120,6 +124,20 @@
 <!-- ============ QUICK BOX ============ -->
 <form id="boxform" autocomplete="off" novalidate>
   <p class="intro">An enclosure from a size and a few choices. Everything is in millimetres, measured from the centre of the inside, with Z up. The preview updates as you type.</p>
+  <details class="startbox" id="startboard">
+    <summary>Start from a finished board</summary>
+    <p class="hint">Upload KiCad's STEP export of the board (File &gt; Export &gt; STEP, with 3D models). The box is sized around it, with standoffs under the mounting holes and openings for the connectors at its edges, then checked with the board inside. Every setting below stays editable.</p>
+    <div class="grid g1">
+      <label class="f">Board STEP<input type="file" name="fp_board" accept=".step,.stp"></label>
+      <label class="f">parts.json (optional: datasheet panel cutouts)<input type="file" name="fp_parts" accept=".json"></label>
+    </div>
+    <div class="grid">
+      <label class="f">Lid<select name="fp_lid"><option value="screw">Screw-down</option><option value="friction">Press-fit</option><option value="snap">Snap-fit</option><option value="none">No lid</option></select></label>
+      <label class="f">Edge gap<span class="unit" data-unit="mm"><input name="fp_gap" type="number" min="0.3" step="0.1" value="1"></span></label>
+      <label class="f">Headroom<span class="unit" data-unit="mm"><input name="fp_head" type="number" min="0" step="0.5" value="2"></span></label>
+    </div>
+    <button class="go" type="button" id="fpbtn">Make the box</button>
+  </details>
   <fieldset class="first">
     <legend>Size</legend>
     <div class="seg full" role="radiogroup" aria-label="Which size">
@@ -152,6 +170,7 @@
       <label class="f" data-show="lid">Thickness<span class="unit" data-unit="mm"><input name="lid_thickness" type="number" min="0.8" step="0.1" value="2"></span></label>
     </div>
     <p class="hint" id="lidhint"></p>
+    <p class="hint" data-show="lip">Not sure of the fit gap? <a href="api/coupon" download>Print a fit test</a>: six plugs from 0.10 to 0.35 mm, labelled, to try in their pockets.</p>
     <div class="grid" data-show="lip">
       <label class="f">Lip depth<span class="unit" data-unit="mm"><input name="lip" type="number" min="0" step="0.5" value="3"></span></label>
       <label class="f">Fit gap per side<span class="unit" data-unit="mm"><input name="fit_clearance" type="number" min="0" step="0.05" value="0.2"></span></label>
@@ -194,10 +213,11 @@
     <div class="grid" data-so="any">
       <label class="f">Height<span class="unit" data-unit="mm"><input name="standoff_height" type="number" min="1" step="0.5" value="5"></span></label>
       <label class="f">Screw<select name="standoff_screw"></select></label>
-      <label class="f">Hole for<select name="standoff_hole">
-        <option value="insert">Insert</option><option value="tap">Tapped</option><option value="clearance">Through</option>
+      <label class="f">Board held by<select name="standoff_hole">
+        <option value="insert">Screw in insert</option><option value="tap">Screw, tapped</option><option value="clearance">Screw and nut</option><option value="pin">Snap-in pins</option>
       </select></label>
     </div>
+    <p class="hint" data-pin>Snap-in pins: a split peg with a barb goes up through each mounting hole and the board clicks down over them. Print them solid.</p>
     <label class="check" data-so="any"><input type="checkbox" name="standoff_ribs" checked> Support ribs at their feet</label>
   </fieldset>
 
@@ -218,6 +238,23 @@
     <legend>Text</legend>
     <div class="rows" id="label_rows"></div>
     <button type="button" class="add" data-add="label">+ Add text</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Boards standing on edge</legend>
+    <p class="hint">Card guides: pairs of rails on the front and back walls hold a board standing across the box. Give the X position of each.</p>
+    <div class="rows" id="card_rows"></div>
+    <button type="button" class="add" data-add="card">+ Add a card slot</button>
+    <div class="grid g2" style="margin-top:8px">
+      <label class="f">Board thickness<span class="unit" data-unit="mm"><input name="board_thickness" type="number" min="0.4" step="0.1" value="1.6"></span></label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Display windows</legend>
+    <p class="hint">An opening with a recess behind it, so a clear panel or a display's glass sits flush from the inside.</p>
+    <div class="rows" id="win_rows"></div>
+    <button type="button" class="add" data-add="win">+ Add a window</button>
   </fieldset>
 
   <fieldset>
@@ -250,7 +287,13 @@
     </div>
     <label class="check" style="margin:0"><input name="stl" type="checkbox" checked> STL</label>
     <button class="go" type="submit">Download</button>
-    <button class="plain" type="button" id="tofit">Fit a board in it</button>
+    <div class="links small" style="width:100%;margin:0">
+      <button class="plain" type="button" id="tofit">Fit a board in it</button>
+      <button class="plain" type="button" id="sharebtn">Copy share link</button>
+      <button class="plain" type="button" id="openbtn">Open box.json</button>
+      <input type="file" id="openfile" accept=".json" hidden>
+      <span class="hint" id="sharestate" style="margin:0;align-self:center"></span>
+    </div>
   </div>
 </form>
 
@@ -486,7 +529,35 @@ function soRow(o = {}) {
   item._sync = () => {};
   return item;
 }
-const ROWS = { cut: ["#cut_rows", holeRow], vent: ["#vent_rows", ventRow], label: ["#label_rows", labelRow], so: ["#so_rows", soRow], stock: ["#stock_rows", holeRow] };
+function cardRow(o = {}) {
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid g2 head" }, field("X position", numIn("x", o.x ?? 0), "mm")));
+  item._sync = () => {};
+  return item;
+}
+function winRow(o = {}) {
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid g2 head" }, field("Face", faceSel(o.face || "lid"))),
+    h("div", { class: "grid" },
+      field("Opening width", numIn("w", o.w ?? 40, "0.5", "2"), "mm"), field("Opening height", numIn("hh", o.hh ?? 25, "0.5", "2"), "mm"),
+      field("Panel thickness", numIn("pt", o.pt ?? 1, "0.1", "0.2"), "mm")),
+    h("div", { class: "grid" },
+      field("Panel width", numIn("pw", o.pw ?? 46, "0.5", "2"), "mm"), field("Panel height", numIn("ph", o.ph ?? 31, "0.5", "2"), "mm")),
+    h("div", { class: "grid g2" },
+      h("label", { class: "f", "data-pos": "a" }, "X", h("span", { class: "unit", "data-unit": "mm" }, numIn("a", o.a ?? 0))),
+      h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": "mm" }, numIn("b", o.b ?? 0)))));
+  for (const opt of item.querySelectorAll("[name=face] option")) if (opt.value === "floor") opt.remove();
+  item.addEventListener("change", () => posLabels(item));
+  item._sync = () => posLabels(item);
+  return item;
+}
+const readWin = item => {
+  const e = n => num(item.querySelector(`[name=${n}]`).value);
+  return { face: item.querySelector("[name=face]").value, size: [e("w"), e("hh")], at: [e("a"), e("b")], panel: [e("pw"), e("ph")], panel_t: e("pt") };
+};
+const ROWS = { card: ["#card_rows", cardRow], win: ["#win_rows", winRow], cut: ["#cut_rows", holeRow], vent: ["#vent_rows", ventRow], label: ["#label_rows", labelRow], so: ["#so_rows", soRow], stock: ["#stock_rows", holeRow] };
 function addRow(kind, opts) {
   const [sel, make] = ROWS[kind];
   const item = make(opts);
@@ -514,6 +585,7 @@ function sync() {
   const g = $("#gasket_on").checked; $("#gasket_row").hidden = $("#gaskethint").hidden = !g;
   const so = e.so_mode.value;
   for (const el of $$("[data-so]", boxform)) el.hidden = !(el.dataset.so === so || (el.dataset.so === "any" && so !== "none"));
+  for (const el of $$("[data-pin]", boxform)) el.hidden = e.standoff_hole.value !== "pin" || so === "none";
   const src = fitform.elements.src.value;
   for (const el of $$("[data-src]", fitform)) el.hidden = el.dataset.src !== src;
   for (const el of $$("[data-needboard]", fitform)) el.hidden = src === "sample";
@@ -576,6 +648,13 @@ function boxReport(data, error) {
   if (error) return report.append(msg("err", error));
   const f = v => v.map(x => +x.toFixed(2)).join(" × ");
   report.append(h("div", { class: "dims" }, "Inside ", h("b", {}, f(data.inner)), " mm, outside ", h("b", {}, f(data.outer)), " mm"));
+  if (fromBoard) {
+    const fb = fromBoard;
+    report.append(fb.fits ? msg("ok", "Made around your board, and the board fits." + (fb.warnings ? ` ${fb.warnings} warning(s) below.` : ""))
+      : msg("err", `Made around your board, but the check found ${fb.errors} problem(s): ` + fb.findings.filter(f => f.severity === "error").map(f => `${f.subject}: ${f.message}`).join("; ")));
+    report.append(h("ul", { class: "notes" }, fb.notes.map(n => h("li", {}, n))));
+    fromBoard = null;
+  }
   for (const c of data.checks) report.append(msg("warn", c));
   if (data.notes.length) report.append(h("ul", { class: "notes" }, data.notes.map(n => h("li", {}, n))));
 }
@@ -594,6 +673,8 @@ function boxBody() {
       ? $$("#so_rows .item").map(it => [num($("[name=x]", it).value), num($("[name=y]", it).value)]) : "",
     standoff_height: num(e.standoff_height.value), standoff_screw: e.standoff_screw.value, standoff_hole: e.standoff_hole.value,
     standoff_ribs: e.standoff_ribs.checked,
+    card_slots: $$("#card_rows .item").map(it => num($("[name=x]", it).value)), board_thickness: num(e.board_thickness.value),
+    windows: $$("#win_rows .item").map(readWin),
     cutouts: $$("#cut_rows .item").map(readHole), vents: $$("#vent_rows .item").map(readVent), labels: $$("#label_rows .item").map(readLabel),
     flange: num(e.flange.value), feet: num(e.feet.value), feet_depth: num(e.feet_depth.value), keyholes: e.keyholes.value || null,
     din_rail: e.din_rail.checked, bottom_chamfer: num(e.bottom_chamfer.value), teardrop: e.teardrop.checked,
@@ -601,7 +682,7 @@ function boxBody() {
   };
 }
 async function errorOf(res) { try { const j = await res.json(); return j.error || j.detail || res.statusText; } catch { return res.statusText; } }
-let timer = null, seq = 0, boxData = null;
+let timer = null, seq = 0, boxData = null, reframe = false;
 async function refresh() {
   const mine = ++seq;
   if (tab === "box") $("#status").textContent = "Building...";
@@ -611,13 +692,16 @@ async function refresh() {
     if (!res.ok) { const err = await errorOf(res); boxData = { error: err }; if (tab === "box") { boxReport(null, err); $("#status").textContent = "Not built"; } return; }
     const data = await res.json();
     const old = views.box; views.box = makeView(data);
-    if (old) { views.box.framed = true; }
+    if (old && !reframe) views.box.framed = true;
+    reframe = false;
     boxData = data;
+    remember();
     if (tab === "box") { showView(views.box); boxReport(data); $("#status").textContent = ""; }
   } catch (err) { if (mine === seq && tab === "box") { boxReport(null, String(err)); $("#status").textContent = ""; } }
 }
 function later() { clearTimeout(timer); timer = setTimeout(refresh, 450); }
-boxform.addEventListener("input", later); boxform.addEventListener("change", later);
+const outsideBox = ev => ev.target.closest && ev.target.closest("#startboard");
+boxform.addEventListener("input", ev => outsideBox(ev) || later()); boxform.addEventListener("change", ev => outsideBox(ev) || later());
 
 async function download(res, fallback) {
   if (!res.ok) return { error: await errorOf(res) };
@@ -642,6 +726,95 @@ boxform.addEventListener("submit", async ev => {
   });
 });
 $("#tofit").onclick = () => { fitform.elements.src.value = "box"; sync(); selectTab("fit"); readEnclosure(); };
+
+// ---------- Loading a design into the form ----------
+const FACE_OF = { "-X": "left", "+X": "right", "-Y": "front", "+Y": "back", lid: "lid", floor: "floor", top: "lid", bottom: "floor" };
+function applySpec(sp) {
+  const e = boxform.elements, set = (n, v) => { if (v !== undefined && v !== null && e[n]) e[n].value = v; };
+  const [L, W, H] = sp.size || [100, 60, 40];
+  set("L", L); set("W", W); set("H", H);
+  e.size_is.value = sp.size_is || "inner";
+  for (const n of ["wall", "floor", "corner_radius", "lid", "lid_thickness", "lip", "fit_clearance", "lid_screw", "lid_screw_hole",
+    "standoff_height", "standoff_screw", "standoff_hole", "flange", "feet", "feet_depth", "bottom_chamfer"]) set(n, sp[n]);
+  $("#gasket_on").checked = !!sp.gasket; if (sp.gasket) set("gasket", sp.gasket);
+  e.keyholes.value = sp.keyholes || "";
+  for (const n of ["din_rail", "teardrop", "standoff_ribs"]) if (n in sp) e[n].checked = !!sp[n];
+  let so = sp.standoffs || [];
+  if (typeof so === "string") {
+    const m = /^rect:([\d.]+)x([\d.]+)$/.exec(so.trim());
+    so = m ? [[-m[1] / 2, -m[2] / 2], [m[1] / 2, -m[2] / 2], [-m[1] / 2, m[2] / 2], [m[1] / 2, m[2] / 2]] : [];
+  }
+  $("#so_rows").replaceChildren();
+  const xs = [...new Set(so.map(p => Math.abs(p[0])))], ys = [...new Set(so.map(p => Math.abs(p[1])))];
+  if (!so.length) e.so_mode.value = "none";
+  else if (so.length === 4 && xs.length === 1 && ys.length === 1 && new Set(so.map(p => `${Math.sign(p[0])}${Math.sign(p[1])}`)).size === 4) {
+    e.so_mode.value = "rect"; set("so_x", +(2 * xs[0]).toFixed(3)); set("so_y", +(2 * ys[0]).toFixed(3));
+  } else { e.so_mode.value = "custom"; for (const [x, y] of so) addRow("so", { x, y }); }
+  $("#cut_rows").replaceChildren();
+  for (const c of sp.cutouts || []) {
+    const face = FACE_OF[c.face] || c.face, [a, b] = c.at || [0, 0];
+    if (c.preset) addRow("cut", { face, preset: c.preset, a, b });
+    else if (c.shape === "rect") addRow("cut", { face, shape: "rect", w: c.size[0], hh: c.size[1], r: c.radius || 0, a, b });
+    else addRow("cut", { face, shape: "round", d: c.size[0], a, b });
+  }
+  $("#card_rows").replaceChildren(); for (const x of sp.card_slots || []) addRow("card", { x });
+  set("board_thickness", sp.board_thickness);
+  $("#win_rows").replaceChildren();
+  for (const w of sp.windows || []) addRow("win", { face: FACE_OF[w.face] || w.face, w: w.size[0], hh: w.size[1], a: w.at[0], b: w.at[1], pw: w.panel[0], ph: w.panel[1], pt: w.panel_t });
+  $("#vent_rows").replaceChildren();
+  for (const v of sp.vents || []) addRow("vent", { face: FACE_OF[v.face] || v.face, w: v.size[0], hh: v.size[1], a: v.at[0], b: v.at[1], slot: v.slot ?? 2, pitch: v.pitch ?? 4 });
+  $("#label_rows").replaceChildren();
+  for (const t of sp.labels || []) {
+    const it = addRow("label", { face: FACE_OF[t.face] || t.face, text: t.text, a: t.at[0], b: t.at[1], size: t.size ?? 6, depth: Math.abs(t.depth ?? 0.6) });
+    $("[name=style]", it).value = (t.depth ?? -0.6) < 0 ? "-1" : "1";
+  }
+  sync(); refresh();
+}
+
+$("#fpbtn").onclick = async () => {
+  const e = boxform.elements;
+  if (!e.fp_board.files.length) { boxReport(null, "Choose the board's STEP first."); return; }
+  const fd = new FormData();
+  fd.set("board", e.fp_board.files[0]); if (e.fp_parts.files.length) fd.set("parts", e.fp_parts.files[0]);
+  fd.set("lid", e.fp_lid.value); fd.set("edge_gap", num(e.fp_gap.value)); fd.set("headroom", num(e.fp_head.value));
+  await busy($("#fpbtn"), "Designing...", async () => {
+    $("#status").textContent = "Designing the box around your board...";
+    const res = await fetch("api/frompcb", { method: "POST", body: fd });
+    $("#status").textContent = "";
+    if (!res.ok) { boxReport(null, await errorOf(res)); return; }
+    const d = await res.json();
+    reframe = true;
+    fromBoard = d;
+    applySpec(d.spec);
+  });
+};
+let fromBoard = null;
+
+// ---------- Saving and sharing ----------
+const KEEP = "enclosure.box.v1";
+const designOf = () => { const b = boxBody(); delete b.format; delete b.stl; return b; };
+const b64 = str => btoa(unescape(encodeURIComponent(str))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+const unb64 = str => decodeURIComponent(escape(atob(str.replace(/-/g, "+").replace(/_/g, "/"))));
+function remember() { try { localStorage.setItem(KEEP, JSON.stringify(designOf())); } catch {} }
+$("#sharebtn").onclick = async () => {
+  const url = `${location.origin}${location.pathname}#d=${b64(JSON.stringify(designOf()))}`;
+  history.replaceState(null, "", url);
+  try { await navigator.clipboard.writeText(url); $("#sharestate").textContent = "Link copied: it opens this box with every setting."; }
+  catch { $("#sharestate").textContent = "The link is in the address bar: copy it from there."; }
+};
+$("#openbtn").onclick = () => $("#openfile").click();
+$("#openfile").onchange = async () => {
+  const f = $("#openfile").files[0]; if (!f) return;
+  try { reframe = true; applySpec(JSON.parse(await f.text())); $("#sharestate").textContent = `Opened ${f.name}.`; }
+  catch (err) { boxReport(null, `${f.name}: not a box.json (${err.message})`); }
+  $("#openfile").value = "";
+};
+function startDesign() {
+  const m = /#d=([A-Za-z0-9_-]+)/.exec(location.hash);
+  if (m) { try { applySpec(JSON.parse(unb64(m[1]))); return true; } catch {} }
+  try { const kept = localStorage.getItem(KEEP); if (kept) { applySpec(JSON.parse(kept)); return true; } } catch {}
+  return false;
+}
 
 // ---------- Fit a board ----------
 let pcbText = null, pcbName = "board";
@@ -722,7 +895,15 @@ fitform.addEventListener("submit", async ev => {
     report.replaceChildren(verdict, place, ...items, h("div", { class: "links" },
       h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([d.punch_list], { type: "text/markdown" }), "punch_list.md") }, "Punch list"),
       h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([JSON.stringify(d.report, null, 2)], { type: "application/json" }), "report.json") }, "report.json"),
-      h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([d.view], { type: "text/html" }), "fit_view.html") }, "3D view")));
+      h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([d.view], { type: "text/html" }), "fit_view.html") }, "3D view")),
+      d.fixed ? h("div", { class: "summary" },
+        h("b", {}, "Fixed board ready. "), `Moved ${d.fixed.moved.filter(m => m.moved).map(m => m.what).join(", ") || "nothing"}. `,
+        d.fixed.moved.filter(m => !m.moved).map(m => `${m.what}: ${m.why}. `).join(""),
+        "Open it in KiCad, re-export the STEP and check again.",
+        h("div", { class: "links" }, h("button", { class: "go", type: "button",
+          onclick: () => saveBlob(new Blob([d.fixed.kicad_pcb], { type: "text/plain" }), d.fixed.name) }, "Download fixed .kicad_pcb")))
+      : (!d.fits && !fitform.elements.pcb.files.length && fitform.elements.src.value !== "sample"
+        ? h("div", { class: "hint" }, "Add the .kicad_pcb to get a fixed copy with these moves applied.") : null));
   });
 });
 
@@ -761,10 +942,12 @@ for (const b of $$("[data-tab]")) b.onclick = () => selectTab(b.dataset.tab);
 // ---------- Start ----------
 fetch("api/presets").then(r => r.json()).then(p => {
   PRESETS = p;
-  addRow("cut", { face: "left", preset: "usb-c", a: 0, b: 8 });
-  addRow("cut", { face: "back", preset: "pg9", a: 20, b: 20 });
   addRow("stock", { face: "front", preset: "pg9", a: 0, b: 12 });
-  sync(); refresh();
+  if (!startDesign()) {
+    addRow("cut", { face: "left", preset: "usb-c", a: 0, b: 8 });
+    addRow("cut", { face: "back", preset: "pg9", a: 20, b: 20 });
+    sync(); refresh();
+  }
 });
 sync();
 </script>

@@ -241,3 +241,107 @@ def footprints(kicad_pcb: str | Path) -> dict[str, dict]:
                     "at": [float(at[1]), float(at[2])], "rotation": float(at[3]) if len(at) > 3 else 0.0,
                     "side": "bottom" if layer.startswith("B.") else "top", "has_model": bool(_kids(fp, "model"))}
     return out
+
+
+def _blocks(text: str):
+    """(start, end) of each top-level footprint in a .kicad_pcb's text."""
+    i, depth, out, start = 0, 0, [], None
+    n = len(text)
+    while i < n:
+        c = text[i]
+        if c == '"':
+            i += 1
+            while i < n and text[i] != '"':
+                i += 2 if text[i] == "\\" else 1
+        elif c == "(":
+            depth += 1
+            if depth == 2 and (text.startswith("(footprint", i) or text.startswith("(module", i)):
+                start = i
+        elif c == ")":
+            if depth == 2 and start is not None:
+                out.append((start, i + 1))
+                start = None
+            depth -= 1
+        i += 1
+    return out
+
+
+def _own_at(block: str):
+    """The span of a footprint's own `(at x y [rot])`: the first one directly inside it."""
+    depth, i, n = 0, 0, len(block)
+    while i < n:
+        c = block[i]
+        if c == '"':
+            i += 1
+            while i < n and block[i] != '"':
+                i += 2 if block[i] == "\\" else 1
+        elif c == "(":
+            depth += 1
+            if depth == 2 and block.startswith("(at ", i):
+                return i, block.index(")", i) + 1
+        elif c == ")":
+            depth -= 1
+        i += 1
+    return None
+
+
+def move_footprints(kicad_pcb: str | Path, moves: dict, out: str | Path) -> list[dict]:
+    """Move footprints by (dx, dy) mm on KiCad's page and write the board to *out*. *moves* keys
+    are references (J1) or page positions (x, y) for footprints with no useful reference (a
+    mounting hole found by where it is). Returns what moved."""
+    text = Path(kicad_pcb).read_text(encoding="utf-8")
+    edits, done = [], []
+    found = footprints(kicad_pcb)
+    by_pos = {ref: fp["at"] for ref, fp in found.items()}
+    want = {}
+    for key, (dx, dy) in moves.items():
+        if isinstance(key, tuple):
+            ref = next((r for r, (x, y) in by_pos.items() if abs(x - key[0]) < 0.05 and abs(y - key[1]) < 0.05), None)
+            if ref is None:
+                done.append({"what": f"hole at ({key[0]:.2f}, {key[1]:.2f})", "moved": False,
+                             "why": "no footprint sits there (the hole may be a pad of a larger footprint)"})
+                continue
+        else:
+            ref = key
+        want[ref] = (want.get(ref, (0, 0))[0] + dx, want.get(ref, (0, 0))[1] + dy)
+    for start, end in _blocks(text):
+        block = text[start:end]
+        node = parse(block)
+        refs = [p[2] for p in _kids(node, "property") if len(p) >= 3 and p[1] == "Reference"]
+        refs += [t[2] for t in _kids(node, "fp_text") if len(t) >= 3 and t[1] == "reference"]
+        ref = refs[0] if refs else None
+        if ref not in want:
+            continue
+        span = _own_at(block)
+        if span is None:
+            continue
+        parts = block[span[0] + 1:span[1] - 1].split()
+        x, y = float(parts[1]), float(parts[2])
+        dx, dy = want.pop(ref)
+        parts[1], parts[2] = _n(x + dx), _n(y + dy)
+        edits.append((start + span[0], start + span[1], "(" + " ".join(parts) + ")"))
+        done.append({"what": ref, "moved": True, "from": [x, y], "to": [round(x + dx, 4), round(y + dy, 4)]})
+    for ref in want:
+        done.append({"what": ref, "moved": False, "why": "not on the board"})
+    for a, b, new in sorted(edits, reverse=True):
+        text = text[:a] + new + text[b:]
+    Path(out).write_text(text, encoding="utf-8")
+    return done
+
+
+def moves_from_fit(findings: list[dict]) -> dict:
+    """The footprint moves a fit report's findings ask for."""
+    import re
+    moves = {}
+    for f in findings:
+        km = f.get("kicad_move")
+        if not km or not any(abs(v) > 1e-6 for v in km):
+            continue
+        subject = f.get("subject", "")
+        m = re.match(r"hole at \(([-\d.]+), ([-\d.]+)\)", subject)
+        # A hole is named by where it is in the board's STEP, which is KiCad's page with Y flipped.
+        key = (float(m.group(1)), -float(m.group(2))) if m else subject.split(" ")[0]
+        if key in moves:
+            continue  # one move per footprint: the first finding's
+        moves[key] = (km[0], km[1])
+    return moves

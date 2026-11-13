@@ -9,6 +9,7 @@ touching the +Y wall.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 from build123d import Box, Compound, Cylinder, Location, Pos, export_step
@@ -83,3 +84,74 @@ def write(folder: str | Path) -> dict:
     export_step(lid(), str(paths["lid"]))
     export_step(board(), str(paths["board"]))
     return {k: str(v) for k, v in paths.items()}
+
+
+# A KiCad sample board, for "a box from a board" and its tests: real STEP models for each part, a
+# .kicad_pcb that places them, and KiCad's own STEP export of the board (needs kicad-cli).
+BOARD = {"x0": 100.0, "y0": 100.0, "w": 80.0, "h": 50.0, "t": 1.6}
+# ref: (footprint, (x, y) on the page, rotation, model box (x0, x1, y0, y1, height) in the footprint frame)
+BOARD_PARTS = {
+    "J1": ("Connector_USB:USB_C_Receptacle_GCT_USB4105-xx-A_16P_TopMnt_Horizontal", (103.0, 125.0), 0,
+           (-3.6, 3.75, -4.47, 4.47, 3.26)),  # its face 0.6 mm past the -X edge
+    "J2": ("TerminalBlock:TerminalBlock_bornier-2_P5.08mm", (175.5, 118.0), 0,
+           (-4.0, 5.1, -5.1, 5.1, 10.0)),  # wire entry at the +X edge
+    "C1": ("Capacitor_THT:CP_Radial_D8.0mm_P3.50mm", (140.0, 125.0), 0, None),  # Ø8 x 11.5 can
+    "SW1": ("Button_Switch_SMD:SW_SPST_TL3342", (150.0, 140.0), 0, (-3.0, 3.0, -3.0, 3.0, 5.0)),
+}
+BOARD_HOLES = [(104.0, 104.0), (176.0, 104.0), (104.0, 146.0), (176.0, 146.0)]
+
+
+def kicad_board(folder) -> dict:
+    """Write the sample KiCad board and its part models; export the board's STEP with kicad-cli
+    when KiCad is installed. Returns the paths."""
+    import shutil
+    import subprocess
+    import uuid
+    from build123d import Align, Box, Cylinder, Pos, export_step
+
+    folder = Path(folder)
+    (folder / "models").mkdir(parents=True, exist_ok=True)
+    b = BOARD
+    x1, y1 = b["x0"] + b["w"], b["y0"] + b["h"]
+    items = []
+    for (ax, ay), (bx, by) in [((b["x0"], b["y0"]), (x1, b["y0"])), ((x1, b["y0"]), (x1, y1)),
+                               ((x1, y1), (b["x0"], y1)), ((b["x0"], y1), (b["x0"], b["y0"]))]:
+        items.append(f'  (gr_line (start {ax} {ay}) (end {bx} {by}) (stroke (width 0.1) (type default)) '
+                     f'(layer "Edge.Cuts") (tstamp {uuid.uuid4()}))')
+    for i, (x, y) in enumerate(BOARD_HOLES, 1):
+        items.append(f'  (footprint "MountingHole:MountingHole_3.2mm_M3" (layer "F.Cu") (tstamp {uuid.uuid4()}) (at {x} {y})\n'
+                     f'    (fp_text reference "H{i}" (at 0 -3) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))\n'
+                     f'    (fp_text value "MountingHole_3.2mm_M3" (at 0 3) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))\n'
+                     f'    (pad "" np_thru_hole circle (at 0 0) (size 3.2 3.2) (drill 3.2) (layers "F&B.Cu" "*.Mask")))')
+    for ref, (fp, (x, y), rot, body) in BOARD_PARTS.items():
+        model = folder / "models" / f"{ref}.step"
+        if body is None:  # a round can
+            shape = Pos(1.75, 0, 0) * Cylinder(4.0, 11.5, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            crt = (-2.5, 6.0, -4.25, 4.25)
+        else:
+            mx0, mx1, my0, my1, hh = body
+            shape = Pos((mx0 + mx1) / 2, (my0 + my1) / 2, 0) * Box(mx1 - mx0, my1 - my0, hh, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            crt = (mx0 - 0.25, mx1 + 0.25, my0 - 0.25, my1 + 0.25)
+        export_step(shape, str(model))
+        cx0, cx1, cy0, cy1 = crt
+        court = "\n".join(f'    (fp_line (start {a} {c}) (end {bb} {d}) (stroke (width 0.05) (type default)) (layer "F.CrtYd"))'
+                          for a, c, bb, d in [(cx0, cy0, cx1, cy0), (cx1, cy0, cx1, cy1), (cx1, cy1, cx0, cy1), (cx0, cy1, cx0, cy0)])
+        items.append(f'  (footprint "{fp}" (layer "F.Cu") (tstamp {uuid.uuid4()}) (at {x} {y} {rot})\n'
+                     f'    (fp_text reference "{ref}" (at 0 -6) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))\n'
+                     f'    (fp_text value "{ref}" (at 0 6) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15))))\n'
+                     f'{court}\n'
+                     f'    (model "{model.resolve()}" (offset (xyz 0 0 0)) (scale (xyz 1 1 1)) (rotate (xyz 0 0 0))))')
+    from .kicad import LAYERS, VERSION, _q
+    layers = "\n".join("    (" + " ".join([str(n)] + [_q(v) if i != 1 else v for i, v in enumerate(rest)]) + ")" for n, *rest in LAYERS)
+    text = (f'(kicad_pcb (version {VERSION}) (generator "enclosure")\n  (general (thickness {b["t"]}))\n  (paper "A4")\n'
+            f'  (layers\n{layers}\n  )\n  (setup (pad_to_mask_clearance 0))\n  (net 0 "")\n' + "\n".join(items) + "\n)\n")
+    pcb = folder / "board.kicad_pcb"
+    pcb.write_text(text)
+    out = {"pcb": str(pcb), "models": str(folder / "models")}
+    cli = shutil.which("kicad-cli") or os.environ.get("BACKPLANE_KICAD_CLI")
+    if cli:
+        step = folder / "board.step"
+        subprocess.run([cli, "pcb", "export", "step", "--subst-models", "-f", "-o", str(step), str(pcb)],
+                       check=True, capture_output=True)
+        out["step"] = str(step)
+    return out

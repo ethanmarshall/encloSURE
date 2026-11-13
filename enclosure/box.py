@@ -29,7 +29,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from build123d import (Align, Axis, Box, Compound, Cylinder, Location, Polygon, Pos, Rot, Text,
+from build123d import (Align, Axis, Box, Compound, Cone, Cylinder, Location, Polygon, Pos, Rot, Text,
                        chamfer, export_step, export_stl, extrude, fillet)
 
 from .presets import GLANDS, PRESETS, resolve
@@ -44,6 +44,7 @@ SCREWS = {
     "M4": (4.5, 3.4, 5.6, 8.1, 7.0),
 }
 LIDS = ("screw", "friction", "snap", "slide", "none")
+PIN_HOLE = {"M2": 2.2, "M2.5": 2.7, "M3": 3.2, "M4": 4.3}  # the board hole a pin goes through
 FACES = ("-X", "+X", "-Y", "+Y", "lid", "floor")
 WALLS = ("-X", "+X", "-Y", "+Y")
 # Plain names for the walls (a leading "-" reads as a flag on the command line).
@@ -143,6 +144,11 @@ class BoxSpec:
     keyhole_spacing: float = 0.0  # 0: 60% of the length
     din_rail: bool = False  # a TS35 rail clip under the floor, the rail along X
     labels: list[dict] = field(default_factory=list)  # {face, text, size, at, depth}
+    # Holding the board
+    board_thickness: float = 1.6  # for pin standoffs and card guides
+    card_slots: list[float] = field(default_factory=list)  # X of each board standing in guides on the ±Y walls
+    # Windows: a through opening with a recess behind it for a clear panel or display
+    windows: list[dict] = field(default_factory=list)  # {face, size [w, h], at, panel [w, h], panel_t}
 
     # The box's dimensions
     @property
@@ -182,9 +188,28 @@ class BoxSpec:
                 raise ValueError(f"{name}: one of {', '.join(SCREWS)}")
         if self.keyholes is not None and self.keyholes not in SCREWS:
             raise ValueError(f"keyholes: a screw, one of {', '.join(SCREWS)}")
-        for name in ("lid_screw_hole", "standoff_hole"):
-            if getattr(self, name) not in ("tap", "insert", "clearance"):
-                raise ValueError(f"{name}: tap, insert or clearance")
+        if self.lid_screw_hole not in ("tap", "insert", "clearance"):
+            raise ValueError("lid_screw_hole: tap, insert or clearance")
+        if self.standoff_hole not in ("tap", "insert", "clearance", "pin"):
+            raise ValueError("standoff_hole: tap, insert, clearance or pin (a snap-in peg)")
+        L_in, W_in, _ = self.inner
+        for x in self.card_slots:
+            if abs(x) > L_in / 2 - 4:
+                raise ValueError(f"card slot at X {x:g}: keep it 4 mm or more from the end walls")
+        for wdw in self.windows:
+            f = face_name(wdw.get("face", ""))
+            if f not in ("lid", *WALLS):
+                raise ValueError("window: on the lid or a wall")
+            if f == "lid" and self.lid not in ("screw", "friction", "snap"):
+                raise ValueError("a lid window needs a lid on top")
+            w, h = wdw.get("size", [0, 0])
+            pw, ph = wdw.get("panel", [w + 4, h + 4])
+            if w <= 0 or h <= 0 or pw < w + 1 or ph < h + 1:
+                raise ValueError("window: the panel must be at least 0.5 mm bigger than the opening on each side")
+            thick = self.lid_thickness if f == "lid" else self.wall
+            if thick - wdw.get("panel_t", 1.0) < 0.8:
+                raise ValueError(f"window on {f}: a {wdw.get('panel_t', 1.0):g} mm panel leaves under 0.8 mm of a "
+                                 f"{thick:g} mm {'lid' if f == 'lid' else 'wall'}; make it thicker or the panel thinner")
         if min(self.inner) <= 0:
             raise ValueError("the walls, floor and lid leave no room inside: make the box bigger")
         if self.wall < 1.0 or self.floor < 1.0:
@@ -209,8 +234,11 @@ class BoxSpec:
                 raise ValueError("a lid label needs a lid on top")
 
     def hole(self, screw: str, kind: str) -> tuple[float, float | None]:
-        """(diameter, depth) of a screw hole of this kind; depth None for through."""
+        """(diameter, depth) of a screw hole of this kind; depth None for through. For a pin, the
+        peg's diameter (the board's hole for that screw, less a little)."""
         clearance, pilot, insert, depth, _ = SCREWS[screw]
+        if kind == "pin":
+            return PIN_HOLE[screw] - 0.25, 0.0
         if kind == "tap":
             return pilot, None
         if kind == "insert":
@@ -309,6 +337,17 @@ def build(spec: BoxSpec) -> dict:
                 fin = Rot(90, 0, 0) * fin  # the triangle stands up in XZ
                 for a in (45, 135, 225, 315):
                     base += Pos(x, y, spec.floor) * (Rot(0, 0, a) * fin)
+            if spec.standoff_hole == "pin":
+                # A split peg through the board's hole with a barb on top: the board snaps down.
+                bt, rp = spec.board_thickness, d / 2
+                z0 = spec.floor + h
+                peg = Cylinder(rp, bt + 0.3).locate(Location((x, y, z0 + (bt + 0.3) / 2)))
+                barb = Cone(rp + 0.35, rp - 0.15, 1.0).locate(Location((x, y, z0 + bt + 0.3 + 0.5)))
+                peg = peg + barb
+                peg -= Box(0.8, d + 2, bt + 2).locate(Location((x, y, z0 + 0.6 + (bt + 2) / 2)))
+                base += peg
+                keep_out.append((x, y, boss / 2))
+                continue
             hole_depth = depth or h
             if spec.standoff_hole == "clearance":
                 hole_depth = h + spec.floor  # through the floor, for a nut underneath
@@ -318,8 +357,31 @@ def build(spec: BoxSpec) -> dict:
                 hole_depth = h + spec.floor - 0.6
             base -= Cylinder(d / 2, hole_depth).locate(Location((x, y, spec.floor + h - hole_depth / 2)))
             keep_out.append((x, y, boss / 2))
-        notes.append(f"{len(spec.standoffs)} standoffs, {h:g} mm tall, {spec.standoff_screw} "
-                     f"{spec.standoff_hole} holes Ø{d:g}" + (", with gussets" if spec.standoff_ribs and h >= 3 else ""))
+        if spec.standoff_hole == "pin":
+            notes.append(f"{len(spec.standoffs)} standoffs, {h:g} mm tall, with split pins Ø{d:g} for {PIN_HOLE[spec.standoff_screw]:g} mm "
+                         f"board holes and a {spec.board_thickness:g} mm board: it snaps down over the barbs (print them solid)")
+        else:
+            notes.append(f"{len(spec.standoffs)} standoffs, {h:g} mm tall, {spec.standoff_screw} "
+                         f"{spec.standoff_hole} holes Ø{d:g}" + (", with gussets" if spec.standoff_ribs and h >= 3 else ""))
+
+    # Card guides: pairs of rails on the ±Y walls, a board standing between them across the box.
+    if spec.card_slots:
+        gap = spec.board_thickness + 2 * spec.fit_clearance
+        rail_t, rail_d = 1.6, 2.5
+        stop = top - (spec.lip + spec.fit_clearance + 0.5 if spec.lid in ("screw", "friction", "snap") else 0.0)
+        rh = stop - spec.floor
+        for x in spec.card_slots:
+            for sy in (-1, 1):
+                for sx in (-1, 1):
+                    rail = Box(rail_t, rail_d, rh).locate(Location((x + sx * (gap / 2 + rail_t / 2), sy * (W / 2 - rail_d / 2), spec.floor + rh / 2)))
+                    base += rail
+            keep_out.append((x, 0, 0))
+        notes.append(f"card guides at X {', '.join(f'{x:g}' for x in spec.card_slots)}: {gap:.2f} mm slots on the ±Y walls for a "
+                     f"{spec.board_thickness:g} mm board {W - 2 * rail_d + 1.0:.1f} to {W - 0.6:.1f} mm wide (across Y), up to {rh:.1f} mm tall")
+        for x in spec.card_slots:
+            hits = [f"({kx:g}, {ky:g})" for kx, ky, kr in keep_out if kr > 0 and abs(kx - x) < kr + gap / 2 + 0.5]
+            if hits:
+                checks.append(f"a board in the card slot at X {x:g} would run into the standoffs or posts at {', '.join(hits)}")
 
     # Mounting ears.
     if spec.flange > 0:
@@ -445,6 +507,25 @@ def build(spec: BoxSpec) -> dict:
                     checks.append(f"{c.preset} on {c.face}: its locknut (about Ø{2 * nut_r:.0f}) runs into the floor or lid")
         label = c.preset or f"{c.shape} {'x'.join(f'{v:g}' for v in c.size)}"
         notes.append(f"cutout {c.face} {label} at {c.at}" + (f" ({c.source})" if c.source else ""))
+
+    # Windows: an opening, and behind it a recess for a clear panel or display, glued in from inside.
+    for wdw in spec.windows:
+        face = face_name(wdw["face"])
+        (w, h), (a, b) = wdw["size"], wdw.get("at", [0, 0])
+        pw, ph = wdw.get("panel", [w + 4, h + 4])
+        pt = wdw.get("panel_t", 1.0)
+        r = wdw.get("radius", 1.0)
+        if face == "lid":
+            cut("lid", Pos(a, b, top) * _profile("rect", [w, h], r, 50.0))
+            # The recess from the lid's underside (the lip, if any, is cut away inside it too).
+            cut("lid", Pos(a, b, top - 25 + pt) * _profile("rect", [pw, ph], min(r + 1, 2), 50.0))
+        else:
+            cut("base", _on_wall(_profile("rect", [w, h], r, spec.wall * 4), face, a, spec.floor + b, oL, oW))
+            inward = {"-X": (1, 0), "+X": (-1, 0), "-Y": (0, 1), "+Y": (0, -1)}[face]
+            pocket = _on_wall(_profile("rect", [pw, ph], min(r + 1, 2), 2 * spec.wall), face, a, spec.floor + b, oL, oW)
+            pocket = Pos(inward[0] * (spec.wall + (spec.wall - pt)), inward[1] * (spec.wall + (spec.wall - pt)), 0) * pocket
+            cut("base", pocket)
+        notes.append(f"window on {face}: {w:g} x {h:g} mm opening, {pw:g} x {ph:g} x {pt:g} mm recess behind it for the panel")
 
     # Vents: slots filling an area, upright on walls, along Y on the lid or floor.
     for v in spec.vents:

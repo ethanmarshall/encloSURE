@@ -70,7 +70,7 @@ def test_onshape_feature_text():
     assert "standoff gussets" in skipped and "gasket" not in skipped
     assert text.count("{") == text.count("}") and text.count("(") == text.count(")")
     _, skipped = onshape.feature_studio(full_spec())
-    assert {"gasket", "vents", "feet", "keyholes", "DIN clip", "labels"} <= set(skipped)
+    assert {"gasket", "keyholes", "DIN clip", "labels"} <= set(skipped) and not {"vents", "feet"} & set(skipped)
 
 
 def test_formats(tmp_path):

@@ -24,10 +24,31 @@ from .presets import GLANDS, PRESETS, resolve
 
 STATIC = Path(__file__).parent / "static"
 FIELDS = {f.name for f in fields(boxmod.BoxSpec)}
-LISTS = {"cutouts", "vents", "labels"}
+LISTS = {"cutouts", "vents", "labels", "windows"}
 MAX_SIDE = 1000.0  # mm: keeps one request from tying up the server
 
 app = FastAPI(title="EncloSURE")
+
+
+@app.middleware("http")
+async def _password(request, call_next):
+    """With ENCLOSURE_PASSWORD set, every page and call asks for it (any user name)."""
+    import os
+    import secrets
+    want = os.environ.get("ENCLOSURE_PASSWORD")
+    if want:
+        auth = request.headers.get("authorization", "")
+        ok = False
+        if auth.lower().startswith("basic "):
+            try:
+                _, _, given = base64.b64decode(auth[6:]).decode().partition(":")
+                ok = secrets.compare_digest(given.encode(), want.encode())
+            except (ValueError, UnicodeDecodeError):
+                ok = False
+        if not ok:
+            return Response("EncloSURE needs its password.", status_code=401,
+                            headers={"WWW-Authenticate": 'Basic realm="EncloSURE", charset="UTF-8"'})
+    return await call_next(request)
 
 
 def _num(v, name):
@@ -96,6 +117,11 @@ def spec_from(body: dict) -> boxmod.BoxSpec:
     spec.cutouts = [_cutout(c) for c in _items(body.get("cutouts"))]
     spec.vents = [_vent(v) for v in _items(body.get("vents"))]
     spec.labels = [_label(t) for t in _items(body.get("labels"))]
+    spec.windows = [{"face": boxmod.face_name(str(w.get("face", ""))), "size": [_num(v, "window size") for v in w.get("size", [])],
+                     "at": [_num(v, "window position") for v in w.get("at", [0, 0])],
+                     "panel": [_num(v, "panel size") for v in w.get("panel", [])], "panel_t": _num(w.get("panel_t", 1.0), "panel thickness")}
+                    for w in body.get("windows") or []]
+    spec.card_slots = [_num(x, "card slot") for x in body.get("card_slots") or []]
     if max(spec.size) > MAX_SIDE:
         raise ValueError(f"each side at most {MAX_SIDE:g} mm here")
     spec.check()
@@ -283,12 +309,50 @@ async def fit_check(board: UploadFile | None = File(None), base: UploadFile | No
             title = f"EncloSURE: {Path(board.filename).stem if board is not None and board.filename else name}"
             files = report.write(d / "fit", enc, result, b, l, title=title)
             j = result.to_json()
-            return {"fits": j["fits"], "errors": j["errors"], "warnings": j["warnings"],
+            fixed = None
+            if pcb_path is not None:
+                from . import kicad
+                moves = kicad.moves_from_fit(j["findings"])
+                if moves:
+                    done = kicad.move_footprints(pcb_path, moves, d / "fixed.kicad_pcb")
+                    fixed = {"kicad_pcb": (d / "fixed.kicad_pcb").read_text(), "moved": done,
+                             "name": Path(pcb.filename).stem + "_fixed.kicad_pcb"}
+            return {"fixed": fixed, "fits": j["fits"], "errors": j["errors"], "warnings": j["warnings"],
                     "placement": j["placement"], "headroom": j["headroom"], "findings": j["findings"],
                     "punch_list": Path(files["punch_list"]).read_text(),
                     "report": json.loads(Path(files["report"]).read_text()),
                     "view": Path(files["view"]).read_text()}
     except (ValueError, RuntimeError, json.JSONDecodeError) as e:
+        _bad(e)
+
+
+@app.get("/api/coupon")
+def fit_coupon():
+    from . import coupon
+    with tempfile.TemporaryDirectory() as d:
+        coupon.write(d)
+        return _zip(Path(d), "fit_test_coupon")
+
+
+@app.post("/api/frompcb")
+async def from_board(board: UploadFile = File(...), pcb: UploadFile | None = File(None),
+                     parts: UploadFile | None = File(None), lid: str = Form("screw"), wall: float = Form(2.0),
+                     edge_gap: float = Form(1.0), standoff_height: float = Form(5.0), headroom: float = Form(2.0)):
+    """A quick box designed around a board, checked with the board in it."""
+    from . import frompcb, parts as partsmod
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            step = await _save(board, d / "board.step")
+            pcb_path = await _save(pcb, d / "board.kicad_pcb")
+            parts_path = await _save(parts, d / "parts.json")
+            st = frompcb.Settings(lid=lid, wall=wall, edge_gap=edge_gap, standoff_height=standoff_height, headroom=headroom)
+            r = frompcb.make(step, st, partsmod.load(parts_path) if parts_path else {},
+                             partsmod.from_board(pcb_path) if pcb_path else None)
+            j = r["fit"].to_json()
+            return {"spec": asdict(r["spec"]), "notes": r["notes"], "fits": j["fits"], "errors": j["errors"],
+                    "warnings": j["warnings"], "findings": j["findings"]}
+    except (ValueError, RuntimeError) as e:
         _bad(e)
 
 

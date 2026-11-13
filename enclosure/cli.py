@@ -2,6 +2,8 @@
 
   enclosure read   base.step [--lid lid.step]                      what the enclosure offers a board
   enclosure limits base.step [--lid lid.step] -o board.kicad_pcb   a KiCad board to design inside
+  enclosure frompcb board.step -o box                               a box around a finished board
+  enclosure fix    board.kicad_pcb fit/report.json -o fixed.kicad_pcb   apply fit's moves
   enclosure fit    base.step board.step [--lid lid.step] -o out/   does the board fit? punch list + 3D view
   enclosure parts  --pcb board.kicad_pcb [--set J1=MPN] [-p parts.json]  real parts from DigiKey/Mouser
   enclosure box    --size 100x60x40 --lid screw [...] -o folder    a quick enclosure, no board needed
@@ -146,6 +148,51 @@ def cmd_stock(args):
     return stock.run(args.step, cutouts, args.out, lid_path=args.lid, teardrop=args.teardrop)
 
 
+def cmd_drawing(args):
+    from . import drawing
+    title = {}
+    for k in ("title", "part_number", "material", "drawn_by", "company"):
+        v = getattr(args, k)
+        if v:
+            title[k] = v
+    return drawing.make(args.folder, args.out, args.standard, title, args.formats)
+
+
+def cmd_coupon(args):
+    from . import coupon
+    gaps = [float(g) for g in args.gaps.split(",")] if args.gaps else coupon.GAPS
+    return coupon.write(args.out, gaps)
+
+
+def cmd_fix(args):
+    from . import kicad
+    findings = json.loads(Path(args.report).read_text())["findings"]
+    moves = kicad.moves_from_fit(findings)
+    if not moves:
+        return {"moved": [], "note": "the report asks for no footprint moves"}
+    done = kicad.move_footprints(args.pcb, moves, args.out)
+    left = [f["subject"] + ": " + f["message"] for f in findings if f["severity"] == "error" and not f.get("kicad_move")]
+    return {"file": args.out, "moved": done, "not_fixed_by_moving": left,
+            "next": "re-export the board's STEP from KiCad and run fit again"}
+
+
+def cmd_frompcb(args):
+    from . import frompcb
+    st = frompcb.Settings(wall=args.wall, lid=args.lid, edge_gap=args.edge_gap, standoff_height=args.standoff_height,
+                          headroom=args.headroom)
+    specs = partsmod.load(args.parts) if args.parts else {}
+    footprints = partsmod.from_board(args.pcb) if args.pcb else None
+    r = frompcb.make(args.board, st, specs, footprints)
+    out = Path(args.out)
+    files = boxmod.write(r["spec"], out, stl=not args.no_stl, formats=tuple(args.format.replace("both", "step,onshape").split(",")))
+    rep = report.write(out / "fit", r["enclosure"], r["fit"], r["made"]["base"], r["made"]["lid"],
+                       title=f"EncloSURE: box for {Path(args.board).stem}")
+    j = r["fit"].to_json()
+    return {"inner": files["inner"], "outer": files["outer"], "fits": j["fits"], "errors": j["errors"],
+            "warnings": j["warnings"], "notes": r["notes"], "checks": files["checks"],
+            "files": {**files["files"], **{f"fit_{k}": v for k, v in rep.items()}}}
+
+
 def cmd_web(args):
     try:
         from .web import serve
@@ -257,6 +304,46 @@ def main(argv=None) -> int:
     p.add_argument("--teardrop", action="store_true", help="teardrop wall holes (for a printed box)")
     p.add_argument("-o", "--out", default="stock", help="folder for base.step, lid.step, drill_templates.pdf, holes.json")
     p.set_defaults(fn=cmd_stock)
+
+    from . import drawing as drawingmod
+    p = sub.add_parser("drawing", help="ASME or ISO drawings of a box's parts (uses draftwright)",
+                       description=drawingmod.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("folder", help="a folder with base.step and lid.step (from box, frompcb or stock)")
+    p.add_argument("--standard", default="asme", choices=("asme", "iso"), help="asme: inches, Y14.5; iso: mm")
+    p.add_argument("--title"); p.add_argument("--part-number"); p.add_argument("--material")
+    p.add_argument("--drawn-by"); p.add_argument("--company")
+    p.add_argument("--formats", default="pdf,svg")
+    p.add_argument("-o", "--out", default="drawings")
+    p.set_defaults(fn=cmd_drawing)
+
+    from . import coupon as couponmod
+    p = sub.add_parser("coupon", help="a fit test print to find your printer's lid gap",
+                       description=couponmod.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("--gaps", help="gaps per side to try, mm, comma separated (default 0.10 to 0.35)")
+    p.add_argument("-o", "--out", default="coupon")
+    p.set_defaults(fn=cmd_coupon)
+
+    p = sub.add_parser("fix", help="apply a fit report's KiCad moves to the .kicad_pcb")
+    p.add_argument("pcb", help="the .kicad_pcb that was checked")
+    p.add_argument("report", help="fit/report.json")
+    p.add_argument("-o", "--out", required=True, help="the fixed .kicad_pcb to write (the original is left alone)")
+    p.set_defaults(fn=cmd_fix)
+
+    p = sub.add_parser("frompcb", help="a box around a board, from KiCad's STEP export",
+                       description=__import__("enclosure.frompcb", fromlist=["x"]).__doc__,
+                       formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("board", help="the board's STEP from KiCad (File > Export > STEP), with 3D models")
+    p.add_argument("--pcb", help="the .kicad_pcb, to check parts that have no 3D model")
+    p.add_argument("--parts", help="parts.json: datasheet panel cutouts are used for openings")
+    p.add_argument("--lid", default="screw", choices=boxmod.LIDS)
+    p.add_argument("--wall", type=float, default=2.0)
+    p.add_argument("--edge-gap", type=float, default=1.0, help="board edge to the walls where nothing pokes out (mm)")
+    p.add_argument("--standoff-height", type=float, default=5.0)
+    p.add_argument("--headroom", type=float, default=2.0, help="above the tallest part (mm)")
+    p.add_argument("--format", default="step", choices=("step", "onshape", "both"))
+    p.add_argument("--no-stl", action="store_true")
+    p.add_argument("-o", "--out", default="box", help="folder for the box files and fit/ report")
+    p.set_defaults(fn=cmd_frompcb)
 
     p = sub.add_parser("web", help="the quick box and bought-box tools as a web page with a 3D preview")
     p.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to let other computers on your network in")

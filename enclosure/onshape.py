@@ -29,16 +29,13 @@ def unsupported(spec: BoxSpec) -> list[str]:
     out = []
     if spec.lid in ("snap", "slide"):
         out.append(f"{spec.lid} lid (the feature makes a friction lid)")
-    for name, on in (("gasket", spec.gasket), ("vents", spec.vents), ("feet", spec.feet),
-                     ("keyholes", spec.keyholes), ("DIN clip", spec.din_rail), ("labels", spec.labels),
-                     ("mounting ears", spec.flange), ("standoff gussets", spec.standoffs and spec.standoff_ribs),
-                     ("bottom chamfer", spec.bottom_chamfer)):
+    for name, on in (("gasket", spec.gasket), ("keyholes", spec.keyholes), ("DIN clip", spec.din_rail),
+                     ("labels", spec.labels), ("mounting ears", spec.flange),
+                     ("standoff gussets", spec.standoffs and spec.standoff_ribs), ("pin standoffs", spec.standoff_hole == "pin")):
         if on:
             out.append(name)
     if any(resolve(c)["shape"] == "round" and c.get("face") not in ("lid", "floor") for c in spec.cutouts) and spec.teardrop:
         out.append("teardrop holes")
-    if any(resolve(c).get("radius") for c in spec.cutouts):
-        out.append("rounded cutout corners")
     if spec.standoffs and not _is_rect(spec.standoffs):
         out.append("standoffs other than a rectangle pattern (the feature uses their bounding rectangle)")
     return out
@@ -68,8 +65,9 @@ def feature_studio(spec: BoxSpec) -> tuple[str, list[str]]:
         c = Cutout(**resolve(raw))
         w = c.size[0]
         h = c.size[1] if c.shape == "rect" else c.size[0]
-        cutouts.append("{ \"face\" : EncFace.%s, \"shape\" : EncShape.%s, \"w\" : %s, \"h\" : %s, \"a\" : %s, \"b\" : %s }" % (
-            FACE_ENUM[c.face], "ROUND" if c.shape == "round" else "RECT", _mm(w), _mm(h), _mm(c.at[0]), _mm(c.at[1])))
+        cutouts.append("{ \"face\" : EncFace.%s, \"shape\" : EncShape.%s, \"w\" : %s, \"h\" : %s, \"a\" : %s, \"b\" : %s, \"r\" : %s }" % (
+            FACE_ENUM[c.face], "ROUND" if c.shape == "round" else "RECT", _mm(w), _mm(h), _mm(c.at[0]), _mm(c.at[1]),
+            _mm(c.radius or 0)))
     defaults = {
         "length": _mm(L), "width": _mm(W), "height": _mm(H), "wall": _mm(spec.wall), "floor": _mm(spec.floor),
         "cornerRadius": _mm(spec.corner_radius), "lidType": f"EncLidType.{lid}", "lidThickness": _mm(spec.lid_thickness),
@@ -81,8 +79,103 @@ def feature_studio(spec: BoxSpec) -> tuple[str, list[str]]:
         "cutouts": "[" + ", ".join(cutouts) + "]",
     }
     text = TEMPLATE.replace("__VERSION__", str(VERSION)).replace(
-        "__DEFAULTS__", ",\n        ".join(f'"{k}" : {v}' for k, v in defaults.items()))
+        "__DEFAULTS__", ",\n        ".join(f'"{k}" : {v}' for k, v in defaults.items())).replace("__EXTRAS__", extras(spec))
     return text, unsupported(spec)
+
+
+def _v(x, y, z) -> str:
+    return f"vector({x}, {y}, {z})"
+
+
+def _wall_box(face: str, along0: float, along1: float, z0: float, z1: float, inward0: str, inward1: str):
+    """Corners of a block on a wall: along the wall from along0 to along1 (mm), from z0 to z1 above
+    the floor (mm), and across the wall from inward0 to inward1 (expressions, from the outside in)."""
+    m = lambda v: f"{v:g} * millimeter"  # noqa: E731
+    z0e, z1e = f"f + {m(z0)}", f"f + {m(z1)}"
+    if face in ("-X", "+X"):
+        s = -1 if face == "-X" else 1
+        x0, x1 = f"{s} * (oL / 2 - {inward0})", f"{s} * (oL / 2 - {inward1})"
+        return _v(x0, m(along0), z0e), _v(x1, m(along1), z1e)
+    s = -1 if face == "-Y" else 1
+    y0, y1 = f"{s} * (oW / 2 - {inward0})", f"{s} * (oW / 2 - {inward1})"
+    return _v(m(along0), y0, z0e), _v(m(along1), y1, z1e)
+
+
+def extras(spec: BoxSpec) -> str:
+    """FeatureScript for the extras this box uses (vents, feet, bottom chamfer, windows, card
+    guides). Their sizes are fixed at what was set; they follow the box when its size changes in
+    the dialog. Only what the box uses is written, so a box without extras is the tested core."""
+    from .box import face_name
+    m = lambda v: f"{v:g} * millimeter"  # noqa: E731
+    out, k = [], 0
+
+    def nid():
+        nonlocal k
+        k += 1
+        return f'id + ("extra" ~ {k})'
+
+    for v in spec.vents:
+        face = face_name(v["face"])
+        (w, h), (a, b) = v["size"], v.get("at", [0, 0])
+        slot, pitch = v.get("slot", 2.0), v.get("pitch", 4.0)
+        n = max(1, int((w - slot) // pitch) + 1)
+        start = a - (n - 1) * pitch / 2
+        out.append(f"        // Vent on {face}: {n} slots {slot:g} x {h:g} mm")
+        for i in range(n):
+            u = start + i * pitch
+            if face in ("lid", "floor"):
+                z0, z1 = ("top - 5 * millimeter", "top + 50 * millimeter") if face == "lid" else ("-5 * millimeter", "f + 0.001 * millimeter")
+                c0, c1 = _v(m(u - slot / 2), m(b - h / 2), z0), _v(m(u + slot / 2), m(b + h / 2), z1)
+                out.append(f"        block(context, {nid()}, {'lid' if face == 'lid' else 'base'}, {c0}, {c1}, true);")
+            else:
+                c0, c1 = _wall_box(face, u - slot / 2, u + slot / 2, b - h / 2, b + h / 2, "(-2 * millimeter)", "(t + 2 * millimeter)")
+                out.append(f"        block(context, {nid()}, base, {c0}, {c1}, true);")
+    if spec.feet:
+        r = spec.feet / 2 + 0.3
+        out.append(f"        // Recesses for Ø{spec.feet:g} rubber feet")
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                x, y = f"{sx} * (oL / 2 - {m(spec.feet / 2 + 3)})", f"{sy} * (oW / 2 - {m(spec.feet / 2 + 3)})"
+                i = nid()
+                out.append(f"        fCylinder(context, {i}, {{ \"bottomCenter\" : {_v(x, y, '-1 * millimeter')}, "
+                           f"\"topCenter\" : {_v(x, y, m(spec.feet_depth))}, \"radius\" : {m(r)} }});")
+                out.append(f"        subtract(context, {i} + \"do\", base, qCreatedBy({i}, EntityType.BODY));")
+    for wdw in spec.windows:
+        face = face_name(wdw["face"])
+        (w, h), (a, b) = wdw["size"], wdw.get("at", [0, 0])
+        pw, ph = wdw.get("panel", [w + 4, h + 4])
+        pt = wdw.get("panel_t", 1.0)
+        out.append(f"        // Window on {face}: {w:g} x {h:g} opening, {pw:g} x {ph:g} x {pt:g} recess")
+        if face == "lid":
+            out.append(f"        block(context, {nid()}, lid, {_v(m(a - w / 2), m(b - h / 2), 'top - 5 * millimeter')}, "
+                       f"{_v(m(a + w / 2), m(b + h / 2), 'top + 50 * millimeter')}, true);")
+            out.append(f"        block(context, {nid()}, lid, {_v(m(a - pw / 2), m(b - ph / 2), 'top - 20 * millimeter')}, "
+                       f"{_v(m(a + pw / 2), m(b + ph / 2), 'top + ' + m(pt))}, true);")
+        else:
+            c0, c1 = _wall_box(face, a - w / 2, a + w / 2, b - h / 2, b + h / 2, "(-2 * millimeter)", "(t + 2 * millimeter)")
+            out.append(f"        block(context, {nid()}, base, {c0}, {c1}, true);")
+            c0, c1 = _wall_box(face, a - pw / 2, a + pw / 2, b - ph / 2, b + ph / 2, f"(t - {m(pt)})", "(t + 2 * millimeter)")
+            out.append(f"        block(context, {nid()}, base, {c0}, {c1}, true);")
+    if spec.card_slots:
+        gap = spec.board_thickness + 2 * spec.fit_clearance
+        stop = f"top - {m(spec.lip + spec.fit_clearance + 0.5)}" if spec.lid in ("screw", "friction", "snap") else "top"
+        out.append(f"        // Card guides for a {spec.board_thickness:g} mm board")
+        for x in spec.card_slots:
+            for sx in (-1, 1):
+                x0, x1 = x + sx * gap / 2, x + sx * (gap / 2 + 1.6)
+                for sy in (-1, 1):
+                    y0, y1 = f"{sy} * (W / 2)", f"{sy} * (W / 2 - 2.5 * millimeter)"
+                    out.append(f"        block(context, {nid()}, base, {_v(m(min(x0, x1)), y0, 'f - 0.01 * millimeter')}, "
+                               f"{_v(m(max(x0, x1)), y1, stop)}, false);")
+    if spec.bottom_chamfer:
+        out.append(f"        // Bottom edge chamfer")
+        out.append("        try silent")
+        out.append("        {")
+        out.append(f"            opChamfer(context, {nid()}, {{ \"entities\" : qCoincidesWithPlane(qOwnedByBody(base, EntityType.EDGE), "
+                   f"plane(vector(0, 0, 0) * millimeter, vector(0, 0, 1))), \"chamferType\" : ChamferType.EQUAL_OFFSETS, "
+                   f"\"width\" : {m(spec.bottom_chamfer)} }});")
+        out.append("        }")
+    return "\n".join(out) + ("\n" if out else "")
 
 
 TEMPLATE = r'''FeatureScript __VERSION__;
@@ -200,6 +293,8 @@ export const enclosureBox = defineFeature(function(context is Context, id is Id,
             isLength(c.a, SIGNED);
             annotation { "Name" : "Height above floor (wall) or Y (lid, floor)" }
             isLength(c.b, SIGNED);
+            annotation { "Name" : "Corner radius (rectangle)" }
+            isLength(c.r, SMALL);
         }
     }
     {
@@ -315,7 +410,10 @@ export const enclosureBox = defineFeature(function(context is Context, id is Id,
                 if (c.shape == EncShape.ROUND)
                     fCylinder(context, tool, { "bottomCenter" : vector(c.a, c.b, z0), "topCenter" : vector(c.a, c.b, z1), "radius" : w / 2 });
                 else
+                {
                     fCuboid(context, tool, { "corner1" : vector(c.a - w / 2, c.b - h / 2, z0), "corner2" : vector(c.a + w / 2, c.b + h / 2, z1) });
+                    roundEdges(context, tool, Z_DIRECTION, min(c.r, min(w, h) / 2 - 0.01 * millimeter));
+                }
             }
             else
             {
@@ -343,18 +441,40 @@ export const enclosureBox = defineFeature(function(context is Context, id is Id,
                 if (c.shape == EncShape.ROUND)
                     fCylinder(context, tool, { "bottomCenter" : p0, "topCenter" : p1, "radius" : w / 2 });
                 else
+                {
                     fCuboid(context, tool, { "corner1" : a0, "corner2" : a1 });
+                    roundEdges(context, tool, (c.face == EncFace.LEFT || c.face == EncFace.RIGHT) ? X_DIRECTION : Y_DIRECTION,
+                        min(c.r, min(w, h) / 2 - 0.01 * millimeter));
+                }
             }
             subtract(context, id + ("cutdo" ~ n), target, qCreatedBy(tool, EntityType.BODY));
             n += 1;
         }
 
+__EXTRAS__
         setProperty(context, { "entities" : base, "propertyType" : PropertyType.NAME, "value" : "Base" });
         if (definition.lidType != EncLidType.NONE)
             setProperty(context, { "entities" : lid, "propertyType" : PropertyType.NAME, "value" : "Lid" });
     }, {
         __DEFAULTS__
     });
+
+// Round a cutting tool's edges that run along dir (a rectangle's corners), when r is worth it.
+function roundEdges(context is Context, tool is Id, dir is Vector, r is ValueWithUnits)
+{
+    if (r > 0.05 * millimeter)
+        opFillet(context, tool + "round", { "entities" : qParallelEdges(qCreatedBy(tool, EntityType.EDGE), dir), "radius" : r });
+}
+
+// A box between two corners, cut from or added to a body (the extras use it).
+function block(context is Context, id is Id, target is Query, c0 is Vector, c1 is Vector, cutIt is boolean)
+{
+    fCuboid(context, id, { "corner1" : c0, "corner2" : c1 });
+    if (cutIt)
+        subtract(context, id + "do", target, qCreatedBy(id, EntityType.BODY));
+    else
+        add(context, id + "do", target, qCreatedBy(id, EntityType.BODY));
+}
 
 // A block centred on the Z axis from z0 up by h, its vertical edges rounded r.
 function slab(context is Context, id is Id, L is ValueWithUnits, W is ValueWithUnits, z0 is ValueWithUnits, h is ValueWithUnits, r is ValueWithUnits) returns Query
