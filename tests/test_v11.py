@@ -120,3 +120,11 @@ def test_sheet_metal_automatic_lip_from_the_page():
     from enclosure.web import app
     r = TestClient(app).post("/api/sheetmetal", json={"box": {"size": [150, 100, 30]}, "preview": True})
     assert r.status_code == 200 and "rmfg" in r.json()
+
+
+def test_plate_always_has_time_and_filament(tmp_path, monkeypatch):
+    s = box.BoxSpec(size=[80, 50, 30])
+    items = plate.box_items(s, box.build(s))
+    monkeypatch.setattr(plate, "slicer", lambda: None)  # no slicer: the rough numbers still come back
+    est = plate.write(items, tmp_path)["estimate"]
+    assert est["hours"] > 0 and est["grams"] > 0 and est["metres"] > 0 and est["source"].startswith("rough")

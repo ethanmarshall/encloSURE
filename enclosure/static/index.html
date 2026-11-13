@@ -2025,11 +2025,12 @@ function partReport() {
     ...[rows.length ? h("details", { open: true }, h("summary", {}, "Numbers (mm, N, MPa)"), h("div", { class: "summary" }, h("table", {}, rows))) : null,
       d.buy ? h("div", { class: "hint" }, "To buy: " + d.buy) : null].filter(Boolean));
 }
-let partSeq = 0, partAbort = null;
+let partSeq = 0, partAbort = null, plateShownAt = 0;
 const PAGE_ID = Math.random().toString(36).slice(2);
 async function partPreview() {
   if (!PARTS) return;
   const mine = ++partSeq;  // only the latest request's answer is shown
+  const started = Date.now();
   partAbort?.abort(); partAbort = new AbortController();
   const body = { ...partBody(), page: PAGE_ID, seq: mine };
   $("#pstate").textContent = body.params.mode === "print" || body.params.threads ? "Drawing (threads take a few seconds)..." : "Drawing...";
@@ -2042,6 +2043,7 @@ async function partPreview() {
   const got = await res.json();
   if (got.stale || mine !== partSeq) return;
   partData = got;
+  if (plateShownAt > started) return;  // the print plate went up meanwhile: leave it showing
   const g = new THREE.Group(), m = mesh(partData.mesh, 0xb8bec4);
   m.geometry.computeBoundingBox();
   const pb = m.geometry.boundingBox, c = pb.getCenter(new THREE.Vector3());
@@ -2109,11 +2111,19 @@ $("#plateshow").onclick = async () => {
     const bb = new THREE.Box3().setFromObject(g);
     views.parts = { group: g, lid: null, top: 0, size: bb.getSize(new THREE.Vector3()), framed: false };
     empty(""); showView(views.parts);
-    const sl = d.slicer;
-    report.replaceChildren(h("div", { class: "dims" }, "Print plate: ", h("b", {}, d.parts.length > 1 ? `${d.parts.length} plates` : "1 plate"),
-      sl ? ` · ${sl.hours} h, ${sl.grams} g` : ""),
+    plateShownAt = Date.now();
+    const est = d.estimate, perKg = num(boxform.elements.filament_per_kg.value) || 25;
+    const hm = hrs => { const m = Math.round(hrs * 60); return m >= 60 ? `${Math.floor(m / 60)} h ${m % 60} min` : `${m} min`; };
+    const stat = (label, value, sub) => h("div", { style: "flex:1;min-width:120px;padding:8px 10px;border:1px solid var(--line);border-radius:7px;background:var(--soft)" },
+      h("div", { class: "hint", style: "margin:0" }, label), h("div", { style: "font-size:20px;font-weight:600;margin:2px 0" }, value), sub ? h("div", { class: "hint", style: "margin:0" }, sub) : null);
+    report.replaceChildren(h("div", { class: "dims" }, "Print plate: ", h("b", {}, d.parts.length > 1 ? `${d.parts.length} plates` : "1 plate"), ` of ${d.material}`),
+      h("div", { style: "display:flex;gap:8px;flex-wrap:wrap;margin:8px 0" },
+        stat("Print time", hm(est.hours), d.parts.length > 1 ? est.per_plate.map((p, i) => `plate ${i + 1}: ${hm(p.hours)}`).join(", ") : null),
+        stat("Filament", `${Math.round(est.grams)} g`, `about ${est.metres} m of 1.75 mm`),
+        stat("Plastic cost", `$${(est.grams / 1000 * perKg).toFixed(2)}`, `at $${perKg}/kg (Quick box tab's price)`)),
+      h("div", { class: "hint" }, d.slicer ? `From ${est.source}. Your own slicer profile will differ a little.` : `Rough estimate (${est.source}); no slicer numbers this time.`),
       ...d.checks.map(c => msg("warn", inUnits(c))),
-      h("ul", { class: "notes" }, [...d.notes, ...(sl ? [`From ${sl.settings}: check them against your own printer profile.`] : [])].map(n => h("li", {}, inUnits(n)))),
+      h("ul", { class: "notes" }, d.notes.map(n => h("li", {}, inUnits(n)))),
       h("div", { class: "hint" }, d.parts.map((p, i) => `Plate ${i + 1}: ${p.join(", ")}`).join(" · ")));
   });
 };

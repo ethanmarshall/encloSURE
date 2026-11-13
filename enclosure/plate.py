@@ -218,4 +218,22 @@ def write(items, folder, bed=(250.0, 210.0), material: str = "PETG", slice_it: b
         else:
             out["notes"].append("no slicer on this server: times and grams are the rough estimate" if not slicer() else
                                 f"PrusaSlicer didn't slice it ({LAST_ERROR[-160:] or 'no reason given'}): times and grams are the rough estimate")
+    # The numbers to show: the slicer's when it ran, else a rough one from the parts' volume.
+    if out.get("slicer"):
+        sl = out["slicer"]
+        out["estimate"] = {"hours": sl["hours"], "grams": sl["grams"],
+                           "metres": round(sum(p.get("filament_m") or 0 for p in sl["per_plate"]), 2),
+                           "per_plate": [{"hours": p["hours"], "grams": p["grams"]} for p in sl["per_plate"]],
+                           "source": sl["settings"]}
+    else:
+        dens = DENSITY.get(material, 1.25)
+        per = []
+        for p in r["plates"]:
+            vol = sum(sh.volume for _, sh in p)  # mm3, as if solid: thin-walled boxes nearly are
+            per.append({"hours": round(vol / 8.0 / 3600, 2), "grams": round(vol / 1000 * dens, 1)})
+        grams = round(sum(x["grams"] for x in per), 1)
+        out["estimate"] = {"hours": round(sum(x["hours"] for x in per), 2), "grams": grams,
+                           "metres": round(grams / dens / (3.14159 * 0.875 ** 2) , 2),
+                           "per_plate": per, "source": "rough: the parts' volume as if solid, at about 8 mm³/s"}
+    out["material"] = material
     return out

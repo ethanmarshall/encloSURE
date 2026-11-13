@@ -285,6 +285,7 @@ def print_plate(body: dict):
             laid = plate.make(items, bed)["plates"]
             meshes = [base64.b64encode(_stl(Compound(children=[s for _, s in p]))).decode() for p in laid]
             return {"notes": r["notes"], "checks": r["checks"], "parts": r["parts"], "slicer": r.get("slicer"),
+                    "estimate": r["estimate"], "material": r["material"],
                     "bed": _bed(body), "meshes": meshes}
     except (ValueError, RuntimeError, TypeError) as e:
         _bad(e)
