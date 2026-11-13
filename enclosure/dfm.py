@@ -58,7 +58,7 @@ def check(spec, made: dict, resin: str = "ABS") -> dict:
     if abs(spec.floor - t) > 0.25 * t:
         add("warning", "floor", f"the floor ({spec.floor:g} mm) and walls ({t:g} mm) differ by more than 25%: the thick one "
             "cools slower and warps the part", f"make the floor {t:g} mm")
-    if spec.lid_thickness and spec.lid in ("screw", "friction", "snap", "hinge") and abs(spec.lid_thickness - t) > 0.25 * t:
+    if spec.lid_thickness and spec.lid in ("screw", "friction", "snap", "hinge", "living") and abs(spec.lid_thickness - t) > 0.25 * t:
         add("warning", "lid", f"the lid ({spec.lid_thickness:g} mm) and walls ({t:g} mm) differ by more than 25%", f"make the lid {t:g} mm")
     r_in = max(spec.corner_radius - t, 0.0)
     if r_in < 0.5 * t:

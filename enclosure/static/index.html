@@ -113,6 +113,16 @@
     .tabs { margin-left: 0; }
     .report { max-height: none; }
   }
+  #guide { grid-column: 1 / -1; overflow: auto; padding: 18px 28px 40px; max-width: 980px; }
+  #guide h2 { margin: 4px 0 6px; font-size: 20px; }
+  #guide h3 { margin: 22px 0 6px; font-size: 15px; }
+  #guide .lead { color: var(--muted); font-size: 13.5px; max-width: 760px; }
+  #guide li, #guide p { font-size: 13.5px; line-height: 1.5; }
+  #guide .gtoc { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 10px 0 4px; font-size: 12.5px; }
+  #guide .gtoc a { color: var(--accent); text-decoration: none; }
+  #guide table.gt { border-collapse: collapse; font-size: 13px; margin: 4px 0; }
+  #guide table.gt td, #guide table.gt th { border-bottom: 1px solid var(--line); padding: 4px 12px 4px 0; text-align: left; vertical-align: top; }
+  #guide table.gt td:first-child { color: var(--muted); white-space: nowrap; }
 </style>
 </head>
 <body>
@@ -126,7 +136,9 @@
     <button role="tab" aria-selected="true" data-tab="box">Quick box</button>
     <button role="tab" aria-selected="false" data-tab="fit">Fit a board</button>
     <button role="tab" aria-selected="false" data-tab="stock">Bought box</button>
+    <button role="tab" aria-selected="false" data-tab="shapes">Other shapes</button>
     <button role="tab" aria-selected="false" data-tab="parts">Parts</button>
+    <button role="tab" aria-selected="false" data-tab="guide">Guide</button>
   </div>
 </header>
 <main>
@@ -194,6 +206,7 @@
         <option value="friction">Press-fit</option>
         <option value="snap">Snap-fit</option>
         <option value="hinge">Hinged, snap latch</option>
+        <option value="living">Living hinge (one piece)</option>
         <option value="slide">Slide-in panel</option>
         <option value="clamshell">Clamshell (two shells)</option>
         <option value="none">No lid</option>
@@ -329,7 +342,9 @@
     <legend>Heat</legend>
     <div class="grid g2">
       <label class="f">Power inside<span class="unit" data-unit="W"><input name="power_w" type="number" min="0" max="200" step="0.5" value="0"></span></label>
+      <label class="f">Fan airflow (with a fan hole)<span class="unit" data-unit="CFM"><input name="fan_flow_cfm" type="number" min="0" step="0.5" value="0"></span></label>
     </div>
+    <p class="hint">Fan airflow: about a third of the datasheet's free-air figure is realistic once vents and the board are in the way. The report checks there are vents across from the fan.</p>
     <p class="hint">What the electronics turn into heat. The report estimates how warm the air inside gets, with and without vents.</p>
   </fieldset>
 
@@ -363,6 +378,20 @@
     <label class="check"><input type="checkbox" name="din_rail"> DIN rail clip (35 mm rail) under the floor</label>
     <label class="check"><input type="checkbox" name="wall_bracket"> Wall bracket: a French cleat under the floor and a bracket to screw to the wall</label>
     <label class="check"><input type="checkbox" name="stacking"> Stacking: pins on the lid, sockets under the floor</label>
+    <label class="check"><input type="checkbox" name="lanyard"> Lanyard loop</label>
+    <label class="check"><input type="checkbox" name="belt_clip"> Belt clip (its own part, screws to the floor)</label>
+    <label class="check"><input type="checkbox" name="handle"> Handle on the lid (its own part)</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Look and grounding</legend>
+    <label class="check"><input type="checkbox" name="icons"> Icons beside panel holes (USB, power, antenna, fan...)</label>
+    <div class="grid g2"><label class="f">Icons and labels<select name="icon_style"><option value="engraved">Engraved</option><option value="raised">Raised</option></select></label></div>
+    <label class="check"><input type="checkbox" name="two_color"> Two colours: labels and icons as their own bodies for a second filament (AMS)</label>
+    <label class="check"><input type="checkbox" id="gl_on"> Ground lug boss (M3 insert)</label>
+    <div class="grid g2"><label class="f">Lug X<span class="unit" data-unit="mm"><input name="gl_x" type="number" step="1" value="0"></span></label>
+      <label class="f">Lug Y<span class="unit" data-unit="mm"><input name="gl_y" type="number" step="1" value="0"></span></label></div>
+    <label class="check"><input type="checkbox" name="shielding"> Notes on shielding with copper tape</label>
   </fieldset>
 
   <fieldset>
@@ -413,7 +442,9 @@
       <label class="f">Filament price<span class="unit" data-unit="$/kg"><input name="filament_per_kg" type="number" min="1" step="1" value="25"></span></label>
     </div>
     <div class="links"><button class="plain" type="button" id="bombtn">Price the parts</button>
-      <button class="plain" type="button" id="sumbtn">One-page summary PDF</button></div>
+      <button class="plain" type="button" id="sumbtn">One-page summary PDF</button>
+      <button class="plain" type="button" id="dkcsv">Parts list for DigiKey (CSV)</button></div>
+    <p class="hint">The CSV uploads to DigiKey's BOM Manager or the cart's upload, which match the part numbers for you.</p>
     <div id="bomout"></div>
     <label class="check"><input type="checkbox" name="use_slicer" checked> Weigh and time it with PrusaSlicer (a few seconds more)</label>
   </fieldset>
@@ -433,7 +464,29 @@
       <button class="plain" type="button" id="smshow">Show sheet metal</button><button class="plain" type="button" id="smdl">Sheet metal DXF</button>
       <button class="plain" type="button" id="lcshow">Show laser-cut</button><button class="plain" type="button" id="lcdl">Laser-cut DXF</button>
       <button class="plain" type="button" id="mouldbtn">Moulding check</button>
+      <button class="plain" type="button" id="cmpbtn">Compare costs</button>
     </div>
+    <details><summary>Rates for the cost comparison</summary>
+      <div class="grid">
+        <label class="f">Printer $/hour<input name="r_printer" type="number" min="0" step="0.1" value="0.5"></label>
+        <label class="f">Sheet $/kg<input name="r_sheet" type="number" min="0" step="0.5" value="12"></label>
+        <label class="f">$ per bend<input name="r_bend" type="number" min="0" step="0.1" value="1.5"></label>
+        <label class="f">Sheet metal setup $<input name="r_ssetup" type="number" min="0" step="1" value="30"></label>
+        <label class="f">Laser sheet $/m²<input name="r_lsheet" type="number" min="0" step="1" value="45"></label>
+        <label class="f">Laser $/m of cut<input name="r_lcut" type="number" min="0" step="0.1" value="1"></label>
+        <label class="f">Laser setup $<input name="r_lsetup" type="number" min="0" step="1" value="10"></label>
+      </div>
+      <p class="hint">Placeholders of the right order, not quotes: put in your own rates.</p>
+    </details>
+  </fieldset>
+
+  <fieldset>
+    <legend>For the rest of the design</legend>
+    <div class="links">
+      <button class="plain" type="button" id="panelbtn">Front panel artwork (SVG)</button>
+      <button class="plain" type="button" id="kicadbtn">Copy outline and holes for KiCad</button>
+    </div>
+    <p class="hint" id="kicadhint">Artwork: each face 1:1 with its holes and labels, for an overlay or sticker. KiCad: copies the board outline that fits, the mounting holes and keep-outs; in KiCad's PCB editor press Ctrl+V and place them (if it won't paste, use the Fit tab's KiCad board download and File &gt; Append Board).</p>
   </fieldset>
 
   <div class="actions">
@@ -620,6 +673,36 @@
   </fieldset>
 </form>
 
+<form id="shapeform" autocomplete="off" novalidate hidden>
+  <p class="intro">Boxes that aren't rectangles: a round box with a screw-on cap, or a box shaped to an outline you draw.</p>
+  <fieldset class="first">
+    <legend>Round box, screw-on cap</legend>
+    <div class="grid">
+      <label class="f">Inside diameter<span class="unit" data-unit="mm"><input name="rb_d" type="number" min="20" step="1" value="70"></span></label>
+      <label class="f">Inside height<span class="unit" data-unit="mm"><input name="rb_h" type="number" min="10" step="1" value="40"></span></label>
+      <label class="f">Wall<span class="unit" data-unit="mm"><input name="rb_wall" type="number" min="1.6" step="0.1" value="2.4"></span></label>
+      <label class="f">Thread pitch<span class="unit" data-unit="mm"><input name="rb_pitch" type="number" min="1.5" max="5" step="0.5" value="3"></span></label>
+      <label class="f">Thread clearance<span class="unit" data-unit="mm"><input name="rb_clear" type="number" min="0" step="0.05" value="0.3"></span></label>
+      <label class="f">Standoffs (on a circle)<input name="rb_so" type="number" min="0" max="8" step="1" value="0"></label>
+    </div>
+    <label class="f">Side holes: angle°, height, diameter; separated by semicolons<input name="rb_side" placeholder="0, 15, 8; 180, 15, 12"></label>
+    <label class="f">Cap holes: x, y, diameter; separated by semicolons<input name="rb_cap" placeholder="0, 0, 12"></label>
+    <div class="links"><button class="plain" type="button" id="rbshow">Show it</button><button class="go" type="button" id="rbdl">Download STEP + STL</button></div>
+  </fieldset>
+  <fieldset>
+    <legend>Box from an outline (DXF)</legend>
+    <p class="hint">Draw the inside shape as one closed outline in Onshape, SolidWorks, KiCad or Inkscape and export it as DXF in mm. The walls go outside it; circles inside it become standoffs.</p>
+    <div class="grid g1"><label class="f">Outline DXF<input type="file" name="ol_dxf" accept=".dxf"></label></div>
+    <div class="grid">
+      <label class="f">Inside height<span class="unit" data-unit="mm"><input name="ol_h" type="number" min="5" step="1" value="30"></span></label>
+      <label class="f">Wall<span class="unit" data-unit="mm"><input name="ol_wall" type="number" min="1" step="0.1" value="2"></span></label>
+      <label class="f">Lid lip<span class="unit" data-unit="mm"><input name="ol_lip" type="number" min="0" step="0.5" value="3"></span></label>
+      <label class="f">Standoff height<span class="unit" data-unit="mm"><input name="ol_so" type="number" min="1" step="0.5" value="5"></span></label>
+    </div>
+    <div class="links"><button class="plain" type="button" id="olshow">Show it</button><button class="go" type="button" id="oldl">Download STEP + STL</button></div>
+  </fieldset>
+</form>
+
 <section class="view">
   <div id="canvas"><div class="empty" id="empty" hidden></div></div>
   <iframe id="fitview" title="Fit check 3D view" hidden></iframe>
@@ -630,6 +713,186 @@
   </div>
   <div class="report" id="report"></div>
 </section>
+<article id="guide" hidden>
+  <h2>Designing a box from scratch</h2>
+  <p class="lead">Rules of thumb for drawing your own enclosure in Onshape or SolidWorks and printing it on an FDM printer with a 0.4 mm nozzle. They're the same numbers EncloSURE uses, so a box you draw this way will pass its Fit check. They're starting points: print the fit test (Parts tab, "Thread and snap test print") once, and adjust to what your printer does.</p>
+
+  <div class="gtoc">
+    <a href="#g-start">Start from the board</a><a href="#g-walls">Walls and corners</a><a href="#g-fit">Fits and clearances</a><a href="#g-lid">Lids</a>
+    <a href="#g-screws">Screws and inserts</a><a href="#g-board">Holding the board</a><a href="#g-open">Connectors and openings</a>
+    <a href="#g-ui">Buttons, LEDs, displays</a><a href="#g-print">Printability</a><a href="#g-snap">Snap fits</a><a href="#g-heat">Heat</a>
+    <a href="#g-seal">Sealing</a><a href="#g-asm">Assembly</a><a href="#g-cad">In Onshape and SolidWorks</a><a href="#g-other">Sheet metal and moulding</a><a href="#g-rmfg">Sheet metal for RMFG</a>
+  </div>
+
+  <section id="g-start"><h3>Start from the board</h3>
+    <ul>
+      <li>Export the board from KiCad as STEP with its 3D models (File &gt; Export &gt; STEP) and bring it into your CAD as a reference. Draw the box around the real board, not a rectangle.</li>
+      <li>Put the box's origin at the board's centre (or a mounting hole) so moving the board moves everything with it.</li>
+      <li>Find the tallest part and anything under the board (through-hole leads stick out 1.5 to 2 mm). Those set the inside height and the standoff height.</li>
+      <li>Mark which connectors face which wall before you draw any walls.</li>
+    </ul>
+  </section>
+
+  <section id="g-walls"><h3>Walls, floors and corners</h3>
+    <table class="gt">
+      <tr><td>Wall</td><td>2.0 mm (about four lines at 0.45 mm); 1.2 mm minimum; 2.5 to 3 mm past about 150 mm long, or add ribs</td></tr>
+      <tr><td>Floor and lid</td><td>2.0 mm; keep them close to the wall thickness so the part cools evenly</td></tr>
+      <tr><td>Outside corner radius</td><td>3 mm or more; it prints cleaner and doesn't lift</td></tr>
+      <tr><td>Inside corner radius</td><td>the outside radius minus the wall (a Shell feature does this for you)</td></tr>
+      <tr><td>Bottom edge</td><td>a 0.4 to 0.5 mm chamfer hides the first layer's squish ("elephant's foot")</td></tr>
+      <tr><td>Ribs</td><td>about 60% of the wall thick, no more than 3 times the wall tall</td></tr>
+    </table>
+  </section>
+
+  <section id="g-fit"><h3>Fits and clearances (per side)</h3>
+    <table class="gt">
+      <tr><td>Lid lip into the walls</td><td>0.2 mm: slides in snug</td></tr>
+      <tr><td>Press fit</td><td>0.05 to 0.1 mm</td></tr>
+      <tr><td>Loose or sliding</td><td>0.3 to 0.4 mm</td></tr>
+      <tr><td>Parts that move (hinges, a pin)</td><td>0.3 mm</td></tr>
+      <tr><td>Printed threads</td><td>0.2 mm each (bolt smaller, nut bigger)</td></tr>
+      <tr><td>Holes</td><td>vertical holes print about 0.1 to 0.2 mm small on the diameter; add that, or drill them out</td></tr>
+    </table>
+    <p>Fits depend on your printer, filament and slicer, so print a test piece before a big part.</p>
+  </section>
+
+  <section id="g-lid"><h3>Lids</h3>
+    <ul>
+      <li>Lip: 3 mm deep, 1.6 mm thick, inside the walls with the fit clearance. It locates the lid and stops light and dust getting in at the seam.</li>
+      <li>Screw lid: corner posts about 2.2 to 2.5 times the screw size across (8 mm for M3), tied into the corner. Counterbore the heads half the lid deep.</li>
+      <li>Snap lid: a 0.5 mm rib on the lip into a groove in the wall. Hinge lid: knuckles with 0.3 mm gaps, and a 1.75 mm filament pin.</li>
+      <li>Living hinge: a 0.4 to 0.5 mm strip, printed in PETG, PP or nylon (PLA cracks), flexed a few times while warm.</li>
+      <li>Leave the lid's lip and anything hanging from the lid clear of the board's tallest part: 2 mm or more.</li>
+    </ul>
+  </section>
+
+  <section id="g-screws"><h3>Screws and heat-set inserts</h3>
+    <table class="gt">
+      <tr><th></th><th>M2</th><th>M2.5</th><th>M3</th><th>M4</th></tr>
+      <tr><td>Clearance hole</td><td>2.4</td><td>2.9</td><td>3.4</td><td>4.5</td></tr>
+      <tr><td>Self-tapping pilot (into plastic)</td><td>1.7</td><td>2.1</td><td>2.5</td><td>3.4</td></tr>
+      <tr><td>Heat-set insert hole</td><td>3.2</td><td>3.6</td><td>4.0</td><td>5.6</td></tr>
+      <tr><td>Insert length</td><td>4.0</td><td>4.5</td><td>5.7</td><td>8.1</td></tr>
+    </table>
+    <ul>
+      <li>The insert sizes are for CNC Kitchen's standard inserts; other makers differ, so use the datasheet for the ones you buy.</li>
+      <li>Insert hole depth: the insert's length plus 0.5 to 1 mm, so melted plastic has somewhere to go. Leave at least 1.5 to 2 mm of plastic round the insert.</li>
+      <li>Self-tapping: get at least 1.5 times the screw size of thread into the plastic (4.5 mm for M3). Screws that bottom out crack the boss.</li>
+      <li>Pick screw lengths so the screw stops short of the hole's bottom. EncloSURE checks this for you.</li>
+      <li>In SolidWorks' Hole Wizard or Onshape's Hole feature, draw an insert hole as a plain hole at the maker's diameter, not a tapped hole.</li>
+    </ul>
+  </section>
+
+  <section id="g-board"><h3>Holding the board</h3>
+    <ul>
+      <li>Standoffs 5 mm tall: through-hole leads and solder joints need 3 mm or more. Make them about 2.5 times the screw across (7.5 mm for M3), and keep that inside the board's keep-out round the hole.</li>
+      <li>A gusset or two at the foot of tall standoffs keeps them from snapping.</li>
+      <li>Gap from the board's edge to the walls: 0.5 to 1 mm, less on a connector edge so the connector reaches the outside.</li>
+      <li>Headroom over the tallest part: 2 mm or more below the lid's lip.</li>
+      <li>Watch the corners: a screw lid's corner posts sit where a big board's corners would be.</li>
+    </ul>
+  </section>
+
+  <section id="g-open"><h3>Connectors and openings</h3>
+    <ul>
+      <li>Opening: the connector's face plus 0.25 to 0.5 mm each side, or the panel cutout from its datasheet.</li>
+      <li>Height: standoff + board thickness + the connector's centre above the board. Draw it from the board model, not by eye.</li>
+      <li>Set the connector's face within about 1 mm of the outside. A USB-C plug's overmold has to reach the receptacle; thin the wall there (to 1.2 mm) if you have to.</li>
+      <li>Openings in a wall make the board drop in at an angle or slide sideways. Check that it can actually go in (EncloSURE's insertion check does).</li>
+      <li>Panel parts (glands, switches, jacks): use the maker's recommended hole, and leave room inside for the nut: about 1.5 times the hole across.</li>
+    </ul>
+  </section>
+
+  <section id="g-ui"><h3>Buttons, LEDs and displays</h3>
+    <ul>
+      <li>Button caps: 0.2 to 0.3 mm clearance in their hole each side, a flange inside so they can't fall out, and a short travel stop.</li>
+      <li>LEDs: a light pipe (a tube down from the lid) stops light bleeding to neighbouring LEDs; a 0.6 to 1 mm thin spot in a light-coloured wall glows through without a hole.</li>
+      <li>Displays: an opening the size of the active area, with a recess behind it for the glass or a clear panel, glued from inside.</li>
+    </ul>
+  </section>
+
+  <section id="g-print"><h3>Printability</h3>
+    <ul>
+      <li>Overhangs up to 45° print without support; flat roofs bridge up to about 10 to 20 mm.</li>
+      <li>Horizontal round holes over about 5 mm: a teardrop or a flat top so the roof doesn't sag.</li>
+      <li>Print the base opening up and the lid top down: no supports and the show faces come out smooth.</li>
+      <li>Text: 5 mm tall or more, strokes 0.8 mm wide or more, 0.6 mm deep or raised.</li>
+      <li>Snap hooks and anything that flexes: print so the layers run along the bending part, not across it.</li>
+    </ul>
+  </section>
+
+  <section id="g-snap"><h3>Snap fits</h3>
+    <ul>
+      <li>Strain at the hook's root: ε = 1.5 t y / L² (t thickness, y undercut, L length), the straight-beam formula from the Bayer snap-fit guide.</li>
+      <li>Keep ε under roughly 1.5% for PLA and 2.5% for PETG or ABS (rules of thumb for printed parts). A longer, thinner beam bends further for the same strain.</li>
+      <li>A beam 5 to 10 times as long as it is thick, with a small fillet at the root.</li>
+      <li>A 90° catch face holds for good; 30 to 45° lets it pull off.</li>
+    </ul>
+  </section>
+
+  <section id="g-heat"><h3>Heat</h3>
+    <ul>
+      <li>PLA softens from about 55 to 60 °C; PETG about 80 °C; ABS and ASA about 100 °C. In a car or the sun, use PETG or ASA.</li>
+      <li>Vents low on one side and high on the other let warm air rise out (a chimney).</li>
+      <li>Vent slots 2 mm wide keep fingers and most tools out; under 1 mm keeps wires out too.</li>
+      <li>A fan: vents across the box from it, so air crosses the board on its way out.</li>
+    </ul>
+  </section>
+
+  <section id="g-seal"><h3>Sealing</h3>
+    <ul>
+      <li>An O-ring cord in a groove in the lid: groove about 1.4 times the cord wide and 0.75 times it deep (about 25% squeeze).</li>
+      <li>Keep the screws outside the seal, close enough that the lid doesn't bow between them.</li>
+      <li>Every hole needs its own seal: an IP-rated gland or connector, or a gasket under the part.</li>
+      <li>IP ratings: a first digit of 2 keeps out fingers (12.5 mm), 3 tools (2.5 mm), 4 wires (1 mm); real numbers need the IEC 60529 tests.</li>
+    </ul>
+  </section>
+
+  <section id="g-asm"><h3>Assembly</h3>
+    <ul>
+      <li>Work out the order first: board in, screws, cables, lid. Every screw needs a straight path for the driver.</li>
+      <li>Leave room for cables to bend (about 5 times their diameter) and add a strain relief where they leave the box.</li>
+      <li>Put all screws on one side if you can, and the same size everywhere.</li>
+    </ul>
+  </section>
+
+  <section id="g-cad"><h3>In Onshape and SolidWorks</h3>
+    <ul>
+      <li>Drive the design from a few numbers: Onshape's Variable Studio (or #variables) and configurations; SolidWorks' Global Variables (Tools &gt; Equations) and configurations. Wall, clearance and inside size should each live in one place.</li>
+      <li>Build order: sketch the inside from the board plus its clearances, extrude it, fillet the vertical edges, then Shell with the top face removed. Filleting before the shell keeps the wall thickness even round the corners.</li>
+      <li>Make the lid as its own part, or split one solid at the lid line (Split in SolidWorks, Split Part in Onshape), then add the lip.</li>
+      <li>Project the board's mounting holes onto the floor sketch (Convert Entities in SolidWorks, Use in Onshape) so the standoffs follow the board if it changes.</li>
+      <li>Check for clashes: SolidWorks' Interference Detection, or a Boolean intersect with the board in Onshape.</li>
+      <li>Export STEP for EncloSURE's Fit tab: upload your base, lid and the board's STEP, and it checks the fit for you.</li>
+    </ul>
+  </section>
+
+  <section id="g-other"><h3>Sheet metal and moulding</h3>
+    <ul>
+      <li>Sheet metal: flanges at least 4 times the thickness long; holes at least 2.5 times the thickness plus the bend radius from a bend; inside bend radius about the thickness. Your shop's bend table wins.</li>
+      <li>Injection moulding: even walls (ABS about 1.2 to 3.5 mm), 1° of draft on walls along the pull, bosses and ribs at 60% of the wall or less (sink marks), inside radii at least half the wall. Openings in side walls need side actions, which cost more.</li>
+    </ul>
+  </section>
+  <section id="g-rmfg"><h3>Sheet metal for RMFG</h3>
+    <p>From RMFG's own published limits (their docs for laser cutting, bending, countersinking, tapping, powder coating and shipping). EncloSURE's sheet metal box checks these for you; inches are theirs.</p>
+    <table class="gt">
+      <tr><td>Flat blank</td><td>up to 60" x 47.5" (bent parts are measured flat); outlines ±0.005"</td></tr>
+      <tr><td>Thickness</td><td>5052-H32 aluminium 0.032" to 0.25"; cold rolled steel 0.036" to 0.135"; 304 2B stainless 0.031" to 0.25"; 6061-T6 is flat only (it doesn't bend)</td></tr>
+      <tr><td>Holes and slots</td><td>at least 0.5 x thickness (they flag smaller); 1.5 x thickness or more cuts best</td></tr>
+      <tr><td>Bends</td><td>1° to 90° (nothing past 90°, no hems), ±1°; ±0.015" per bend line, adding up across parallel bends; up to 60" long</td></tr>
+      <tr><td>Flange length</td><td>half the V-die opening plus its shoulder radius; about 4 x thickness if you don't know their tooling</td></tr>
+      <tr><td>U-channels</td><td>the base at least 3 x the flange height (a deep, narrow U won't clear the tooling)</td></tr>
+      <tr><td>Bends next to each other</td><td>(Z-bends, joggles) at least the V-die opening plus the thickness apart</td></tr>
+      <tr><td>Holes near bends</td><td>at least 2 x thickness + bend radius from the bend line; closer blocks the order. Taps, PEM hardware and countersinks can't sit in the bend zone</td></tr>
+      <tr><td>Countersinks</td><td>82° (inch flat heads) or 90° (ISO 10642); the cone must stay inside the sheet</td></tr>
+      <tr><td>Tapping</td><td>M2 to M12 coarse, cut into the sheet; PEM nuts, studs and standoffs from their catalogue, each with its own minimum thickness and edge distance</td></tr>
+      <tr><td>Powder coat</td><td>steel and stainless at least 0.060", aluminium at least 0.080", and a hole of 2.2 mm or more to hang it</td></tr>
+      <tr><td>Flat pattern</td><td>they apply their own bend allowance per material, so send the 3D STEP; the flat pattern is a reference</td></tr>
+      <tr><td>Shipping</td><td>ground boxes up to 48" x 30" and 50 lb</td></tr>
+    </table>
+    <p>Source: <a href="https://www.rmfg.com/llms-full.txt" target="_blank" rel="noopener">rmfg.com</a> (their docs pages for each service). Check their site before ordering: limits change.</p>
+  </section>
+</article>
 </main>
 
 <script type="importmap">
@@ -818,7 +1081,8 @@ function winRow(o = {}) {
       field("Opening width", lenIn("w", o.w ?? 40, "0.5", "2"), "mm"), field("Opening height", lenIn("hh", o.hh ?? 25, "0.5", "2"), "mm"),
       field("Panel thickness", lenIn("pt", o.pt ?? 1, "0.1", "0.2"), "mm")),
     h("div", { class: "grid" },
-      field("Panel width", lenIn("pw", o.pw ?? 46, "0.5", "2"), "mm"), field("Panel height", lenIn("ph", o.ph ?? 31, "0.5", "2"), "mm")),
+      field("Panel width", lenIn("pw", o.pw ?? 46, "0.5", "2"), "mm"), field("Panel height", lenIn("ph", o.ph ?? 31, "0.5", "2"), "mm"),
+      h("label", { class: "check" }, h("input", { type: "checkbox", name: "print_panel", checked: !!o.print_panel }), " Print the panel (clear filament)")),
     h("div", { class: "grid g2" },
       h("label", { class: "f", "data-pos": "a" }, "X", h("span", { class: "unit", "data-unit": "mm" }, lenIn("a", o.a ?? 0))),
       h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": "mm" }, lenIn("b", o.b ?? 0)))));
@@ -829,7 +1093,8 @@ function winRow(o = {}) {
 }
 const readWin = item => {
   const e = n => len(item.querySelector(`[name=${n}]`));
-  return { face: item.querySelector("[name=face]").value, size: [e("w"), e("hh")], at: [e("a"), e("b")], panel: [e("pw"), e("ph")], panel_t: e("pt") };
+  return { face: item.querySelector("[name=face]").value, size: [e("w"), e("hh")], at: [e("a"), e("b")], panel: [e("pw"), e("ph")], panel_t: e("pt"),
+           print_panel: item.querySelector("[name=print_panel]").checked };
 };
 const xyRow = (o = {}) => soRow(o);
 function batRow(o = {}) {
@@ -971,7 +1236,7 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 2.2));
 const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(1, 2, 1.5); scene.add(sun);
 const world = new THREE.Group(); world.rotation.x = -Math.PI / 2; scene.add(world);
 const loader = new STLLoader();
-const views = { box: null, fit: null, stock: null, parts: null };
+const views = { box: null, fit: null, stock: null, parts: null, shapes: null };
 let current = null, tab = "box";
 function themeColors() { scene.background = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue("--view").trim()); }
 themeColors(); matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeColors);
@@ -988,6 +1253,7 @@ function makeView(data) {
   g.add(mesh(data.base, 0x8d9aa6));
   const lid = data.lid ? mesh(data.lid, 0xd9a066) : null;
   if (lid) g.add(lid);
+  for (const inl of data.inlays || []) g.add(mesh(inl.mesh, 0x2f6fb3));  // second-colour bodies, in place
   // Extra printed parts (a battery door, clamp bars, a wall bracket) laid beside the box.
   if (data.extras && data.extras.length) {
     const bb0 = new THREE.Box3().setFromObject(g);
@@ -1046,6 +1312,8 @@ function boxReport(data, error) {
   if (data.print_plan) report.append(h("div", { class: "hint" }, "Print the base " + data.print_plan.base +
     (data.print_plan.lid ? "; the lid " + data.print_plan.lid : "") + "."));
   if (data.notes.length) report.append(h("ul", { class: "notes" }, data.notes.map(n => h("li", {}, inUnits(n)))));
+  if (data.ip) report.append(h("details", {}, h("summary", {}, `Weather and dust: ${data.ip.code} at best`),
+    h("ul", { class: "notes" }, [`First digit: ${data.ip.first}`, `Second digit: ${data.ip.second}`, ...data.ip.reasons, data.ip.note].map(n => h("li", {}, inUnits(n))))));
 }
 
 // ---------- Quick box ----------
@@ -1079,6 +1347,9 @@ function boxBody() {
     battery_door: $("#bd_on").checked ? { size: [len(e.bd_w), len(e.bd_l)], at: [len(e.bd_x), len(e.bd_y)], screw: e.bd_screw.value } : null,
     strain_reliefs: $$("#sr_rows .item").map(readSr),
     dividers: $$("#div_rows .item").map(readDiv),
+    icons: e.icons.checked, icon_style: e.icon_style.value, two_color: e.two_color.checked,
+    lanyard: e.lanyard.checked, belt_clip: e.belt_clip.checked, handle: e.handle.checked, shielding: e.shielding.checked,
+    ground_lug: $("#gl_on").checked ? [len(e.gl_x), len(e.gl_y)] : null, fan_flow_cfm: num(e.fan_flow_cfm.value) || 0,
     board_screw_length: e.board_screw_length.value ? len(e.board_screw_length) : null,
     lid_screw_length: e.lid_screw_length.value ? len(e.lid_screw_length) : null,
     format: e.format.value, stl: e.stl.checked,
@@ -1136,7 +1407,7 @@ const FACE_OF = { "-X": "left", "+X": "right", "-Y": "front", "+Y": "back", lid:
 function applySpec(sp) {
   const LEN = new Set(["L", "W", "H", "wall", "floor", "corner_radius", "lid_thickness", "lip", "fit_clearance", "standoff_height",
     "flange", "feet", "feet_depth", "bottom_chamfer", "gasket", "so_x", "so_y", "board_thickness", "lid_standoff_height",
-    "bd_w", "bd_l", "bd_x", "bd_y"]);
+    "bd_w", "bd_l", "bd_x", "bd_y", "gl_x", "gl_y"]);
   const e = boxform.elements, set = (n, v) => {
     if (v === undefined || v === null || !e[n]) return;
     if (LEN.has(n) && typeof v === "number") { e[n].value = show(v); e[n].dataset.mm = String(v); } else e[n].value = v;
@@ -1148,7 +1419,11 @@ function applySpec(sp) {
     "standoff_height", "standoff_screw", "standoff_hole", "flange", "feet", "feet_depth", "bottom_chamfer"]) set(n, sp[n]);
   $("#gasket_on").checked = !!sp.gasket; if (sp.gasket) set("gasket", sp.gasket);
   e.keyholes.value = sp.keyholes || "";
-  for (const n of ["din_rail", "teardrop", "standoff_ribs", "wall_bracket", "stacking"]) if (n in sp) e[n].checked = !!sp[n];
+  for (const n of ["din_rail", "teardrop", "standoff_ribs", "wall_bracket", "stacking", "icons", "two_color", "lanyard", "belt_clip", "handle", "shielding"])
+    if (n in sp) e[n].checked = !!sp[n];
+  if (sp.icon_style) e.icon_style.value = sp.icon_style;
+  set("fan_flow_cfm", sp.fan_flow_cfm);
+  $("#gl_on").checked = !!sp.ground_lug; if (sp.ground_lug) { set("gl_x", sp.ground_lug[0]); set("gl_y", sp.ground_lug[1]); }
   $("#bd_on").checked = !!sp.battery_door;
   if (sp.battery_door) { set("bd_w", sp.battery_door.size[0]); set("bd_l", sp.battery_door.size[1]); set("bd_x", (sp.battery_door.at || [0, 0])[0]);
     set("bd_y", (sp.battery_door.at || [0, 0])[1]); e.bd_screw.value = sp.battery_door.screw || "M2"; }
@@ -1564,6 +1839,8 @@ async function altShow(btn, url, body, title) {
     const d = await res.json();
     showView(makeView(d));
     report.replaceChildren(h("div", { class: "dims" }, title, d.grams ? h("span", { class: "hint" }, ` · about ${Math.round(d.grams)} g`) : null),
+      ...(d.rmfg ? [h("div", { class: "hint", style: "margin-top:6px" }, h("b", {}, "Against RMFG's published rules:")),
+        ...d.rmfg.map(f => msg(f.severity === "error" ? "err" : f.severity === "warning" ? "warn" : "ok", h("span", {}, h("b", {}, f.rule + ": "), inUnits(f.message))))] : []),
       h("ul", { class: "notes" }, d.notes.map(n => h("li", {}, inUnits(n)))),
       h("div", { class: "hint" }, "Change any setting to go back to the printed box."));
   });
@@ -1595,6 +1872,91 @@ $("#mouldbtn").onclick = async () => busy($("#mouldbtn"), "Checking...", async (
   report.replaceChildren(msg(d.ready ? "ok verdict" : "err verdict", `Moulding in ${d.resin}: ${d.summary}.`),
     ...d.findings.map(f => msg(f.severity === "error" ? "err" : f.severity === "warning" ? "warn" : "ok", h("span", {}, h("b", {}, f.what + ": "), inUnits(f.message)), f.fix ? inUnits(f.fix) : null)),
     h("div", { class: "hint" }, `Walls for ${d.resin}: ${d.wall_range[0]} to ${d.wall_range[1]} mm (Protolabs). A moulder reviews it too; this catches the big things first.`));
+});
+
+
+// ---------- More outputs: DigiKey CSV, cost comparison, panel art, KiCad paste ----------
+$("#dkcsv").onclick = async () => busy($("#dkcsv"), "Making...", async () => {
+  const body = { ...boxBody(), filament_per_kg: num(boxform.elements.filament_per_kg.value), title: { title: boxform.elements.dw_title.value } };
+  const r = await download(await fetch("api/digikey_csv", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), "digikey_parts.csv");
+  if (r.error) boxReport(null, r.error);
+});
+$("#cmpbtn").onclick = async () => busy($("#cmpbtn"), "Pricing...", async () => {
+  const e = boxform.elements;
+  const rates = { filament_per_kg: num(e.filament_per_kg.value), printer_per_hour: num(e.r_printer.value), sheet_per_kg: num(e.r_sheet.value),
+    bend_each: num(e.r_bend.value), sheet_setup: num(e.r_ssetup.value), laser_sheet_per_m2: num(e.r_lsheet.value),
+    laser_per_m_cut: num(e.r_lcut.value), laser_setup: num(e.r_lsetup.value) };
+  const res = await fetch("api/compare", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ box: boxBody(), rates, slice: e.use_slicer.checked }) });
+  if (!res.ok) { boxReport(null, await errorOf(res)); return; }
+  const d = await res.json(), $$m = v => `$${v.toFixed(2)}`;
+  report.replaceChildren(h("div", { class: "dims" }, "Cost each way"),
+    h("div", { class: "summary" }, h("table", {}, h("tr", {}, h("th", {}, "Boxes"), h("th", {}, "Printed"), h("th", {}, "Sheet metal"), h("th", {}, "Laser-cut")),
+      ...d.rows.map(r => h("tr", {}, h("td", {}, String(r.qty)), h("td", {}, $$m(r.printed)), h("td", {}, $$m(r.sheet_metal)), h("td", {}, $$m(r.laser_cut)))))),
+    h("ul", { class: "notes" }, d.notes.map(n => h("li", {}, inUnits(n)))), h("div", { class: "hint" }, d.caveat + "."));
+});
+$("#panelbtn").onclick = async () => busy($("#panelbtn"), "Drawing...", async () => {
+  const r = await download(await fetch("api/panels", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(boxBody()) }), "panel_artwork.zip");
+  if (r.error) boxReport(null, r.error);
+});
+$("#kicadbtn").onclick = async () => busy($("#kicadbtn"), "Reading...", async () => {
+  const res = await fetch("api/kicad_paste", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(boxBody()) });
+  if (!res.ok) { boxReport(null, await errorOf(res)); return; }
+  const { text } = await res.json();
+  try { await navigator.clipboard.writeText(text); $("#kicadhint").textContent = "Copied. In KiCad's PCB editor press Ctrl+V, click to place, and line it up with your board's origin."; }
+  catch { saveBlob(new Blob([text], { type: "text/plain" }), "enclosure_limits.kicad_pcb"); $("#kicadhint").textContent = "The browser wouldn't copy, so it downloaded instead: in KiCad use File > Append Board."; }
+});
+
+
+// ---------- Other shapes: round box, outline box ----------
+const shapeform = $("#shapeform");
+function triples(text, names) {
+  return (text || "").split(";").map(t => t.trim()).filter(Boolean).map(t => {
+    const v = t.split(",").map(x => num(x.trim()));
+    if (v.length !== 3 || v.some(x => !isFinite(x))) throw new Error(`"${t}": three numbers, like ${names}`);
+    return v;
+  });
+}
+function roundBody() {
+  const e = shapeform.elements;
+  return { inside_d: len(e.rb_d), height: len(e.rb_h), wall: len(e.rb_wall), pitch: len(e.rb_pitch), clearance: len(e.rb_clear),
+    standoffs: Math.round(num(e.rb_so.value) || 0),
+    side_holes: triples(e.rb_side.value, "0, 15, 8").map(([angle, height, d]) => ({ angle, height: height * U, d: d * U })),
+    cap_holes: triples(e.rb_cap.value, "0, 0, 12").map(([x, y, d]) => ({ at: [x * U, y * U], d: d * U })) };
+}
+function showShape(d, title) {
+  views.shapes = makeView(d); empty(""); showView(views.shapes);
+  report.replaceChildren(h("div", { class: "dims" }, title, d.outer ? h("span", { class: "hint" }, ` · outside ${d.outer.map(v => +(v / U).toFixed(2)).join(" × ")} ${UNIT()}`) : null),
+    h("ul", { class: "notes" }, d.notes.map(n => h("li", {}, inUnits(n)))));
+}
+$("#rbshow").onclick = () => busy($("#rbshow"), "Making...", async () => {
+  let body; try { body = { round: roundBody(), preview: true }; } catch (err) { report.replaceChildren(msg("err", err.message)); return; }
+  const res = await fetch("api/roundbox", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) { report.replaceChildren(msg("err", await errorOf(res))); return; }
+  showShape(await res.json(), "Round box");
+});
+$("#rbdl").onclick = () => busy($("#rbdl"), "Making...", async () => {
+  let body; try { body = { round: roundBody() }; } catch (err) { report.replaceChildren(msg("err", err.message)); return; }
+  const r = await download(await fetch("api/roundbox", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), "round_box.zip");
+  if (r.error) report.replaceChildren(msg("err", r.error));
+});
+function outlineForm(preview) {
+  const e = shapeform.elements;
+  if (!e.ol_dxf.files.length) throw new Error("Choose the outline's DXF first.");
+  const fd = new FormData();
+  fd.set("dxf", e.ol_dxf.files[0]); fd.set("height", len(e.ol_h)); fd.set("wall", len(e.ol_wall)); fd.set("lip", len(e.ol_lip));
+  fd.set("standoff_height", len(e.ol_so)); fd.set("preview", preview ? "true" : "false");
+  return fd;
+}
+$("#olshow").onclick = () => busy($("#olshow"), "Making...", async () => {
+  let fd; try { fd = outlineForm(true); } catch (err) { report.replaceChildren(msg("err", err.message)); return; }
+  const res = await fetch("api/outline", { method: "POST", body: fd });
+  if (!res.ok) { report.replaceChildren(msg("err", await errorOf(res))); return; }
+  showShape(await res.json(), "Box from your outline");
+});
+$("#oldl").onclick = () => busy($("#oldl"), "Making...", async () => {
+  let fd; try { fd = outlineForm(false); } catch (err) { report.replaceChildren(msg("err", err.message)); return; }
+  const r = await download(await fetch("api/outline", { method: "POST", body: fd }), "outline_box.zip");
+  if (r.error) report.replaceChildren(msg("err", r.error));
 });
 
 // ---------- Parts: screws, nuts, washers, spacers, springs, clips ----------
@@ -1774,6 +2136,7 @@ function selectTab(name) {
   tab = name;
   for (const b of $$("[data-tab]")) b.setAttribute("aria-selected", b.dataset.tab === name);
   boxform.hidden = name !== "box"; fitform.hidden = name !== "fit"; stockform.hidden = name !== "stock"; partform.hidden = name !== "parts";
+  $("#shapeform").hidden = name !== "shapes"; $("#guide").hidden = name !== "guide"; $(".view").hidden = name === "guide";
   $("#status").textContent = "";
   if (name !== "fit") showFitView(false);
   if (name === "box") { empty(""); showView(views.box); boxData?.error ? boxReport(null, boxData.error) : boxData && boxReport(boxData); }
@@ -1781,7 +2144,9 @@ function selectTab(name) {
     if (!$("#fitview").srcdoc) { showView(views.fit); empty(views.fit ? "" : "Read an enclosure to see it here."); }
     else showFitView(true);
     if (!views.fit && !$("#fitview").srcdoc) report.replaceChildren(h("div", { class: "hint" }, "Step 1: pick the enclosure and read it."));
-  } else if (name === "parts") { empty(views.parts ? "" : "Pick a part."); showView(views.parts); partReport(); }
+  } else if (name === "shapes") { empty(views.shapes ? "" : "Show a round box or an outline box here."); showView(views.shapes); report.replaceChildren(); }
+  else if (name === "guide") { report.replaceChildren(); }
+  else if (name === "parts") { empty(views.parts ? "" : "Pick a part."); showView(views.parts); partReport(); }
   else { showView(null); empty("Your bought box's holes come back as STEP and a drilling template PDF."); report.replaceChildren(); }
 }
 for (const b of $$("[data-tab]")) b.onclick = () => selectTab(b.dataset.tab);

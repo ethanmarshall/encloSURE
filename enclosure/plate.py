@@ -20,6 +20,18 @@ GAP = 5.0  # between parts on the bed, mm
 LAST_ERROR = ""  # why the slicer last failed, for the health check
 BEDS = {"prusa-mk4": (250, 210), "prusa-mini": (180, 180), "bambu-x1": (256, 256), "bambu-h3c": (330, 320), "ender-3": (220, 220),
         "prusa-xl": (360, 360), "voron-350": (350, 350)}
+# Speeds (mm/s) and accelerations (mm/s²) for the slicer's time estimate, from each maker's own
+# "0.20mm Standard" process and machine profiles (Bambu Studio's resources/profiles/BBL); a printer
+# without an entry gets PrusaSlicer's defaults. Filament flow caps from Bambu's generic profiles (mm³/s).
+SPEEDS = {
+    "bambu-h3c": {"external": 200, "perimeter": 300, "infill": 350, "solid": 250, "top": 200, "travel": 1400, "first": 50,
+                  "accel": 20000, "accel_external": 7000, "accel_perimeter": 12000, "accel_top": 2000, "accel_travel": 25000,
+                  "machine_accel": 25000, "machine_speed": 1400, "name": "Bambu Lab H3C (Bambu Studio's 0.20mm Standard @BBL H3C)"},
+    "bambu-x1": {"external": 200, "perimeter": 300, "infill": 270, "solid": 250, "top": 200, "travel": 500, "first": 50,
+                 "accel": 10000, "accel_external": 5000, "accel_perimeter": 10000, "accel_top": 2000, "accel_travel": 10000,
+                 "machine_accel": 20000, "machine_speed": 500, "name": "Bambu Lab X1 Carbon (Bambu Studio's 0.20mm Standard @BBL X1C)"},
+}
+MAX_FLOW = {"PLA": 12, "PETG": 12, "ABS": 15, "ASA": 12, "nylon": 10}
 DENSITY = {"PETG": 1.27, "PLA": 1.24, "ABS": 1.04, "ASA": 1.07, "nylon": 1.14}
 
 
@@ -32,9 +44,28 @@ def on_bed(shape):
 def box_items(spec, made: dict) -> list[tuple[str, object]]:
     """The box's printed parts, turned to print: the base upright, a lid on top flipped onto its
     face (its lip, knuckles or posts up)."""
-    items = [("base", made["base"])]
+    inl = made.get("inlays") or []
+
+    def grouped(name, host, which):
+        # A part with its second-colour bodies kept together: they move as one and go in the 3MF as
+        # separate objects in place, so each can get its own filament.
+        mine = [(n, sh) for n, sh, h in inl if h == which]
+        if not mine:
+            return host
+        from build123d import Compound
+        host = Compound(children=[host] + [sh for _, sh in mine])
+        host.label = "group:" + "|".join([name] + [n for n, _ in mine])
+        return host
+
+    if made.get("print_body") is not None:  # a living hinge: one piece, the lid standing on the back wall
+        from .box import living_turn
+        turn = living_turn(spec)
+        inl = [(n, sh if h == "base" else turn(sh), "base") for n, sh, h in inl]
+        return [("box", grouped("box", made["print_body"], "base"))] + list(made.get("extras") or [])
+    items = [("base", grouped("base", made["base"], "base"))]
     lid = made.get("lid")
     if lid is not None:
+        lid = grouped("lid", lid, "lid")
         if spec.lid == "slide":
             items.append(("lid", lid))
         else:
@@ -87,6 +118,12 @@ def make(items: list[tuple[str, object]], bed=(250.0, 210.0), gap: float = GAP) 
 def export_3mf(plate: list, path) -> str:
     m = Mesher()
     for name, s in plate:
+        label = getattr(s, "label", "") or ""
+        if label.startswith("group:"):
+            names = label[6:].split("|")
+            for n, child in zip(names, s.children):
+                m.add_shape(child, linear_deflection=0.02, angular_deflection=0.2, part_number=n)
+            continue
         m.add_shape(s, linear_deflection=0.02, angular_deflection=0.2, part_number=name)
     m.write(str(path))
     return str(path)
@@ -96,8 +133,25 @@ def slicer() -> str | None:
     return shutil.which("prusa-slicer") or shutil.which("PrusaSlicer")
 
 
+def _speed_args(printer: str | None, material: str) -> list[str]:
+    sp = SPEEDS.get(printer or "")
+    if not sp:
+        return []
+    return ["--external-perimeter-speed", str(sp["external"]), "--perimeter-speed", str(sp["perimeter"]),
+            "--infill-speed", str(sp["infill"]), "--solid-infill-speed", str(sp["solid"]),
+            "--top-solid-infill-speed", str(sp["top"]), "--travel-speed", str(sp["travel"]),
+            "--first-layer-speed", str(sp["first"]), "--default-acceleration", str(sp["accel"]),
+            "--external-perimeter-acceleration", str(sp["accel_external"]), "--perimeter-acceleration", str(sp["accel_perimeter"]),
+            "--top-solid-infill-acceleration", str(sp["accel_top"]), "--travel-acceleration", str(sp["accel_travel"]),
+            "--infill-acceleration", str(sp["accel"]), "--max-volumetric-speed", str(MAX_FLOW.get(material, 12)),
+            "--machine-limits-usage", "time_estimate_only",
+            "--machine-max-acceleration-extruding", str(sp["machine_accel"]),
+            "--machine-max-acceleration-x", str(sp["machine_accel"]), "--machine-max-acceleration-y", str(sp["machine_accel"]),
+            "--machine-max-feedrate-x", str(sp["machine_speed"]), "--machine-max-feedrate-y", str(sp["machine_speed"])]
+
+
 def slice_numbers(path_3mf, material: str = "PETG", layer: float = 0.2, infill: int = 15, timeout: int = 240,
-                  bed=(250.0, 210.0)) -> dict | None:
+                  bed=(250.0, 210.0), printer: str | None = None) -> dict | None:
     """PrusaSlicer's print time and filament for a 3MF (its default printer settings, no supports),
     or None when PrusaSlicer isn't installed or fails."""
     exe = slicer()
@@ -110,8 +164,15 @@ def slice_numbers(path_3mf, material: str = "PETG", layer: float = 0.2, infill: 
                "--filament-density", str(DENSITY.get(material, 1.25)), "--dont-arrange",
                "--bed-shape", f"0x0,{bed[0]:g}x0,{bed[0]:g}x{bed[1]:g},0x{bed[1]:g}", "-o", str(out)]
         global LAST_ERROR
+        tuned = _speed_args(printer, material)
         try:
-            run = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=True)
+            try:
+                run = subprocess.run(cmd[:-2] + tuned + cmd[-2:], capture_output=True, text=True, timeout=timeout, check=True)
+            except subprocess.CalledProcessError:
+                if not tuned:
+                    raise
+                tuned = []  # an older PrusaSlicer without one of these options: its defaults, then
+                run = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=True)
         except subprocess.CalledProcessError as e:
             LAST_ERROR = ((e.stderr or "") + (e.stdout or "")).strip()[-400:]
             return None
@@ -132,10 +193,11 @@ def slice_numbers(path_3mf, material: str = "PETG", layer: float = 0.2, infill: 
         secs += int(n) * {"d": 86400, "h": 3600, "m": 60, "s": 1}[unit]
     return {"time": t.group(1).strip(), "hours": round(secs / 3600, 2), "grams": float(g.group(1)) if g else None,
             "filament_m": round(float(mm.group(1)) / 1000, 2) if mm else None,
-            "settings": f"PrusaSlicer defaults, {layer:g} mm layers, {infill}% infill, 2 perimeters, no supports, {material}"}
+            "settings": (f"PrusaSlicer with the speeds of the {SPEEDS[printer]['name']}" if tuned else "PrusaSlicer defaults")
+            + f", {layer:g} mm layers, {infill}% infill, 2 perimeters, no supports, {material}"}
 
 
-def write(items, folder, bed=(250.0, 210.0), material: str = "PETG", slice_it: bool = True) -> dict:
+def write(items, folder, bed=(250.0, 210.0), material: str = "PETG", slice_it: bool = True, printer: str | None = None) -> dict:
     folder = Path(folder)
     folder.mkdir(parents=True, exist_ok=True)
     r = make(items, bed)
@@ -145,7 +207,7 @@ def write(items, folder, bed=(250.0, 210.0), material: str = "PETG", slice_it: b
         export_3mf(p, path)
         files.append(str(path))
         if slice_it:
-            sliced.append(slice_numbers(path, material, bed=bed))
+            sliced.append(slice_numbers(path, material, bed=bed, printer=printer))
     out = {"files": files, "notes": r["notes"], "checks": r["checks"],
            "parts": [[n for n, _ in p] for p in r["plates"]]}
     if slice_it:

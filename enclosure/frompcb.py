@@ -142,7 +142,7 @@ def design(board_step, settings: Settings | None = None, specs: dict | None = No
     ix0, ix1 = bx0 - gap["-X"], bx1 + gap["+X"]
     iy0, iy1 = by0 - gap["-Y"], by1 + gap["+Y"]
     cx, cy = (ix0 + ix1) / 2, (iy0 + iy1) / 2
-    lip = 3.0 if s.lid in ("screw", "friction", "snap", "hinge") else 0.0
+    lip = 3.0 if s.lid in ("screw", "friction", "snap", "hinge", "living") else 0.0
     height = so_h + thick + tallest + s.headroom + lip
     L, W, H = round(ix1 - ix0, 2), round(iy1 - iy0, 2), round(height, 1)
     notes.insert(0, f"inside {L:g} x {W:g} x {H:g} mm: the board {bx1 - bx0:.1f} x {by1 - by0:.1f} mm, the tallest part "

@@ -43,9 +43,9 @@ SCREWS = {
     "M3": (3.4, 2.5, 4.0, 5.7, 5.5),
     "M4": (4.5, 3.4, 5.6, 8.1, 7.0),
 }
-LIDS = ("screw", "friction", "snap", "hinge", "slide", "none", "clamshell")
-TOP_LIDS = ("screw", "friction", "snap", "hinge", "clamshell")  # a lid across the top
-PLATE_LIDS = ("screw", "friction", "snap", "hinge")  # a plate on top of the walls, maybe with a lip
+LIDS = ("screw", "friction", "snap", "hinge", "living", "slide", "none", "clamshell")
+TOP_LIDS = ("screw", "friction", "snap", "hinge", "living", "clamshell")  # a lid across the top
+PLATE_LIDS = ("screw", "friction", "snap", "hinge", "living")  # a plate on top of the walls, maybe with a lip
 PIN_HOLE = {"M2": 2.2, "M2.5": 2.7, "M3": 3.2, "M4": 4.3}  # the board hole a pin goes through
 # Cells: (diameter, length) with a little room; AA and AAA are IEC 60086-2 maximums, 18650 and 21700
 # their names (18 x 65, 21 x 70 mm) plus room for protected cells. Check your cells.
@@ -180,6 +180,15 @@ class BoxSpec:
     # Dividers: walls splitting the inside into sections: [{axis: x (a wall across at X = at) or y,
     # at, thickness, height (blank: up to under the lid), span [from, to] along it, removable, notch (a cable gap)}]
     dividers: list[dict] = field(default_factory=list)
+    icons: bool = False  # symbols beside panel holes (USB, power, antenna...), from each cutout's preset
+    icon_style: str = "engraved"  # engraved or raised
+    two_color: bool = False  # labels and icons as separate bodies for a second filament (AMS)
+    fan_flow_cfm: float = 0.0  # a fan's airflow through the box, for the temperature estimate
+    lanyard: bool = False
+    belt_clip: bool = False
+    handle: bool = False
+    ground_lug: list[float] | None = None  # [x, y]: an M3 insert boss for a ground terminal
+    shielding: bool = False  # notes on copper-tape shielding
     wall_bracket: bool = False  # a French-cleat rail on the floor and a bracket for the wall (its own part)
     stacking: bool = False  # pins on the lid and sockets under the floor so boxes stack in line
 
@@ -528,6 +537,32 @@ def grid_dividers(spec: "BoxSpec", nx: int, ny: int, **kw) -> list[dict]:
     return out
 
 
+LIVING_T = 0.5  # the living hinge strip's thickness, mm
+
+
+def living_turn(spec: "BoxSpec"):
+    """The move that opens a living-hinge lid 90 degrees to stand on the back wall (its print position)."""
+    L, W, H = spec.inner
+    oW = W + 2 * spec.wall
+    top = spec.floor + H
+    pivot = (0, oW / 2, top + spec.lid_thickness)
+    return lambda shape: shape.rotate(Axis((0, pivot[1], pivot[2]), (1, 0, 0)), -90)
+
+
+def living_print_body(spec: "BoxSpec", base, lid):
+    """The box in one piece as it prints: the base upright, the lid standing on the back wall's top,
+    joined along the outside by a thin strip that bends when it shuts."""
+    L, W, H = spec.inner
+    oL, oW = L + 2 * spec.wall, W + 2 * spec.wall
+    top = spec.floor + H
+    t = spec.lid_thickness
+    turn = living_turn(spec)
+    opened = turn(lid)
+    strip_len = oL - 2 * spec.corner_radius - 2.0
+    strip = Box(strip_len, LIVING_T, t + 0.02, align=(Align.CENTER, Align.MAX, Align.MIN)).locate(Location((0, oW / 2, top - 0.01)))
+    return base + strip + opened, turn
+
+
 def build(spec: BoxSpec) -> dict:
     """The base and lid as solids, notes on what was made, and checks worth a look."""
     spec.check()
@@ -701,7 +736,7 @@ def build(spec: BoxSpec) -> dict:
                 lid -= Cylinder(c / 2, spec.lid_thickness * 3).locate(Location((x, y, top + spec.lid_thickness / 2)))
                 cb = spec.lid_thickness / 2  # counterbore the heads half the lid's thickness
                 lid -= Cylinder(head / 2 + 0.3, cb).locate(Location((x, y, top + spec.lid_thickness - cb / 2)))
-        if spec.lid in ("snap", "hinge") and spec.lip > 0:
+        if spec.lid in ("snap", "hinge", "living") and spec.lip > 0:
             rib, z_rib = 0.5, top - spec.lip + 1.0
             for sy in ((-1, 1) if spec.lid == "snap" else (-1,)):
                 lid += Box(L * 0.6, rib * 2, 1.0).locate(Location((0, sy * (W / 2 - lip_c), z_rib)))
@@ -890,6 +925,11 @@ def build(spec: BoxSpec) -> dict:
             pocket = Pos(inward[0] * (spec.wall + (spec.wall - pt)), inward[1] * (spec.wall + (spec.wall - pt)), 0) * pocket
             cut("base", pocket)
         notes.append(f"window on {face}: {w:g} x {h:g} mm opening, {pw:g} x {ph:g} x {pt:g} mm recess behind it for the panel")
+        if wdw.get("print_panel"):
+            c_ = spec.fit_clearance
+            divider_parts.append((f"window_panel_{len([1 for n, _ in divider_parts if n.startswith('window')]) + 1}",
+                                  Box(pw - 2 * c_, ph - 2 * c_, pt, align=(Align.CENTER, Align.CENTER, Align.MIN))))
+            notes.append("   its panel prints as its own part: use clear PETG or PC, 100% infill, and glue it in from inside")
 
     # Vents: slots filling an area, upright on walls, along Y on the lid or floor.
     for v in spec.vents:
@@ -953,29 +993,73 @@ def build(spec: BoxSpec) -> dict:
         base += din_clip(oL)
         notes.append("DIN rail clip (TS35, rail along X): hook on +Y, sprung latch on -Y; print a test first")
 
-    # Labels: raised (depth > 0) or recessed (depth < 0) text.
-    for t in spec.labels:
-        face = face_name(t["face"])
-        size, depth = t.get("size", 6.0), t.get("depth", -0.6)
-        a, b = t.get("at", [0, 0])
-        text = Text(t["text"], size, align=(Align.CENTER, Align.CENTER))
-        body = extrude(text, amount=abs(depth))
+    # Labels and icons: raised (depth > 0) or recessed (depth < 0). With two_color, each becomes its own
+    # body (an inlay filling the recess, or the raised mark) for a second filament.
+    inlays = []
+
+    def mark(body, face, a, b, depth, name, host_for_lid=True):
+        nonlocal base, lid
         if face == "lid":
             z = lid_top if depth > 0 else lid_top - abs(depth)
             placed = Pos(a, b, z) * body
-            lid = lid + placed if depth > 0 else lid - placed
+            if depth > 0:
+                lid = lid + placed if not spec.two_color else lid
+            else:
+                lid = lid - placed
+            host = "lid"
         else:
             # Upright on the wall, reading from outside; the extrusion points out of the wall.
             turn = {"-Y": 0, "+Y": 180, "-X": -90, "+X": 90}[face]
             out = {"-Y": (0, -1), "+Y": (0, 1), "-X": (-1, 0), "+X": (1, 0)}[face]
             right = {"-Y": (1, 0), "+Y": (-1, 0), "-X": (0, -1), "+X": (0, 1)}[face]
             half = (oL / 2) if face in ("-X", "+X") else (oW / 2)
-            inset = 0.0 if depth > 0 else -abs(depth)  # recessed text starts inside the wall
+            inset = 0.0 if depth > 0 else -abs(depth)  # recessed marks start inside the wall
             x = out[0] * (half + inset) + right[0] * a
             y = out[1] * (half + inset) + right[1] * a
             placed = Pos(x, y, spec.floor + b) * (Rot(0, 0, turn) * (Rot(90, 0, 0) * body))
-            base = base + placed if depth > 0 else base - placed
+            if depth > 0:
+                base = base + placed if not spec.two_color else base
+            else:
+                base = base - placed
+            host = "base"
+        if spec.two_color:
+            inlays.append((name, placed, host))
+
+    for i, t in enumerate(spec.labels):
+        face = face_name(t["face"])
+        size, depth = t.get("size", 6.0), t.get("depth", -0.6)
+        a, b = t.get("at", [0, 0])
+        mark(extrude(Text(t["text"], size, align=(Align.CENTER, Align.CENTER)), amount=abs(depth)), face, a, b, depth, f"label_{i + 1}")
         notes.append(f"label {t['text']!r} on {face}, {'raised' if depth > 0 else 'recessed'} {abs(depth):g} mm")
+
+    if spec.icons:
+        from .icons import icon_for, icon_shape
+        n_icons = 0
+        for raw in spec.cutouts:
+            c = Cutout(**resolve(raw))
+            name = raw.get("icon") or icon_for(c.preset)
+            if not name or name == "none":
+                continue
+            size = 6.0
+            depth = -0.6 if spec.icon_style == "engraved" else 0.6
+            hole_h = c.size[1] if c.shape == "rect" else c.size[0]
+            if c.face in ("lid", "floor"):
+                if c.face == "floor":
+                    continue
+                a, b = c.at[0], c.at[1] + hole_h / 2 + size / 2 + 2.5
+            else:
+                along, height = c.at
+                b = height + hole_h / 2 + size / 2 + 2.5
+                if spec.floor + b + size / 2 > base_h - (spec.lip if spec.lid in PLATE_LIDS else 0) - 1:
+                    b = height - hole_h / 2 - size / 2 - 2.5  # no room above: below it
+                a = along * {"-Y": 1, "+Y": -1, "-X": -1, "+X": 1}[c.face]
+            mark(extrude(icon_shape(name, size), amount=abs(depth)), c.face, a, b, depth, f"icon_{name}_{n_icons + 1}")
+            n_icons += 1
+        if n_icons:
+            notes.append(f"{n_icons} icon{'s' if n_icons > 1 else ''} beside the holes, {spec.icon_style} 0.6 mm")
+    if spec.two_color and inlays:
+        notes.append(f"two colours: {len(inlays)} label/icon bod{'ies' if len(inlays) != 1 else 'y'} {'are' if len(inlays) != 1 else 'is'} separate in the 3MF; give them the second filament "
+                     "(in Bambu Studio, select them and pick the filament)")
 
     # Posts under the lid, for a display or button board mounted behind it.
     if spec.lid_standoffs and lid is not None:
@@ -1122,8 +1206,13 @@ def build(spec: BoxSpec) -> dict:
                 vent_area += n * slot * h / 1e6
             zs.append(v.get("at", [0, 0])[1] if face_name(v["face"]) in WALLS else (base_h if face_name(v["face"]) == "lid" else 0.0))
         stack = max((max(zs) - min(zs)) / 1000, base_h / 2000) if zs else 0.0
+        fans = [c for c in spec.cutouts if str(c.get("preset", "")).startswith("fan-")]
+        forced = spec.fan_flow_cfm * 0.000471947 if fans and spec.fan_flow_cfm > 0 else 0.0  # m3/s
+
         def removed(dt):
             air = 0.0
+            if forced:
+                return hcoef * area * dt + 1.2 * 1005 * forced * dt
             if vent_area > 0:
                 q = 0.6 * (vent_area / 2) * math.sqrt(max(2 * 9.81 * stack * dt / 300.0, 0.0))
                 air = 1.2 * 1005 * q * dt
@@ -1137,12 +1226,91 @@ def build(spec: BoxSpec) -> dict:
         thermal = {"power_w": spec.power_w, "rise_c": dt, "sealed_rise_c": sealed, "vent_area_mm2": round(vent_area * 1e6),
                    "note": "rough: still air, even heat; a hot part runs hotter than the air inside"}
         notes.append(f"{spec.power_w:g} W inside: the air inside runs about {dt:g} °C above the room"
-                     + (f" ({sealed:g} °C if it were sealed)" if vent_area else " (no vents)"))
+                     + (f" with the fan moving {spec.fan_flow_cfm:g} CFM" if forced else "")
+                     + (f" ({sealed:g} °C if it were sealed)" if vent_area or forced else " (no vents)"))
+        thermal["fan_cfm"] = spec.fan_flow_cfm if forced else 0
         if dt > 15:
             checks.append(f"about {dt:g} °C above the room with {spec.power_w:g} W: add vents low and high (a chimney), "
                           f"make the box bigger, or move heat out through a metal panel")
 
+    # Fan layout: air should come in on one side and leave across the box, not short-circuit.
+    fans = [c for c in spec.cutouts if str(c.get("preset", "")).startswith("fan-")]
+    if fans:
+        opposite = {"-X": "+X", "+X": "-X", "-Y": "+Y", "+Y": "-Y", "lid": "floor", "floor": "lid"}
+        outlets = [face_name(v["face"]) for v in spec.vents] + [face_name(c["face"]) for c in spec.cutouts
+                                                                  if not str(c.get("preset", "")).startswith("fan-")
+                                                                  and "screw hole" not in str(c.get("source", ""))]
+        for f_ in fans:
+            fa = face_name(f_["face"])
+            if not outlets:
+                checks.append(f"the fan on {fa} has nowhere for the air to go: add vents, ideally on {opposite[fa]}")
+            elif opposite[fa] not in outlets:
+                checks.append(f"the fan on {fa} has no vents across from it ({opposite[fa]}): the air takes the short way out and "
+                              "misses most of the board")
+            else:
+                notes.append(f"fan on {fa}, vents on {opposite[fa]}: air crosses the box")
+        if spec.power_w > 0 and spec.fan_flow_cfm <= 0:
+            checks.append("give the fan's airflow (fan_flow_cfm, from its datasheet; about a third of it is realistic "
+                          "against vents and a board) to count it in the temperature estimate")
+
     extras = list(divider_parts)  # other printed parts: dividers, a battery door, clamp bars, a wall bracket
+
+    # Handheld: a lanyard loop on the -X wall near the top, a belt clip and a handle (their own parts).
+    if spec.lanyard:
+        lz = base_h - 8.0
+        # Near a corner of the -X wall, else the +X wall: where the wall behind it is whole.
+        for sx, yy in ((-1, W / 2 - 8), (-1, -W / 2 + 8), (1, W / 2 - 8), (1, -W / 2 + 8)):
+            tab = Box(6.4, 10.0, 9.0).locate(Location((sx * (oL / 2 + 3.0 - 0.2), yy, lz)))
+            tab -= Pos(sx * (oL / 2 + 3.0), yy, lz) * Cylinder(1.75, 12, rotation=(90, 0, 0))
+            trial = base + tab
+            if len(trial.solids()) == len(base.solids()):
+                base = trial
+                notes.append(f"lanyard loop on the {'+' if sx > 0 else '-'}X wall: a Ø3.5 mm hole for the cord")
+                break
+        else:
+            checks.append("lanyard loop: no solid wall near the top corners to put it on")
+    if spec.belt_clip:
+        cw, cl = min(30.0, W * 0.6), min(60.0, L * 0.8)
+        m_ = "M3"
+        for sx in (-1, 1):
+            base -= Pos(sx * cl / 4, 0, 0) * Cylinder(SCREWS[m_][0] / 2, spec.floor * 3)
+        clip = Box(cl, cw, 2.5, align=(Align.CENTER, Align.CENTER, Align.MIN))  # the pad on the floor
+        for sx in (-1, 1):
+            clip -= Pos(sx * cl / 4, 0, 0) * Cylinder(SCREWS[m_][0] / 2, 10)
+        tongue_l = cl * 0.9
+        clip += Pos(-cl / 2 + 6, 0, 0) * Box(6, cw, 6.5, align=(Align.MAX, Align.CENTER, Align.MIN))  # the spine
+        clip += Pos(-cl / 2, 0, 4.5) * Box(tongue_l, cw, 2.2, align=(Align.MIN, Align.CENTER, Align.MIN))  # the tongue
+        clip += Pos(-cl / 2 + tongue_l - 3, 0, 4.5) * Box(3, cw, 1.2, align=(Align.MIN, Align.CENTER, Align.MAX))  # a bump
+        extras.append(("belt_clip", clip))
+        notes.append(f"belt clip: its own part, two M3 screws through the floor {cl / 2:g} mm apart (nuts inside); print it on its side")
+    if spec.handle:
+        hl = min(L * 0.6, 120.0)
+        m_ = "M3"
+        handle = Box(hl, 12, 4, align=(Align.CENTER, Align.CENTER, Align.MIN)).locate(Location((0, 0, 22)))
+        for sx in (-1, 1):
+            handle += Box(10, 12, 26, align=(Align.CENTER, Align.CENTER, Align.MIN)).locate(Location((sx * (hl / 2 - 5), 0, 0)))
+            handle -= Pos(sx * (hl / 2 - 5), 0, 0) * Cylinder(SCREWS[m_][1] / 2, 16, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            if lid is not None:
+                lid -= Pos(sx * (hl / 2 - 5), 0, top) * Cylinder(SCREWS[m_][0] / 2, 40)
+        extras.append(("handle", Rot(90, 0, 0) * handle))
+        notes.append(f"handle: its own part, two M3 screws up through the lid into it, {hl - 10:g} mm apart; print it on its side")
+
+    # Grounding: a boss for a ground lug, and where copper tape would shield the inside.
+    if spec.ground_lug:
+        gx, gy = spec.ground_lug
+        m_ = "M3"
+        d_ins, dep = spec.hole(m_, "insert")
+        base += Pos(gx, gy, spec.floor) * Cylinder(d_ins / 2 + 2.2, 6.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        base -= Pos(gx, gy, spec.floor + 6.0 - dep) * Cylinder(d_ins / 2, dep + 0.01, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        notes.append(f"ground lug boss at ({gx:g}, {gy:g}): an M3 insert for a ring terminal with a star washer; run the "
+                     "earth and any shield tape to it")
+    if spec.shielding:
+        inside = 2 * (L + W) * H + L * W + (L * W if lid is not None else 0)
+        notes.append(f"shielding: about {inside / 100:.0f} cm² of inside surface to cover with copper tape (conductive adhesive), "
+                     "overlapped 5 mm at the seams; carry it over the lid's lip or use gasket fingers so the lid touches it; "
+                     "bond it to the ground lug. Holes bigger than about 1/20 of the wavelength you care about leak "
+                     "(15 mm at 1 GHz)")
+
 
     # Battery door: an opening in the floor, a rebate round it for a flush door, two screw bosses inside.
     if spec.battery_door:
@@ -1246,12 +1414,20 @@ def build(spec: BoxSpec) -> dict:
                 "volume_cm3": round(vol / 1000, 1)}
     notes.append(f"about {grams:.0f} g of {spec.material} and {hours:.1f} h to print (solid; rough, a slicer knows better)")
 
+    print_body = None
+    if spec.lid == "living":
+        print_body, lid_turn = living_print_body(spec, base, lid)
+        notes.append(f"living hinge: the lid is printed standing up off the back wall, joined by a {LIVING_T:g} mm strip "
+                     f"along the +Y edge; print in PETG or PP, and flex it open and shut a few times while it is still warm. "
+                     "The snap rib on -Y holds it shut")
+        if spec.material == "PLA":
+            checks.append("living hinge in PLA: PLA cracks after a few bends; use PETG, PP or nylon")
     screws = screw_plan(spec)
     checks += screws.pop("checks")
     for role, row in screws.items():
         notes.append(f"{role} screws: {row['screw']}x{row['length']:g} ({'your length' if getattr(spec, role + '_screw_length') else 'stock length'}), "
                      f"{row['engaged']:g} mm of thread {'in the nut' if row['kind'] == 'clearance' else 'in the ' + ('insert' if row['kind'] == 'insert' else 'plastic')}")
-    return {"base": base, "lid": lid, "extras": extras, "notes": notes, "checks": checks, "estimate": estimate, "screws": screws,
+    return {"base": base, "lid": lid, "print_body": print_body, "extras": extras, "inlays": inlays, "notes": notes, "checks": checks, "estimate": estimate, "screws": screws,
             "supports": placed, "print_plan": print_plan, "thermal": thermal,
             "inner": [round(v, 3) for v in spec.inner], "outer": [round(v, 3) for v in spec.outer]}
 
@@ -1357,6 +1533,12 @@ def write(spec: BoxSpec, folder: str | Path, stl: bool = True, formats=("step",)
                 flipped = Rot(180, 0, 0) * lid
                 export_stl(Pos(0, 0, -flipped.bounding_box().min.Z) * flipped, str(folder / "lid.stl"))
                 files["lid_stl"] = str(folder / "lid.stl")
+            if made.get("print_body") is not None:
+                export_stl(made["print_body"], str(folder / "box_one_piece.stl"))
+                files["one_piece_stl"] = str(folder / "box_one_piece.stl")
+            if made.get("inlays"):
+                export_stl(Compound(children=[sh for _, sh, _ in made["inlays"]]), str(folder / "second_colour.stl"))
+                files["second_colour_stl"] = str(folder / "second_colour.stl")
             for name, part in made.get("extras") or []:
                 export_stl(part, str(folder / f"{name}.stl"))
                 files[f"{name}_stl"] = str(folder / f"{name}.stl")

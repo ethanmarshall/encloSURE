@@ -72,3 +72,19 @@ def price(bom: list[dict], estimate: dict | None, filament_per_kg: float = FILAM
     return {"rows": rows, "plastic": plastic, "filament_per_kg": filament_per_kg, "total": round(total, 2),
             "currency": "USD", "notes": notes,
             "caveat": "DigiKey's first in-stock match for each line, at single-unit price: check each before ordering"}
+
+
+def digikey_csv(cost: dict, project: str = "EncloSURE") -> str:
+    """The bought parts as a CSV for DigiKey's BOM Manager or cart upload: quantity, manufacturer part
+    number (when DigiKey found one), description and your reference."""
+    import csv
+    import io
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["Quantity", "Manufacturer Part Number", "Manufacturer", "Description", "Customer Reference"])
+    for r in cost.get("rows", []):
+        if r.get("make") != "buy" or r["item"] in ("PCB",):
+            continue
+        w.writerow([r["qty"], r.get("mpn", ""), r.get("manufacturer", ""), r.get("description") or r.get("searched") or r["item"],
+                    f"{project}: {r['item']}"[:48]])
+    return buf.getvalue()

@@ -27,7 +27,7 @@ def _mm(v: float) -> str:
 
 def unsupported(spec: BoxSpec) -> list[str]:
     out = []
-    if spec.lid in ("snap", "hinge", "slide"):
+    if spec.lid in ("snap", "hinge", "living", "slide"):
         out.append(f"{spec.lid} lid (the feature makes a friction lid)")
     if spec.lid == "clamshell":
         out.append("clamshell (the feature makes a screw lid)")
@@ -57,7 +57,7 @@ def feature_studio(spec: BoxSpec) -> tuple[str, list[str]]:
     """The Feature Studio text, and the settings it leaves out."""
     spec.check()
     L, W, H = spec.inner
-    lid = {"screw": "SCREW", "friction": "FRICTION", "snap": "FRICTION", "hinge": "FRICTION", "slide": "NONE", "none": "NONE",
+    lid = {"screw": "SCREW", "friction": "FRICTION", "snap": "FRICTION", "hinge": "FRICTION", "living": "FRICTION", "slide": "NONE", "none": "NONE",
            "clamshell": "SCREW"}[spec.lid]
     d_post, depth_post = spec.hole(spec.lid_screw, spec.lid_screw_hole)
     clear, _, _, _, head = SCREWS[spec.lid_screw]
@@ -165,7 +165,7 @@ def extras(spec: BoxSpec) -> str:
             out.append(f"        block(context, {nid()}, base, {c0}, {c1}, true);")
     if spec.card_slots:
         gap = spec.board_thickness + 2 * spec.fit_clearance
-        stop = f"top - {m(spec.lip + spec.fit_clearance + 0.5)}" if spec.lid in ("screw", "friction", "snap", "hinge") else "top"
+        stop = f"top - {m(spec.lip + spec.fit_clearance + 0.5)}" if spec.lid in ("screw", "friction", "snap", "hinge", "living") else "top"
         out.append(f"        // Card guides for a {spec.board_thickness:g} mm board")
         for x in spec.card_slots:
             for sx in (-1, 1):

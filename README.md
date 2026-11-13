@@ -306,11 +306,26 @@ The Quick box tab's "Made another way" makes the same inside size and holes as:
 
 - **Bent sheet metal**: a base (floor, end walls, side lips) and a cover (top and sides) that screws
   to the lips, as flat pattern DXFs with bend lines (layer BEND) and a formed STEP. Flat lengths use
-  the bend allowance BA = (pi/2)(R + K t) per bend; check your shop's K-factor or bend table.
+  the bend allowance BA = (pi/2)(R + K t) per bend; check your shop's K-factor or bend table. It is
+  checked against RMFG's published rules (flat size, stocked thicknesses, flange length, U-channel
+  proportions, holes 2 x thickness + bend radius from bends, small holes, tapping, powder coat), and
+  the lip screws are placed to pass them.
 - **Laser-cut panels**: six panels with finger joints from one DXF, outlines grown by half the kerf.
 - **A moulding check**: draft on faces along the pull, even walls, boss and rib thickness against the
   wall, inside corner radii, the wall range for the resin (Protolabs' table), and openings that need
   side actions in the mould.
+
+## Other shapes
+
+The Other shapes tab makes a round box with a screw-on cap (a coarse printed thread, standoffs on a
+circle, side and cap holes), and a box shaped to any closed outline you draw and export as DXF
+(circles inside it become standoffs).
+
+## Guide
+
+The Guide tab collects the rules of thumb for drawing a box yourself in Onshape or SolidWorks: walls,
+fits, lids, screws and inserts, holding the board, openings, printability, snap fits, heat, sealing,
+assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
 
 ## More on the box
 
@@ -328,6 +343,20 @@ The Quick box tab's "Made another way" makes the same inside size and holes as:
 - **Stacking**: pins on the lid and sockets under the floor.
 - **Getting the board in**: the fit check lowers the board in from above and says whether anything
   stands over it, and whether connectors reaching into wall openings need the board slid or tilted in.
+- **Look**: icons beside panel holes (USB, power, antenna, fan, DC, fuse, LAN, I/O), engraved or
+  raised; with two colours on, labels and icons are their own bodies in the 3MF for the AMS. Window
+  panels can print as their own part in clear filament.
+- **Living hinge lid**: the box prints in one piece, the lid standing on the back wall.
+- **Handheld**: a lanyard loop, a belt clip and a handle (the last two their own parts).
+- **Grounding**: an M3 insert boss for a ground lug, and shielding notes for copper tape.
+- **Fans**: the fan's airflow counts in the temperature estimate, and the report checks for vents
+  across from it.
+- **IP rating guide**: the best IP code the openings and seal allow, and what holds it back.
+- **Cost comparison**: printed vs sheet metal vs laser-cut at 1, 10 and 50, with your own rates.
+- **Front panel artwork** (1:1 SVG per face), **a DigiKey CSV** of the parts to buy, and **the board
+  outline and holes copied for KiCad** (paste into the PCB editor).
+- **Print times per printer**: the Bambu Lab H3C and X1 slice with the speeds from Bambu Studio's own
+  profiles; others use PrusaSlicer's defaults.
 - **Parts in the team library** next to boxes, and **parts to Onshape** (imported as a Part Studio).
 
 ## A box you bought

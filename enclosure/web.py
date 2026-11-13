@@ -122,7 +122,8 @@ def spec_from(body: dict) -> boxmod.BoxSpec:
     spec.labels = [_label(t) for t in _items(body.get("labels"))]
     spec.windows = [{"face": boxmod.face_name(str(w.get("face", ""))), "size": [_num(v, "window size") for v in w.get("size", [])],
                      "at": [_num(v, "window position") for v in w.get("at", [0, 0])],
-                     "panel": [_num(v, "panel size") for v in w.get("panel", [])], "panel_t": _num(w.get("panel_t", 1.0), "panel thickness")}
+                     "panel": [_num(v, "panel size") for v in w.get("panel", [])], "panel_t": _num(w.get("panel_t", 1.0), "panel thickness"),
+                     "print_panel": bool(w.get("print_panel"))}
                     for w in body.get("windows") or []]
     spec.card_slots = [_num(x, "card slot") for x in body.get("card_slots") or []]
     if max(spec.size) > MAX_SIDE:
@@ -278,7 +279,8 @@ def print_plate(body: dict):
     try:
         with _PART_LOCK, tempfile.TemporaryDirectory() as d:
             items, bed = _plate_items(body), _bed(body)
-            r = plate.write(items, Path(d), bed, str(body.get("material") or "PETG"))
+            r = plate.write(items, Path(d), bed, str(body.get("material") or "PETG"),
+                            printer=body.get("bed") if isinstance(body.get("bed"), str) else None)
             from build123d import Compound
             laid = plate.make(items, bed)["plates"]
             meshes = [base64.b64encode(_stl(Compound(children=[s for _, s in p]))).decode() for p in laid]
@@ -315,11 +317,11 @@ def sheet_metal(body: dict):
         o = body.get("sheet") or {}
         sheet = sheetmetal.Sheet(size=list(spec.inner), thickness=_num(o.get("thickness", 1.5), "thickness"),
                                  bend_radius=_num(o["bend_radius"], "bend radius") if o.get("bend_radius") not in (None, "") else None,
-                                 material=str(o.get("material", "aluminium 5052")), lip=_num(o.get("lip", 10.0), "lip"),
+                                 material=str(o.get("material", "aluminium 5052")), lip=_num(o.get("lip", 0.0), "lip"),
                                  screw=str(o.get("screw", "M3")), cutouts=_cutouts_of(spec))
         if body.get("preview"):
             made = sheetmetal.formed(sheet)
-            return {"notes": sheetmetal.notes_for(sheet), "grams": made["grams"],
+            return {"notes": sheetmetal.notes_for(sheet), "grams": made["grams"], "rmfg": sheetmetal.rmfg_check(sheet),
                     "base": base64.b64encode(_stl(made["base"])).decode(), "lid": base64.b64encode(_stl(made["cover"])).decode()}
         with tempfile.TemporaryDirectory() as d:
             sheetmetal.write(sheet, Path(d) / "sheet")
@@ -363,6 +365,104 @@ def moulding_check(body: dict):
         _bad(e)
 
 
+@app.post("/api/digikey_csv")
+def digikey_list(body: dict):
+    """The parts to buy as a CSV to upload to DigiKey (BOM Manager, or the cart's upload)."""
+    from . import costing
+    try:
+        _, cost = _costed(spec_from(body), body)
+        text = costing.digikey_csv(cost, str((body.get("title") or {}).get("title") or "EncloSURE"))
+        return Response(text, media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="digikey_parts.csv"'})
+    except (ValueError, RuntimeError) as e:
+        _bad(e)
+
+
+@app.post("/api/compare")
+def price_compare(body: dict):
+    """Printed vs sheet metal vs laser-cut: rough cost at a few quantities, with your rates."""
+    from . import compare
+    try:
+        spec = spec_from(body.get("box") or {})
+        rates = compare.Rates(**{k: _num(v, k) for k, v in (body.get("rates") or {}).items() if k in compare.Rates.__dataclass_fields__})
+        made, _ = _costed(spec, {"slice": body.get("slice")})
+        return compare.compare(spec, made, rates, made.get("estimate") if made.get("estimate", {}).get("source") else None)
+    except (ValueError, RuntimeError, TypeError) as e:
+        _bad(e)
+
+
+@app.post("/api/panels")
+def panel_art(body: dict):
+    """Each face's artwork as 1:1 SVG: outline, holes, vents, windows, labels."""
+    from . import panels
+    try:
+        spec = spec_from(body)
+        with tempfile.TemporaryDirectory() as d:
+            panels.write(spec, Path(d) / "panels")
+            return _zip(Path(d) / "panels", "panel_artwork")
+    except (ValueError, RuntimeError) as e:
+        _bad(e)
+
+
+@app.post("/api/kicad_paste")
+def kicad_paste(body: dict):
+    """The board outline, mounting holes and keep-outs as text to paste into KiCad's PCB editor."""
+    from . import kicad, shell
+    try:
+        spec = spec_from(body)
+        made = boxmod.build(spec)
+        enc, _ = shell.read(made["base"], made["lid"])
+        with tempfile.TemporaryDirectory() as d:
+            kicad.limits(enc, Path(d) / "limits.kicad_pcb", base=made["base"])
+            return {"text": (Path(d) / "limits.kicad_pcb").read_text()}
+    except (ValueError, RuntimeError) as e:
+        _bad(e)
+
+
+@app.post("/api/roundbox")
+def round_box(body: dict):
+    """A round box with a screw-on cap: preview, or STEP and STL."""
+    from . import roundbox
+    try:
+        fields_ = roundbox.Round.__dataclass_fields__
+        r = roundbox.Round(**{k: v for k, v in (body.get("round") or {}).items() if k in fields_})
+        with _PART_LOCK:
+            if body.get("preview"):
+                m = roundbox.build(r)
+                return {"notes": m["notes"], "base": base64.b64encode(_stl(m["base"])).decode(),
+                        "lid": base64.b64encode(_stl(m["lid"])).decode(),
+                        "inner": [r.inside_d, r.inside_d, r.height], "outer": [m["outside_d"], m["outside_d"], m["outside_h"]]}
+            with tempfile.TemporaryDirectory() as d:
+                roundbox.write(r, Path(d) / "round")
+                return _zip(Path(d) / "round", "round_box")
+    except (ValueError, RuntimeError, TypeError) as e:
+        _bad(e)
+
+
+@app.post("/api/outline")
+async def outline_box(dxf: UploadFile = File(...), height: float = Form(30.0), wall: float = Form(2.0),
+                      floor: float = Form(2.0), lip: float = Form(3.0), standoff_height: float = Form(5.0),
+                      preview: bool = Form(False)):
+    """A box shaped to the closed outline in a DXF (circles inside it become standoffs)."""
+    from . import outline
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            path = await _save(dxf, d / "outline.dxf")
+            o = outline.Outline(height=height, wall=wall, floor=floor, lip=lip, standoff_height=standoff_height)
+            if not (5 <= height <= MAX_SIDE and 1 <= wall <= 10):
+                raise ValueError("height 5 mm or more, wall 1 to 10 mm")
+            if preview:
+                pts, circles = outline.read_dxf(path)
+                m = outline.build(pts, circles, o)
+                bb = m["base"].bounding_box()
+                return {"notes": m["notes"], "base": base64.b64encode(_stl(m["base"])).decode(),
+                        "lid": base64.b64encode(_stl(m["lid"])).decode(), "outer": [round(bb.size.X, 2), round(bb.size.Y, 2), round(bb.size.Z + o.lid_thickness, 2)]}
+            outline.write(path, d / "outline_box", o)
+            return _zip(d / "outline_box", "outline_box")
+    except (ValueError, RuntimeError, OSError) as e:
+        _bad(e)
+
+
 @app.post("/api/preview")
 def preview(body: dict):
     try:
@@ -378,6 +478,10 @@ def preview(body: dict):
     if made.get("extras"):
         out["extras"] = [{"name": n, "mesh": base64.b64encode(_stl(e)).decode()} for n, e in made["extras"]]
     out["screws"] = made.get("screws")
+    from . import ratings
+    out["ip"] = ratings.ip_guide(spec)
+    if made.get("inlays"):
+        out["inlays"] = [{"name": n, "mesh": base64.b64encode(_stl(sh)).decode()} for n, sh, _ in made["inlays"]]
     if body.get("format") in ("onshape", "both"):
         from .onshape import unsupported
         skipped = unsupported(spec)

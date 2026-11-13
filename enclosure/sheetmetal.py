@@ -30,7 +30,7 @@ class Sheet:
     bend_radius: float | None = None  # inside radius; None = the thickness
     material: str = "aluminium 5052"
     k_factor: float | None = None
-    lip: float = 10.0  # the base's lips the cover screws into
+    lip: float = 0.0  # the base's lips the cover screws into; 0: as short as clears the bend for its screws
     screw: str = "M3"
     screws_per_side: int = 2
     cutouts: list[dict] = field(default_factory=list)  # as the printed box: face, shape, size, at (or preset)
@@ -44,9 +44,14 @@ class Sheet:
             raise ValueError(f"material: one of {', '.join(MATERIALS)}")
         if self.screw not in SCREW_TAP:
             raise ValueError(f"screw: one of {', '.join(SCREW_TAP)}")
-        r = self.R
-        if self.lip < r + self.thickness + 6:
-            raise ValueError(f"lip: at least {r + self.thickness + 6:g} mm, so a screw clears the bend")
+        if self.lip <= 0:
+            self.lip = 0.0
+            need = _screw_z(self) + SCREW_CLEAR[self.screw] / 2 + 1.5
+            self.lip = max(10.0, math.ceil(need * 2) / 2)
+            return
+        need = _screw_z(self) + SCREW_CLEAR[self.screw] / 2 + 1.5
+        if self.lip < need:
+            raise ValueError(f"lip: at least {need:.1f} mm, so its screw holes sit clear of the bend")
 
     @property
     def R(self):
@@ -64,6 +69,14 @@ class Sheet:
 def _leg(sheet: Sheet, outside: float) -> float:
     """Flat length of a leg measured to the outside: what's left past the bend."""
     return outside - (sheet.R + sheet.thickness)
+
+
+def _screw_z(sheet: "Sheet") -> float:
+    """The lip screws' height: far enough from the bend that the hole's edge is 2 x thickness + bend
+    radius from the bend line (RMFG's rule, and a good one anywhere), or mid-lip if that's higher."""
+    t, R, BA = sheet.thickness, sheet.R, sheet.BA
+    r = SCREW_CLEAR[sheet.screw] / 2
+    return max(sheet.lip / 2, 2 * t + R + r + (R + t) - BA / 2 + 0.3)
 
 
 def flats(sheet: Sheet) -> dict:
@@ -87,7 +100,7 @@ def flats(sheet: Sheet) -> dict:
     out["cover"] = {"core": ccore, "flaps": {"+y": (side_leg, ccore[0]), "-y": (side_leg, ccore[0])}}
     # Screws: through the cover's sides into the lips, halfway up the lip.
     xs = [(-0.5 + (i + 0.5) / sheet.screws_per_side) * (L * 0.8) for i in range(sheet.screws_per_side)]
-    z_screw = max(sheet.lip / 2, rt + 3.0)  # clear of the bend
+    z_screw = _screw_z(sheet)
     out["screws"] = {"x": xs, "z": z_screw}
     return out
 
@@ -191,6 +204,89 @@ def _holes(sheet: Sheet, which: str) -> list[dict]:
     return out
 
 
+# RMFG's published limits (rmfg.com/docs: services/laser-cutting, services/bending, services/countersinking,
+# services/powder-coating, shipping), in inches as they give them.
+RMFG = {
+    "max_flat": (60.0, 47.5), "laser_tol": 0.005, "bend_tol_per_line": 0.015, "angle_tol": 1.0, "max_bend_len": 60.0,
+    "thickness": {"aluminium 5052": (0.032, 0.25), "steel (CRS)": (0.036, 0.135), "stainless 304": (0.031, 0.25)},
+    "powder_min": {"aluminium 5052": 0.080, "steel (CRS)": 0.060, "stainless 304": 0.060},
+    "taps": ("M2", "M2.5", "M3", "M4", "M5", "M6", "M8", "M10", "M12"),
+    "ship_box": (48.0, 30.0),
+}
+IN = 25.4
+
+
+def rmfg_check(sheet: Sheet) -> list[dict]:
+    """The design against RMFG's published sheet metal rules: what blocks a quote (error), what they
+    flag (warning), and what to know (info)."""
+    out = []
+
+    def add(sev, rule, msg):
+        out.append({"severity": sev, "rule": rule, "message": msg})
+
+    t, R = sheet.thickness, sheet.R
+    L, W, H = sheet.size
+    f = flats(sheet)
+    lo, hi = RMFG["thickness"][sheet.material]
+    if not lo * IN - 0.01 <= t <= hi * IN + 0.01:
+        add("error", "material", f"RMFG stocks {sheet.material} from {lo}\" to {hi}\" ({lo * IN:.2f} to {hi * IN:.2f} mm); "
+                                 f"{t:g} mm is outside that")
+    # Flat blank size.
+    for k in ("base", "cover"):
+        core, flaps = f[k]["core"], f[k]["flaps"]
+        fx = core[0] + sum(sheet.BA + v[0] for e, v in flaps.items() if "x" in e)
+        fy = core[1] + sum(sheet.BA + v[0] for e, v in flaps.items() if "y" in e)
+        a, b = sorted((fx / IN, fy / IN), reverse=True)
+        if a > RMFG["max_flat"][0] or b > RMFG["max_flat"][1]:
+            add("error", "flat size", f"the {k}'s flat blank is {fx:.0f} x {fy:.0f} mm, over RMFG's 60\" x 47.5\" maximum")
+    # Minimum flange: a fallback of 4 x thickness (the real minimum is the V-die opening / 2 plus its shoulder radius).
+    for k, legs in (("base", [("end walls", t + H), ("lips", sheet.lip)]), ("cover", [("sides", 2 * t + H)])):
+        for name, leg in legs:
+            if leg < 4 * t:
+                add("error", "flange length", f"the {k}'s {name} are {leg:.1f} mm, under 4 x thickness ({4 * t:.1f} mm), "
+                                              "RMFG's fallback minimum flange")
+    # U-channels: RMFG wants the base at least 3 x the flange height so the part clears the tooling.
+    for k, base_w, flange, what in (("base", L + 2 * t, t + H, "floor between the end walls"),
+                                    ("cover", W + 2 * t, 2 * t + H, "top between the sides")):
+        if base_w < 3 * flange:
+            add("warning", "U-channel", f"the {k} is a U with its {what} {base_w:.0f} mm across but flanges {flange:.0f} mm tall: RMFG "
+                                       f"asks for the base to be at least 3 x the flange ({3 * flange:.0f} mm). Make the box lower, "
+                                       "or build it from two L-shaped pieces, or check with RMFG for this part")
+    # Features near bends: at least 2 x thickness + bend radius from a bend line.
+    need = 2 * t + R
+    for k in ("base", "cover"):
+        core, flaps = f[k]["core"], f[k]["flaps"]
+        for hole in _holes(sheet, k):
+            x, y = hole["at"]
+            r = (hole["size"][0] / 2) if hole["shape"] == "round" else max(hole["size"]) / 2
+            for e in flaps:
+                line = (core[0] if "x" in e else core[1]) / 2 + sheet.BA / 2
+                pos = abs(x) if "x" in e else abs(y)
+                same_side = (x if "x" in e else y) * (1 if e.startswith("+") else -1) > 0
+                if same_side and abs(pos - line) - r < need - 1e-6:
+                    add("error", "hole near a bend", f"{hole['what']} on the {k} is {max(abs(pos - line) - r, 0):.1f} mm from a bend "
+                                                     f"line; RMFG needs {need:.1f} mm (2 x thickness + bend radius), and blocks the "
+                                                     "order otherwise")
+        # Smallest holes.
+        for hole in _holes(sheet, k):
+            m = min(hole["size"]) if hole["shape"] == "rect" else hole["size"][0]
+            if m < 0.5 * t:
+                add("warning", "small hole", f"{hole['what']} is {m:g} mm, under half the thickness: RMFG flags it (rough or undersize)")
+            elif m < 1.5 * t:
+                add("info", "small hole", f"{hole['what']} is {m:g} mm: RMFG cuts it, but 1.5 x thickness ({1.5 * t:g} mm) or more cuts best")
+    if sheet.screw in RMFG["taps"]:
+        add("info", "tapping", f"RMFG can tap the lips' {sheet.screw} holes for you (M2 to M12), instead of thread-forming screws; "
+                               "taps, PEM nuts and countersinks can't sit inside a bend")
+    pmin = RMFG["powder_min"][sheet.material]
+    add("info", "powder coat", f"for powder coating: {sheet.material} at least {pmin}\" ({pmin * IN:.2f} mm)"
+                               + (" (this part is thinner)" if t < pmin * IN - 0.01 else "") + ", and a hole of 2.2 mm or more to hang it")
+    add("info", "tolerances", "RMFG holds ±0.005\" on laser-cut outlines, ±1° on bend angles, and ±0.015\" per bend line "
+                              "(two parallel bends ±0.030\"); angles up to 90°, no hems")
+    add("info", "flat pattern", "RMFG works out its own bend allowance for each material: the flat pattern here is a reference, "
+                                "so send them the 3D STEP of each part")
+    return out
+
+
 def write(sheet: Sheet, folder) -> dict:
     """base_flat.dxf, cover_flat.dxf, enclosure_sheet.step and notes."""
     import ezdxf
@@ -231,7 +327,14 @@ def write(sheet: Sheet, folder) -> dict:
     export_step(Compound(children=[made["base"], made["cover"]]), str(step))
     files["step"] = str(step)
     notes = notes_for(sheet)
-    (folder / "notes.md").write_text("# Sheet metal enclosure\n\n" + "\n".join(f"- {n}" for n in notes) + "\n", encoding="utf-8")
+    rm = rmfg_check(sheet)
+    lines = ["# Sheet metal enclosure", ""] + [f"- {n}" for n in notes] + ["", "## Against RMFG's rules", ""]
+    lines += [f"- {r['severity']}: {r['rule']}: {r['message']}" for r in rm]
+    (folder / "notes.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
+    from build123d import export_step as _es
+    m2 = formed(sheet)
+    _es(m2["base"], str(folder / "base_formed.step"))
+    _es(m2["cover"], str(folder / "cover_formed.step"))
     files["notes"] = str(folder / "notes.md")
     return {"files": files, "notes": notes, "flats": {k: {"core": f[k]["core"]} for k in ("base", "cover")}}
 

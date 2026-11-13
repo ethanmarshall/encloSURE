@@ -34,9 +34,9 @@ def macro(spec: BoxSpec) -> tuple[str, list[str]]:
     oL, oW = L + 2 * t, W + 2 * t
     top = f + H
     skipped = [k for k in LEFT_OUT if getattr(spec, k)]
-    if spec.lid in ("snap", "hinge", "slide", "clamshell"):
+    if spec.lid in ("snap", "hinge", "living", "slide", "clamshell"):
         skipped.append(f"{spec.lid} lid (the macro makes a flat lid)")
-    if spec.lip and spec.lid in ("screw", "friction", "snap", "hinge"):
+    if spec.lip and spec.lid in ("screw", "friction", "snap", "hinge", "living"):
         skipped.append("the lid's lip")
     if spec.floor != spec.wall:
         skipped.append(f"a {spec.floor:g} mm floor (the shell makes it {spec.wall:g} mm, like the walls)")
@@ -164,7 +164,7 @@ def macro(spec: BoxSpec) -> tuple[str, list[str]]:
             a(f"    Circ {_m(x)}, {_m(y)}, {_m(d / 2)}")
         a("    EndSketch")
         a(f'    Cut {_m(min(depth or h, h + t - 0.6) + 1)}, False, "Standoff holes"')
-    lid = spec.lid in ("screw", "friction", "snap", "hinge", "clamshell")
+    lid = spec.lid in ("screw", "friction", "snap", "hinge", "living", "clamshell")
     if lid:
         lt = spec.lid_thickness
         a("")
