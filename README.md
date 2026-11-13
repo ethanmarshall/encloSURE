@@ -75,7 +75,7 @@ slicer can use to force support in the flat-topped wall openings) when it needs 
 weight and print time, and flags what prints badly: walls under
 1.2 mm, flat-topped wall openings over 10 mm that need bridging or support, round wall holes without
 teardrops, and raised text under 4 mm.
-| Printing | `--no-teardrop` (round wall holes get a 45° peak by default, to print without support), `--bottom-chamfer` (against first-layer squish), `--no-ribs` (gussets at the standoffs' feet) | on, 0.4 mm, on |
+| Printing | `--no-teardrop` (round wall holes over 5 mm get 45° sides with a short flat top by default, so they print without support and stay their own height), `--bottom-chamfer` (against first-layer squish), `--no-ribs` (gussets at the standoffs' feet) | on, 0.4 mm, on |
 | Output | `--format step` (STEP and STL), `onshape` (an Onshape custom feature), or `both`; `--no-stl` | step |
 
 Positions are from the centre of the inside, Z up. A box made this way reads straight back into

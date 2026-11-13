@@ -139,7 +139,7 @@ class BoxSpec:
     flange: float = 0.0  # mounting ears outside the base this far, 0 for none
     flange_screw: str = "M4"
     # Printing
-    teardrop: bool = True  # round holes in walls get a 45° peak, to print without support
+    teardrop: bool = True  # round wall holes over 5 mm get 45° sides with a flat top, to print without support
     bottom_chamfer: float = 0.4  # against the first layer's squish; 0 for none
     # Weather
     gasket: float = 0.0  # O-ring cord diameter for a sealed screw lid, 0 for none
@@ -303,16 +303,22 @@ def _post_boss(spec: BoxSpec, d_hole: float) -> float:
     return max(2.2 * d_hole, d_hole + 2 * 1.6)
 
 
+TEARDROP_MIN = 5.0  # mm: smaller round holes print fine as circles
+
+
 def _profile(shape: str, size, radius: float, depth: float, teardrop: bool = False):
     """A cutting tool along Z, centred: a rect (corner radius) or a round hole, its local +Y up.
-    A teardrop adds a 45° peak above a round hole so it prints without support."""
+    A teardrop adds 45° sides above a round hole so it prints without support, cut off flat at the
+    circle's top: the hole stays its own height, and the flat (0.41 x the diameter) bridges easily.
+    Holes 5 mm and under stay round: printers bridge those as they are."""
     if shape == "round":
         r = size[0] / 2
         tool = Cylinder(r, depth)
-        if teardrop:
+        if teardrop and size[0] > TEARDROP_MIN:
             k = r * math.sqrt(0.5)
-            peak = extrude(Polygon((-k, k), (k, k), (0, r * math.sqrt(2)), align=None), amount=depth / 2, both=True)
-            tool = tool + peak
+            f = r * (math.sqrt(2) - 1)  # half the flat, where the 45° sides meet the circle's top
+            cap = extrude(Polygon((-k, k), (k, k), (f, r), (-f, r), align=None), amount=depth / 2, both=True)
+            tool = tool + cap
         return tool
     tool = Box(size[0], size[1], depth)
     if radius > 0:
