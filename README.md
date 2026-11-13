@@ -66,8 +66,13 @@ snap -o my_box_v2` rebuilds it with one thing changed.
 | Batteries | `batteries: [{cell: AA, AAA, 18650 or 21700, count, at, axis}]`: a cradle on the floor with room for spring contacts | none |
 | Cables | `tie_points: [[x, y]]` (zip-tie anchors), `cable_notches: [{face, at, d}]` (a U in the top of a wall the lid closes) | none |
 | Material | `material`: PETG, PLA, ABS or ASA, for the weight estimate | PETG |
+| Clamshell | `--lid clamshell`, `split` (0.2 to 0.8 of the inside height): two shells with a tongue and groove, screwed from the top; for tall or handheld boxes | |
+| Light pipes | `light_pipes: [{at, d}]`: tubes from the lid to 1 mm above each LED, for a light pipe or clear rod | none |
+| Heat | `power_w`: the air's rise over the room, sealed and with the vents (a rough still-air estimate) | 0 |
 
-Every box also reports a rough weight and print time, and flags what prints badly: walls under
+Every box also says how to lay each part on the print bed, writes `support_enforcers.stl` (blocks a
+slicer can use to force support in the flat-topped wall openings) when it needs one, reports a rough
+weight and print time, and flags what prints badly: walls under
 1.2 mm, flat-topped wall openings over 10 mm that need bridging or support, round wall holes without
 teardrops, and raised text under 4 mm.
 | Printing | `--no-teardrop` (round wall holes get a 45° peak by default, to print without support), `--bottom-chamfer` (against first-layer squish), `--no-ribs` (gussets at the standoffs' feet) | on, 0.4 mm, on |
@@ -153,6 +158,12 @@ land on a board that fills the box, so with a screw lid the box grows along one 
 (the notes say which); a press-fit or snap lid doesn't need that. The board is then checked inside
 the box (`my_box/fit/`), and `my_box/box.json` holds every setting to change with `enclosure box --from`.
 
+The board can also be just the `.kicad_pcb` (`enclosure frompcb board.kicad_pcb`): its Edge.Cuts
+outline (lines, arcs, rectangles, circles, polygons, any shape), its mounting holes and each
+footprint's courtyard become the board, with heights from parts.json or typical ones for each kind of
+part (listed in the notes), so openings land where the connectors really are. `enclosure describe
+"... wall-mounted" --pcb board.kicad_pcb` does the same and adds what the words say.
+
 ## Fixing the board
 
 ```
@@ -174,6 +185,16 @@ Round after round: export the STEP with `kicad-cli` (Backplane's, through `$BACK
 inside Backplane), check, move what the check asks to move, until the board fits or a round asks for
 nothing a move can fix. Your board is left alone; the result is `autofit/board_fixed.kicad_pcb`, with
 each round's report beside it. The `enclosure-fit` skill tells an agent in Backplane to use it.
+
+## Worst-case gaps
+
+`enclosure fit` (and the page's fit check) also writes `tolerances.json`: each board edge's gap and
+each screw's play once the fab's outline tolerance, where the printer puts things and the plastic's
+shrink all go the wrong way at once, with a warning where the board may not drop in or a screw may
+not go in. The figures are typical (±0.2 mm board outline, ±0.1 mm holes, ±0.15 mm printing, PETG
+0.4% shrink); change them in `enclosure.tolerance.Tolerances`. The fit check also tests the board
+itself against the box now (corner posts, ribs, a gasket ledge), not only its outline's box against
+the walls, and `limits` draws the board's outline round whatever is at board height.
 
 ## Fit test print
 
@@ -212,8 +233,10 @@ stand it with its opening up, and give it cutouts in the same syntax as `enclosu
 enclosure stock 1590B.step --cutout front:pg9@0,12 --cutout lid:pushbutton-22@0,0 -o drill
 ```
 
-You get `base.step` and `lid.step` with the holes cut, in the maker's own position, and
-`drill_templates.pdf`: one page per face as seen from outside, at 1:1 on Letter paper, with each
+You get `base.step` and `lid.step` with the holes cut, in the maker's own position, each face's
+holes as a 1:1 DXF (for a laser, router or CAM) and as G-code (drilled up to 6.5 mm, bigger holes
+milled in a helix, rectangles as an inside contour; the feeds and speeds are placeholders for a 1/8"
+end mill in aluminium: set yours and dry-run it), and `drill_templates.pdf`: one page per face as seen from outside, at 1:1 on Letter paper, with each
 hole drawn, a centre-punch cross, and its position from the face's bottom-left corner. Print it
 at 100% ("Actual size"), check the 50 mm bar with a ruler, tape it on and drill. A file holding
 both the box and the lid is split by shape (the taller solid is the box); a separate lid goes

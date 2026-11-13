@@ -238,14 +238,25 @@ def openings_of(base: Shape, cavity: Shape, walls=None) -> list[Opening]:
 
 
 def lid_underside(lid: Shape, cavity_xy) -> float:
-    """The lowest point of the lid over the cavity."""
+    """The lid's underside over the cavity: the middle height of a grid of points across it. Things
+    that hang lower in places (a lip at the walls, corner posts, light pipe tubes) are left to the
+    fit check's collision test, which sees them as they are."""
     (cx0, cy0), (cx1, cy1) = cavity_xy
-    probe = Box(cx1 - cx0, cy1 - cy0, 1e4).locate(Location(((cx0 + cx1) / 2, (cy0 + cy1) / 2, 0)))
-    over = lid & probe
-    solids = over.solids() if over is not None else []
-    if not solids:
-        return bbox(lid)[0][2]
-    return min(bbox(s)[0][2] for s in solids)
+    (_, _, lz0), (_, _, lz1) = bbox(lid)
+    hits = []
+    for i in range(5):
+        for j in range(5):
+            x = cx0 + (cx1 - cx0) * (0.2 + 0.15 * i)
+            y = cy0 + (cy1 - cy0) * (0.2 + 0.15 * j)
+            col = Box(0.4, 0.4, lz1 - lz0 + 2).locate(Location((x, y, (lz0 + lz1) / 2)))
+            over = lid & col
+            solids = over.solids() if hasattr(over, "solids") else list(over)
+            if solids:
+                hits.append(min(bbox(s)[0][2] for s in solids))
+    if not hits:
+        return lz0
+    hits.sort()
+    return hits[len(hits) // 2]
 
 
 def lid_openings(lid: Shape, base: Shape | None = None) -> list[Opening]:

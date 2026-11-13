@@ -119,7 +119,49 @@ def test_assembly_and_drawing_endpoints(tmp_path):
 def test_describe_endpoint_and_cli(tmp_path):
     from fastapi.testclient import TestClient
     from enclosure.web import app
-    d = TestClient(app).post("/api/describe", json={"text": "Raspberry Pi, usb-c, wall mount"}).json()
+    d = TestClient(app).post("/api/describe", data={"text": "Raspberry Pi, usb-c, wall mount"}).json()
     assert d["spec"]["keyholes"] == "M4" and d["kicad_pcb"].startswith("(kicad_pcb")
     assert main(["describe", "60x40", "board,", "USB-C", "--no-stl", "-o", str(tmp_path / "d")]) == 0
     assert (tmp_path / "d" / "board.kicad_pcb").exists() and box.load(tmp_path / "d" / "box.json")
+
+
+def test_onshape_push_calls(monkeypatch):
+    """The calls the Onshape push makes, against a stand-in for Onshape's API."""
+    import urllib.request
+    from enclosure import onshape_push
+    calls = []
+
+    class R:
+        def __init__(self, body):
+            self.body = body
+        def read(self):
+            return json.dumps(self.body).encode()
+        def __enter__(self):
+            return self
+        def __exit__(self, *a):
+            return False
+
+    def fake(req, timeout=60):
+        path, body = req.full_url.replace(onshape_push.BASE, ""), json.loads(req.data) if req.data else None
+        calls.append((req.get_method(), path, body))
+        assert req.headers["Authorization"].startswith("Basic ")
+        if path == "/api/documents":
+            return R({"id": "D1", "defaultWorkspace": {"id": "W1"}})
+        if req.get_method() == "POST" and path == "/api/featurestudios/d/D1/w/W1":
+            return R({"id": "E1"})
+        if req.get_method() == "GET":
+            return R({"sourceMicroversion": "MV", "serializationVersion": "1.2.3"})
+        return R({})
+
+    monkeypatch.setattr(urllib.request, "urlopen", fake)
+    monkeypatch.delenv("ONSHAPE_ACCESS_KEY", raising=False)
+    with pytest.raises(RuntimeError):
+        onshape_push.push("x")
+    monkeypatch.setenv("ONSHAPE_ACCESS_KEY", "k")
+    monkeypatch.setenv("ONSHAPE_SECRET_KEY", "s")
+    out = onshape_push.push("FeatureScript 3112;", "Box")
+    assert out["feature_studio"].endswith("/documents/D1/w/W1/e/E1")
+    assert [c[:2] for c in calls] == [("POST", "/api/documents"), ("POST", "/api/featurestudios/d/D1/w/W1"),
+                                      ("GET", "/api/featurestudios/d/D1/w/W1/e/E1"), ("POST", "/api/featurestudios/d/D1/w/W1/e/E1")]
+    assert calls[-1][2] == {"contents": "FeatureScript 3112;", "serializationVersion": "1.2.3",
+                            "sourceMicroversion": "MV", "rejectMicroversionSkew": False}

@@ -38,8 +38,8 @@ def cmd_read(args):
 
 def cmd_limits(args):
     from . import kicad
-    _, _, enc = _enclosure(args)
-    return kicad.limits(enc, args.out, clearance=args.clearance, pcb_thickness=args.thickness)
+    base, _, enc = _enclosure(args)
+    return kicad.limits(enc, args.out, clearance=args.clearance, pcb_thickness=args.thickness, base=base)
 
 
 def _placement(text: str | None):
@@ -60,8 +60,13 @@ def cmd_fit(args):
     result = fitmod.check(enc, base, lid, board, settings, placement, specs, footprints)
     files = report.write(args.out, enc, result, base, lid, title=f"EncloSURE: {Path(args.board).stem}")
     j = result.to_json()
+    from . import tolerance
+    tol = tolerance.stack(enc, result, tolerance.Tolerances(material=args.material))
+    (Path(args.out) / "tolerances.json").write_text(json.dumps(tol, indent=2) + "\n")
+    files["tolerances"] = str(Path(args.out) / "tolerances.json")
     return {"fits": j["fits"], "errors": j["errors"], "warnings": j["warnings"],
-            "placement": j["placement"], "headroom": j["headroom"], "files": files}
+            "placement": j["placement"], "headroom": j["headroom"], "files": files,
+            "worst_case": [f"{f['subject']}: {f['message']}" for f in tol["findings"]]}
 
 
 def cmd_parts(args):
@@ -158,7 +163,7 @@ def cmd_describe(args):
     from . import describe
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    r = describe.make(" ".join(args.text), out / "board.kicad_pcb")
+    r = describe.make(" ".join(args.text), out / "board.kicad_pcb", pcb=args.pcb)
     files = boxmod.write(r["spec"], out, stl=not args.no_stl)
     return {"assumed": r["notes"], "inner": files["inner"], "outer": files["outer"], "checks": files["checks"],
             "files": {**files["files"], "kicad_board": str(out / "board.kicad_pcb")},
@@ -207,7 +212,10 @@ def cmd_frompcb(args):
                           headroom=args.headroom)
     specs = partsmod.load(args.parts) if args.parts else {}
     footprints = partsmod.from_board(args.pcb) if args.pcb else None
-    r = frompcb.make(args.board, st, specs, footprints)
+    if str(args.board).lower().endswith(".kicad_pcb"):
+        r = frompcb.from_kicad(args.board, st, specs)
+    else:
+        r = frompcb.make(args.board, st, specs, footprints)
     out = Path(args.out)
     files = boxmod.write(r["spec"], out, stl=not args.no_stl, formats=tuple(args.format.replace("both", "step,onshape").split(",")))
     rep = report.write(out / "fit", r["enclosure"], r["fit"], r["made"]["base"], r["made"]["lid"],
@@ -260,6 +268,7 @@ def main(argv=None) -> int:
     p.add_argument("--clearance", type=float, default=0.5, help="part and board edge to enclosure, mm")
     p.add_argument("--opening-margin", type=float, default=0.25, help="opening clear of a connector face, mm")
     p.add_argument("--max-setback", type=float, default=2.0, help="connector face to outer wall, mm")
+    p.add_argument("--material", default="PETG", choices=("PLA", "PETG", "ABS", "ASA"), help="for the shrink in the worst-case gaps")
     p.add_argument("--parts", help="parts.json: datasheet heights, bodies and connector cutouts")
     p.add_argument("--pcb", help="the .kicad_pcb, to place blocks for parts without 3D models")
     p.set_defaults(fn=cmd_fit)
@@ -343,6 +352,7 @@ def main(argv=None) -> int:
     p = sub.add_parser("describe", help="a first box and KiCad board from a few words",
                        description=describemod.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("text", nargs="+", help='e.g. "Arduino Uno, USB-C, two buttons, OLED, wall-mounted"')
+    p.add_argument("--pcb", help="your .kicad_pcb: the box is made round it, openings at its connectors; the words add the rest")
     p.add_argument("--no-stl", action="store_true")
     p.add_argument("-o", "--out", default="described")
     p.set_defaults(fn=cmd_describe)
@@ -383,7 +393,8 @@ def main(argv=None) -> int:
     p = sub.add_parser("frompcb", help="a box around a board, from KiCad's STEP export",
                        description=__import__("enclosure.frompcb", fromlist=["x"]).__doc__,
                        formatter_class=argparse.RawDescriptionHelpFormatter)
-    p.add_argument("board", help="the board's STEP from KiCad (File > Export > STEP), with 3D models")
+    p.add_argument("board", help="the board's STEP from KiCad (File > Export > STEP, with 3D models), or the "
+                   ".kicad_pcb itself (outline, holes and courtyards; heights from parts.json or typical ones)")
     p.add_argument("--pcb", help="the .kicad_pcb, to check parts that have no 3D model")
     p.add_argument("--parts", help="parts.json: datasheet panel cutouts are used for openings")
     p.add_argument("--lid", default="screw", choices=boxmod.LIDS)

@@ -85,11 +85,13 @@ def design(text: str) -> tuple[boxmod.BoxSpec, list[str]]:
     # Where it lives.
     wet = re.search(r"(water|splash|outdoor|outside|ip6|weather|rain|damp)", t)
     lid = "screw"
-    if re.search(r"(snap|tool-?less)", t):
+    if re.search(r"(clamshell|two[\s-]part|handheld|hand-held)", t):
+        lid = "clamshell"
+    elif re.search(r"(snap|tool-?less)", t):
         lid = "snap"
     elif re.search(r"(press|friction)", t):
         lid = "friction"
-    if wet and lid != "screw":
+    if wet and lid not in ("screw",):
         notes.append("a sealed box needs a screw lid: using one")
         lid = "screw"
     tall = re.search(r"(\d+(?:\.\d+)?)\s*mm\s*(tall|high)", t)
@@ -98,7 +100,7 @@ def design(text: str) -> tuple[boxmod.BoxSpec, list[str]]:
         notes.append("tallest part on the board: 15 mm (say e.g. \"25 mm tall\")")
 
     # The box: the board plus room each side; a screw lid's posts need its corners clear.
-    margin = 3.0 + (9.0 if lid == "screw" else 0.0)
+    margin = 3.0 + (9.0 if lid in ("screw", "clamshell") else 0.0)
     L, W = bl + 2 * margin, bw + 2 * 3.0
     if wet:
         L, W = L + 28, W + 28  # the gasket ledge reaches about 14 mm in
@@ -194,16 +196,50 @@ def design(text: str) -> tuple[boxmod.BoxSpec, list[str]]:
     return spec, notes
 
 
-def make(text: str, out_pcb=None) -> dict:
-    """The box, its notes, and the starting KiCad board (as text)."""
+def around_board(text: str, pcb) -> tuple[boxmod.BoxSpec, list[str]]:
+    """With the board already drawn: the box round its .kicad_pcb (openings where its connectors
+    are), and from the words only what the board can't say: the lid, where it lives, batteries."""
+    from . import frompcb
+    t = " " + text.lower() + " "
+    lid = "snap" if re.search(r"(snap|tool-?less)", t) else "friction" if re.search(r"(press|friction)", t) else "screw"
+    r = frompcb.from_kicad(pcb, frompcb.Settings(lid=lid))
+    spec, notes = r["spec"], list(r["notes"])
+    if re.search(r"wall[\s-]?mount|on a wall|hang", t):
+        spec.keyholes = "M4"
+        notes.append("wall-mounted: two keyholes for M4 screws")
+    if re.search(r"\bdin\b", t):
+        spec.din_rail = True
+        notes.append("a DIN rail clip")
+    if re.search(r"(desk|bench|table|feet)", t):
+        spec.feet = 10.0
+        notes.append("rubber feet recesses")
+    if re.search(r"(water|splash|outdoor|ip6|weather)", t):
+        notes.append("splash-proof: not added round an existing board (a gasket ledge needs about 14 mm more each side); "
+                     "turn on the gasket and grow the box in the form")
+    for pattern, (dw, dh), said in DISPLAYS:
+        if re.search(pattern, t):
+            spec.windows = [{"face": "lid", "size": [dw, dh], "at": [0, 0], "panel": [dw + 6, dh + 6], "panel_t": 1.0}]
+            notes.append(said + "; centred on the lid: move it over your display")
+            break
+    spec.check()
+    return spec, notes
+
+
+def make(text: str, out_pcb=None, pcb=None) -> dict:
+    """The box, its notes, and the starting KiCad board (as text). With *pcb* (a .kicad_pcb), the box
+    is made round that board and its own file is returned as the board."""
     import tempfile
     from pathlib import Path
     from . import kicad, shell
+    if pcb:
+        spec, notes = around_board(text, pcb)
+        made = boxmod.build(spec)
+        return {"spec": spec, "notes": notes, "made": made, "limits": None, "kicad_pcb": Path(pcb).read_text()}
     spec, notes = design(text)
     made = boxmod.build(spec)
     enc, _ = shell.read(made["base"], made["lid"])
     with tempfile.TemporaryDirectory() as d:
         p = Path(out_pcb) if out_pcb else Path(d) / "board.kicad_pcb"
-        lim = kicad.limits(enc, p)
+        lim = kicad.limits(enc, p, base=made["base"])
         pcb = p.read_text()
     return {"spec": spec, "notes": notes, "made": made, "limits": lim, "kicad_pcb": pcb}

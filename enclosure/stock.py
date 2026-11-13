@@ -9,7 +9,7 @@ The model must stand with its opening up (+Z). Cutouts use the same positions as
 `enclosure box`: on a wall, `a` along the wall from the middle of the inside and `b` up from the
 inside floor; on the lid or floor, X and Y from the middle of the inside.
 
-You get the box with its holes as STEP (in the maker's own position, so it lines up with
+You also get each face's holes as a 1:1 DXF and as G-code (see `machining`). You get the box with its holes as STEP (in the maker's own position, so it lines up with
 anything else you have in that frame) and `drill_templates.pdf`: one 1:1 page per face as seen
 from outside, with every hole drawn, centre-punch marks and dimensions from the face's
 bottom-left corner. Print it at 100% ("Actual size"), check the 50 mm bar with a ruler, tape it
@@ -142,9 +142,15 @@ def cut(base, lid, cutouts: list[dict], teardrop: bool = False) -> dict:
             nut = w * 1.6  # a gland's locknut is roughly 1.5-1.7 times the thread across its flats
             if c.at[1] - nut / 2 < 0 and c.face != "floor":
                 checks.append(f"{c.face} {c.preset} at {c.at}: its locknut (about {nut:.0f} mm) may not clear the floor inside")
+        thick = {"-X": f["cx0"] - f["bx0"], "+X": f["bx1"] - f["cx1"], "-Y": f["cy0"] - f["by0"], "+Y": f["by1"] - f["cy1"],
+                 "floor": enc.floor - f["bz0"]}.get(c.face)
+        if c.face == "lid":
+            (_, _, lz0), (_, _, lz1) = lid_box
+            thick = lz1 - lz0
         holes.append({"face": c.face, "shape": c.shape, "size": [w, h] if c.shape == "rect" else [w],
                       "radius": c.radius, "preset": c.preset, "source": c.source,
-                      "from_left": round(u, 2), "from_bottom": round(v, 2), "face_size": [round(fw, 2), round(fh, 2)]})
+                      "from_left": round(u, 2), "from_bottom": round(v, 2), "face_size": [round(fw, 2), round(fh, 2)],
+                      "thickness": round(thick, 2)})
     return {"base": base, "lid": lid, "holes": holes, "checks": checks, "enclosure": enc}
 
 
@@ -228,6 +234,9 @@ def run(base_path, cutouts: list[dict], folder, lid_path=None, teardrop=False) -
         files["lid"] = str(folder / "lid.step")
     if made["holes"]:
         files["templates"] = templates(made["holes"], folder / "drill_templates.pdf", Path(base_path).stem)
+    if made["holes"]:
+        from . import machining
+        files.update(machining.write(made["holes"], folder))
     (folder / "holes.json").write_text(json.dumps(made["holes"], indent=2) + "\n")
     files["holes"] = str(folder / "holes.json")
     enc = made["enclosure"]

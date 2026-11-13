@@ -128,13 +128,14 @@
     <summary>Describe it in words</summary>
     <p class="hint">Name the board (a Raspberry Pi, an Arduino Uno, or a size like 80x50), the connectors and controls, a display or batteries, and where it lives. It reads keywords, and lists everything it assumed.</p>
     <textarea name="ds_text" rows="3" style="width:100%;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:5px;padding:6px;background:var(--bg);color:var(--ink)" placeholder="ESP32 board 60x40, USB-C, two buttons, OLED, wall-mounted, splash-proof"></textarea>
+    <label class="f" style="margin-top:6px">Your .kicad_pcb, if the board is drawn (optional: openings go where its connectors are)<input type="file" name="ds_pcb" accept=".kicad_pcb"></label>
     <div class="links"><button class="go" type="button" id="dsbtn">Make it</button><button class="plain" type="button" id="dspcb" hidden>Download its KiCad board</button></div>
   </details>
   <details class="startbox" id="startboard">
     <summary>Start from a finished board</summary>
-    <p class="hint">Upload KiCad's STEP export of the board (File &gt; Export &gt; STEP, with 3D models). The box is sized around it, with standoffs under the mounting holes and openings for the connectors at its edges, then checked with the board inside. Every setting below stays editable.</p>
+    <p class="hint">Upload KiCad's STEP export of the board (File &gt; Export &gt; STEP, with 3D models), or just its .kicad_pcb (heights then come from parts.json or typical ones, listed). The box is sized around it, with standoffs under the mounting holes and openings for the connectors at its edges, then checked with the board inside. Every setting below stays editable.</p>
     <div class="grid g1">
-      <label class="f">Board STEP<input type="file" name="fp_board" accept=".step,.stp"></label>
+      <label class="f">Board STEP (or leave empty and give the .kicad_pcb)<input type="file" name="fp_board" accept=".step,.stp"></label>
       <label class="f">The .kicad_pcb (optional: parts with no 3D model)<input type="file" name="fp_pcb" accept=".kicad_pcb"></label>
       <label class="f">parts.json (optional: sizes and datasheet panel cutouts)<input type="file" name="fp_parts" accept=".json"></label>
     </div>
@@ -172,11 +173,15 @@
         <option value="friction">Press-fit</option>
         <option value="snap">Snap-fit</option>
         <option value="slide">Slide-in panel</option>
+        <option value="clamshell">Clamshell (two shells)</option>
         <option value="none">No lid</option>
       </select></label>
       <label class="f" data-show="lid">Thickness<span class="unit" data-unit="mm"><input name="lid_thickness" type="number" min="0.8" step="0.1" value="2"></span></label>
     </div>
     <p class="hint" id="lidhint"></p>
+    <div class="grid g2" data-show="clam">
+      <label class="f">Parts at (share of the height)<span class="unit" data-unit="×H"><input name="split" type="number" min="0.2" max="0.8" step="0.05" value="0.6"></span></label>
+    </div>
     <p class="hint" data-show="lip">Not sure of the fit gap? <a href="api/coupon" download>Print a fit test</a>: six plugs from 0.10 to 0.35 mm, labelled, to try in their pockets.</p>
     <div class="grid" data-show="lip">
       <label class="f">Lip depth<span class="unit" data-unit="mm"><input name="lip" type="number" min="0" step="0.5" value="3"></span></label>
@@ -191,11 +196,13 @@
           <option value="clearance">Through, with a nut</option>
         </select></label>
       </div>
+      <div data-show="gasket">
       <label class="check"><input type="checkbox" id="gasket_on"> Seal with an O-ring gasket</label>
       <div class="grid g2" id="gasket_row" hidden>
         <label class="f">Cord diameter<span class="unit" data-unit="mm"><input name="gasket" type="number" min="1" max="5" step="0.1" value="2"></span></label>
       </div>
       <p class="hint" id="gaskethint" hidden>A groove in the lid's underside presses the cord onto a ledge inside the walls, about 25% squeeze. Use solid O-ring cord.</p>
+      </div>
     </div>
   </fieldset>
 
@@ -276,6 +283,21 @@
   </fieldset>
 
   <fieldset>
+    <legend>Light pipes</legend>
+    <p class="hint">Tubes from the lid down to just above each LED on the board, for a light pipe or clear rod. Give the LED positions.</p>
+    <div class="rows" id="lp_rows"></div>
+    <button type="button" class="add" data-add="lp">+ Add a light pipe</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Heat</legend>
+    <div class="grid g2">
+      <label class="f">Power inside<span class="unit" data-unit="W"><input name="power_w" type="number" min="0" max="200" step="0.5" value="0"></span></label>
+    </div>
+    <p class="hint">What the electronics turn into heat. The report estimates how warm the air inside gets, with and without vents.</p>
+  </fieldset>
+
+  <fieldset>
     <legend>Batteries</legend>
     <p class="hint">A cradle on the floor with room at the ends for spring contacts. Cell sizes are the usual maximums; check yours.</p>
     <div class="rows" id="bat_rows"></div>
@@ -340,12 +362,22 @@
     <button class="go" type="submit">Download</button>
     <div class="links small" style="width:100%;margin:0">
       <button class="plain" type="button" id="tofit">Fit a board in it</button>
+      <button class="plain" type="button" id="toonshape" hidden>Send to Onshape</button>
       <button class="plain" type="button" id="sharebtn">Copy share link</button>
       <button class="plain" type="button" id="openbtn">Open box.json</button>
       <button class="plain" type="button" id="savebtn">Save version</button>
       <input type="file" id="openfile" accept=".json" hidden>
       <span class="hint" id="sharestate" style="margin:0;align-self:center"></span>
     </div>
+    <details id="library" style="width:100%" hidden>
+      <summary>Team library (shared on this server)</summary>
+      <div class="grid g2" style="margin-top:6px">
+        <label class="f">Name<input id="lib_name" maxlength="80" placeholder="Sump alarm box"></label>
+        <label class="f">Your name<input id="lib_by" maxlength="60"></label>
+      </div>
+      <button class="plain" type="button" id="libsave">Add this box to the library</button>
+      <div id="liblist"></div>
+    </details>
     <details id="versions" style="width:100%" hidden>
       <summary>Saved versions (in this browser)</summary>
       <div id="verlist"></div>
@@ -642,7 +674,15 @@ function notchRow(o = {}) {
   item._sync = () => {};
   return item;
 }
-const ROWS = { lso: ["#lso_rows", xyRow], bat: ["#bat_rows", batRow], tie: ["#tie_rows", xyRow], notch: ["#notch_rows", notchRow],
+function lpRow(o = {}) {
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid head" }, field("X", numIn("x", o.x ?? 0), "mm"), field("Y", numIn("y", o.y ?? 0), "mm"),
+      field("Pipe Ø", numIn("d", o.d ?? 3, "0.5", "1"), "mm")));
+  item._sync = () => {};
+  return item;
+}
+const ROWS = { lp: ["#lp_rows", lpRow], lso: ["#lso_rows", xyRow], bat: ["#bat_rows", batRow], tie: ["#tie_rows", xyRow], notch: ["#notch_rows", notchRow],
   card: ["#card_rows", cardRow], win: ["#win_rows", winRow], cut: ["#cut_rows", holeRow], vent: ["#vent_rows", ventRow], label: ["#label_rows", labelRow], so: ["#so_rows", soRow], stock: ["#stock_rows", holeRow] };
 function addRow(kind, opts) {
   const [sel, make] = ROWS[kind];
@@ -661,12 +701,15 @@ const LIDHINT = {
   snap: "A lip with a rib that clicks into a groove inside the walls.",
   slide: "A panel slides in grooves from one open end.",
   none: "An open box.",
+  clamshell: "Two shells that part at a height, with a tongue and groove; screws go in from the top. Good for tall or handheld boxes.",
 };
 function sync() {
   const e = boxform.elements, lid = e.lid.value;
   for (const el of $$("[data-show=lid]", boxform)) el.hidden = lid === "none";
   for (const el of $$("[data-show=lip]", boxform)) el.hidden = !["screw", "friction", "snap"].includes(lid);
-  for (const el of $$("[data-show=screw]", boxform)) el.hidden = lid !== "screw";
+  for (const el of $$("[data-show=screw]", boxform)) el.hidden = !["screw", "clamshell"].includes(lid);
+  for (const el of $$("[data-show=clam]", boxform)) el.hidden = lid !== "clamshell";
+  for (const el of $$("[data-show=gasket]", boxform)) el.hidden = lid !== "screw";
   $("#lidhint").textContent = LIDHINT[lid];
   const g = $("#gasket_on").checked; $("#gasket_row").hidden = $("#gaskethint").hidden = !g;
   const so = e.so_mode.value;
@@ -743,6 +786,8 @@ function boxReport(data, error) {
     fromBoard = null;
   }
   for (const c of data.checks) report.append(msg("warn", c));
+  if (data.print_plan) report.append(h("div", { class: "hint" }, "Print the base " + data.print_plan.base +
+    (data.print_plan.lid ? "; the lid " + data.print_plan.lid : "") + "."));
   if (data.notes.length) report.append(h("ul", { class: "notes" }, data.notes.map(n => h("li", {}, n))));
 }
 
@@ -766,7 +811,8 @@ function boxBody() {
       axis: $("[name=axis]", it).value, at: [num($("[name=x]", it).value), num($("[name=y]", it).value)] })),
     tie_points: $$("#tie_rows .item").map(it => [num($("[name=x]", it).value), num($("[name=y]", it).value)]),
     cable_notches: $$("#notch_rows .item").map(it => ({ face: $("[name=face]", it).value, at: num($("[name=a]", it).value), d: num($("[name=d]", it).value) })),
-    material: e.material.value,
+    material: e.material.value, split: num(e.split.value), power_w: num(e.power_w.value),
+    light_pipes: $$("#lp_rows .item").map(it => ({ at: [num($("[name=x]", it).value), num($("[name=y]", it).value)], d: num($("[name=d]", it).value) })),
     card_slots: $$("#card_rows .item").map(it => num($("[name=x]", it).value)), board_thickness: num(e.board_thickness.value),
     windows: $$("#win_rows .item").map(readWin),
     cutouts: $$("#cut_rows .item").map(readHole), vents: $$("#vent_rows .item").map(readVent), labels: $$("#label_rows .item").map(readLabel),
@@ -794,7 +840,7 @@ async function refresh() {
   } catch (err) { if (mine === seq && tab === "box") { boxReport(null, String(err)); $("#status").textContent = ""; } }
 }
 function later() { clearTimeout(timer); timer = setTimeout(refresh, 450); }
-const outsideBox = ev => ev.target.closest && ev.target.closest("#startboard, #describe, [data-drawing]");
+const outsideBox = ev => ev.target.closest && ev.target.closest("#startboard, #describe, [data-drawing], #library");
 boxform.addEventListener("input", ev => outsideBox(ev) || later()); boxform.addEventListener("change", ev => outsideBox(ev) || later());
 
 async function download(res, fallback) {
@@ -853,6 +899,8 @@ function applySpec(sp) {
   }
   $("#card_rows").replaceChildren(); for (const x of sp.card_slots || []) addRow("card", { x });
   $("#lso_rows").replaceChildren(); for (const [x, y] of sp.lid_standoffs || []) addRow("lso", { x, y });
+  set("split", sp.split); set("power_w", sp.power_w);
+  $("#lp_rows").replaceChildren(); for (const lp of sp.light_pipes || []) addRow("lp", { x: lp.at[0], y: lp.at[1], d: lp.d });
   set("lid_standoff_height", sp.lid_standoff_height); set("lid_standoff_screw", sp.lid_standoff_screw); set("material", sp.material);
   $("#bat_rows").replaceChildren(); for (const b of sp.batteries || []) addRow("bat", { cell: b.cell, count: b.count, axis: b.axis, x: b.at[0], y: b.at[1] });
   $("#tie_rows").replaceChildren(); for (const [x, y] of sp.tie_points || []) addRow("tie", { x, y });
@@ -872,9 +920,9 @@ function applySpec(sp) {
 
 $("#fpbtn").onclick = async () => {
   const e = boxform.elements;
-  if (!e.fp_board.files.length) { boxReport(null, "Choose the board's STEP first."); return; }
+  if (!e.fp_board.files.length && !e.fp_pcb.files.length) { boxReport(null, "Choose the board's STEP or its .kicad_pcb first."); return; }
   const fd = new FormData();
-  fd.set("board", e.fp_board.files[0]); if (e.fp_parts.files.length) fd.set("parts", e.fp_parts.files[0]);
+  if (e.fp_board.files.length) fd.set("board", e.fp_board.files[0]); if (e.fp_parts.files.length) fd.set("parts", e.fp_parts.files[0]);
   if (e.fp_pcb.files.length) fd.set("pcb", e.fp_pcb.files[0]);
   fd.set("lid", e.fp_lid.value); fd.set("edge_gap", num(e.fp_gap.value)); fd.set("headroom", num(e.fp_head.value));
   await busy($("#fpbtn"), "Designing...", async () => {
@@ -890,10 +938,11 @@ $("#fpbtn").onclick = async () => {
 };
 let fromBoard = null, describedPcb = null;
 $("#dsbtn").onclick = async () => {
-  const text = boxform.elements.ds_text.value.trim();
-  if (!text) { boxReport(null, "Describe the project first."); return; }
+  const text = boxform.elements.ds_text.value.trim(), pcbFile = boxform.elements.ds_pcb.files[0];
+  if (!text && !pcbFile) { boxReport(null, "Describe the project first."); return; }
+  const fd = new FormData(); fd.set("text", text); if (pcbFile) fd.set("pcb", pcbFile);
   await busy($("#dsbtn"), "Working...", async () => {
-    const res = await fetch("api/describe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    const res = await fetch("api/describe", { method: "POST", body: fd });
     if (!res.ok) { boxReport(null, await errorOf(res)); return; }
     const d = await res.json();
     describedPcb = d.kicad_pcb; $("#dspcb").hidden = !describedPcb;
@@ -924,7 +973,40 @@ $("#asmbtn").onclick = async () => {
     if (r.error) boxReport(null, r.error);
   });
 };
-fetch("api/health").then(r => r.json()).then(hh => { if (!hh.draftwright) for (const el of $$("[data-drawing]")) el.hidden = true; }).catch(() => {});
+fetch("api/health").then(r => r.json()).then(hh => {
+  if (!hh.draftwright) for (const el of $$("[data-drawing]")) el.hidden = true;
+  if (hh.library) { $("#library").hidden = false; loadLibrary(); }
+  if (hh.onshape) $("#toonshape").hidden = false;
+}).catch(() => {});
+$("#toonshape").onclick = async () => {
+  await busy($("#toonshape"), "Sending...", async () => {
+    const res = await fetch("api/onshape", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(boxBody()) });
+    if (!res.ok) { boxReport(null, await errorOf(res)); return; }
+    const d = await res.json();
+    $("#sharestate").replaceChildren("In Onshape: ", h("a", { href: d.document, target: "_blank", rel: "noopener" }, "open the document"),
+      ". Insert EncloSURE Box in its Part Studio." + (d.skipped.length ? ` Not in the feature: ${d.skipped.join(", ")}.` : ""));
+  });
+};
+async function loadLibrary() {
+  const r = await fetch("api/library"); if (!r.ok) return;
+  const d = await r.json();
+  $("#liblist").replaceChildren(...d.designs.map(it => h("div", { class: "links", style: "align-items:center;margin:4px 0" },
+    h("span", { style: "flex:1;font-size:12.5px" }, h("b", {}, it.name),
+      h("span", { class: "hint" }, ` · ${(it.size || []).join(" x ")} mm${it.by ? " · " + it.by : ""} · ${new Date(it.at).toLocaleDateString()}`)),
+    h("button", { class: "plain", type: "button", onclick: async () => {
+      const g = await fetch(`api/library/${it.id}`); if (!g.ok) return;
+      const doc = await g.json(); reframe = true; applySpec(doc.design); $("#sharestate").textContent = `Opened "${it.name}" from the library.`; } }, "Open"),
+    h("button", { class: "plain", type: "button", "aria-label": `Remove ${it.name}`, onclick: async () => {
+      await fetch(`api/library/${it.id}`, { method: "DELETE" }); loadLibrary(); } }, "Remove"))));
+}
+$("#libsave").onclick = async () => {
+  const name = $("#lib_name").value.trim();
+  if (!name) { $("#sharestate").textContent = "Give the design a name first."; return; }
+  const res = await fetch("api/library", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, by: $("#lib_by").value.trim(), design: designOf() }) });
+  $("#sharestate").textContent = res.ok ? `Added "${name}" to the team library.` : await errorOf(res);
+  loadLibrary();
+};
 
 // ---------- Saving and sharing ----------
 const KEEP = "enclosure.box.v1";
@@ -1050,7 +1132,11 @@ fitform.addEventListener("submit", async ev => {
     const items = d.findings.map(f => msg(f.severity === "error" ? "err" : "warn", h("span", {}, h("b", {}, f.subject + ": "), f.message),
       [f.fix ? f.fix[0].toUpperCase() + f.fix.slice(1) + "." : "", f.kicad_move ? `In KiCad, move it X ${f.kicad_move[0] >= 0 ? "+" : ""}${fmt(f.kicad_move[0])}, Y ${f.kicad_move[1] >= 0 ? "+" : ""}${fmt(f.kicad_move[1])} mm.` : ""].filter(Boolean).join(" ")));
     const place = d.placement ? h("div", { class: "hint" }, `Board placed: ${d.placement.how}.`) : null;
-    report.replaceChildren(verdict, place, ...items, h("div", { class: "links" },
+    const tol = d.tolerances ? h("details", {}, h("summary", {}, `Worst-case gaps (${d.tolerances.findings.length ? d.tolerances.findings.length + " tight" : "all fine"})`),
+      h("div", { class: "summary" }, h("table", {}, d.tolerances.rows.map(r => h("tr", {}, h("td", {}, r.what),
+        h("td", {}, r.nominal !== undefined ? `${fmt(r.nominal)} mm, worst ${fmt(r.worst)} mm` : `hole play ${fmt(r.float)} mm, worst error ${fmt(r.worst_misplacement)} mm`))))),
+      ...d.tolerances.findings.map(f => msg("warn", `${f.subject}: ${f.message}`, f.fix))) : null;
+    report.replaceChildren(verdict, place, ...items, tol, h("div", { class: "links" },
       h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([d.punch_list], { type: "text/markdown" }), "punch_list.md") }, "Punch list"),
       h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([JSON.stringify(d.report, null, 2)], { type: "application/json" }), "report.json") }, "report.json"),
       h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([d.view], { type: "text/html" }), "fit_view.html") }, "3D view")),
@@ -1078,7 +1164,7 @@ stockform.addEventListener("submit", async ev => {
   fd.set("drawings", e.drawings.value); fd.set("part_number", e.part_number.value); fd.set("material", e.material.value);
   await busy(ev.submitter, "Working...", async () => {
     const r = await download(await fetch("api/stock", { method: "POST", body: fd }), "drilled.zip");
-    report.replaceChildren(r.error ? msg("err", r.error) : msg("ok", "Downloaded: the drilled box as STEP, drill_templates.pdf and holes.json" +
+    report.replaceChildren(r.error ? msg("err", r.error) : msg("ok", "Downloaded: the drilled box as STEP, drill_templates.pdf, each face as DXF and G-code (set the feeds for your machine), and holes.json" +
       (e.drawings.value ? ", and the drawings" : "") + ". Print the templates at 100% and check the 50 mm bar."));
   });
 });

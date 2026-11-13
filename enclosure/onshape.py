@@ -29,6 +29,10 @@ def unsupported(spec: BoxSpec) -> list[str]:
     out = []
     if spec.lid in ("snap", "slide"):
         out.append(f"{spec.lid} lid (the feature makes a friction lid)")
+    if spec.lid == "clamshell":
+        out.append("clamshell (the feature makes a screw lid)")
+    if spec.light_pipes:
+        out.append("light pipes")
     for name, on in (("gasket", spec.gasket), ("keyholes", spec.keyholes), ("DIN clip", spec.din_rail),
                      ("labels", spec.labels), ("mounting ears", spec.flange),
                      ("standoff gussets", spec.standoffs and spec.standoff_ribs), ("pin standoffs", spec.standoff_hole == "pin")):
@@ -51,7 +55,8 @@ def feature_studio(spec: BoxSpec) -> tuple[str, list[str]]:
     """The Feature Studio text, and the settings it leaves out."""
     spec.check()
     L, W, H = spec.inner
-    lid = {"screw": "SCREW", "friction": "FRICTION", "snap": "FRICTION", "slide": "NONE", "none": "NONE"}[spec.lid]
+    lid = {"screw": "SCREW", "friction": "FRICTION", "snap": "FRICTION", "slide": "NONE", "none": "NONE",
+           "clamshell": "SCREW"}[spec.lid]
     d_post, depth_post = spec.hole(spec.lid_screw, spec.lid_screw_hole)
     clear, _, _, _, head = SCREWS[spec.lid_screw]
     if spec.standoffs:

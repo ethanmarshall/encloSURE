@@ -101,9 +101,41 @@ class _Board:
                 '  (net 0 "")\n\n' + "\n\n".join(self.items) + "\n)\n")
 
 
+def free_outline(base, cavity_bounds, z: float, clearance: float):
+    """The space free for the board at height z: the inside less the base there (rounded corners,
+    corner posts, ribs), inset by the clearance, as page-free (x, y) points. None if it can't be found."""
+    from build123d import Axis, Box, Location
+    (x0, y0, _), (x1, y1, _) = cavity_bounds
+    slab = Box(x1 - x0, y1 - y0, 0.4).locate(Location(((x0 + x1) / 2, (y0 + y1) / 2, z)))
+    try:
+        free = slab - base
+        solids = free.solids()
+        if not solids:
+            return None
+        piece = max(solids, key=lambda s: s.volume)
+        top = piece.faces().sort_by(Axis.Z)[-1]
+        wire = top.outer_wire().offset_2d(-clearance, kind=__import__("build123d").Kind.ARC)
+    except Exception:
+        return None
+    pts = []
+    for e in wire.edges():
+        n = 2 if e.geom_type.name == "LINE" else 9
+        for i in range(n - 1):
+            p = e.position_at(i / (n - 1))
+            pts.append((round(p.X, 4), round(p.Y, 4)))
+    # Drop repeats and points on straight runs.
+    clean = []
+    for p in pts:
+        if not clean or abs(p[0] - clean[-1][0]) > 1e-4 or abs(p[1] - clean[-1][1]) > 1e-4:
+            clean.append(p)
+    return clean if len(clean) >= 3 else None
+
+
 def limits(enc: Enclosure, out: str | Path, clearance: float = 0.5, pcb_thickness: float = 1.6,
-           origin=ORIGIN) -> dict:
-    """Write a .kicad_pcb holding the enclosure's limits. Returns what was written."""
+           origin=ORIGIN, base=None) -> dict:
+    """Write a .kicad_pcb holding the enclosure's limits. Returns what was written. With the base,
+    the outline follows the free space at board height (rounded corners, corner posts), else it is
+    the inside rectangle less the clearance."""
     if not enc.bosses:
         raise ValueError("the enclosure has no standoffs to mount a board on")
     board = _Board(origin, pcb_thickness)
@@ -112,6 +144,11 @@ def limits(enc: Enclosure, out: str | Path, clearance: float = 0.5, pcb_thicknes
     (x0, y0, _), (x1, y1, _) = enc.cavity_bounds
     x0, y0, x1, y1 = x0 + clearance, y0 + clearance, x1 - clearance, y1 - clearance
     corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    shape = free_outline(base, enc.cavity_bounds, seat + pcb_thickness / 2, clearance) if base is not None else None
+    if shape:
+        corners = shape
+        xs, ys = [p[0] for p in shape], [p[1] for p in shape]
+        x0, y0, x1, y1 = min(xs), min(ys), max(xs), max(ys)
     for a, b in zip(corners, corners[1:] + corners[:1]):
         board.line("Edge.Cuts", a, b, 0.1)
 
@@ -166,7 +203,7 @@ def limits(enc: Enclosure, out: str | Path, clearance: float = 0.5, pcb_thicknes
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
     out.write_text(board.text_out())
-    return {"file": str(out), "outline": [[x0, y0], [x1, y1]], "holes": holes, "openings": marks,
+    return {"file": str(out), "outline": [[x0, y0], [x1, y1]], "outline_points": len(corners), "holes": holes, "openings": marks,
             "max_height_top": up, "max_height_bottom": down, "seat": seat, "origin": list(origin)}
 
 
@@ -345,3 +382,215 @@ def moves_from_fit(findings: list[dict]) -> dict:
             continue  # one move per footprint: the first finding's
         moves[key] = (km[0], km[1])
     return moves
+
+
+# The board's shape from the .kicad_pcb: its Edge.Cuts outline, holes and each footprint's courtyard,
+# so a box can be made from the KiCad file alone (no STEP export, no 3D models).
+
+def _xy(node):
+    return float(node[1]), float(node[2])
+
+
+def _arc_points(a, m, b, n=12):
+    """Points along the circle through a, m, b (start, mid, end)."""
+    (ax, ay), (mx, my), (bx, by) = a, m, b
+    d = 2 * (ax * (my - by) + mx * (by - ay) + bx * (ay - my))
+    if abs(d) < 1e-9:
+        return [a, b]
+    ux = ((ax * ax + ay * ay) * (my - by) + (mx * mx + my * my) * (by - ay) + (bx * bx + by * by) * (ay - my)) / d
+    uy = ((ax * ax + ay * ay) * (bx - mx) + (mx * mx + my * my) * (ax - bx) + (bx * bx + by * by) * (mx - ax)) / d
+    r = math.hypot(ax - ux, ay - uy)
+    t0, tm, t1 = (math.atan2(p[1] - uy, p[0] - ux) for p in (a, m, b))
+    # Go from t0 to t1 the way that passes tm.
+    def norm(t):
+        return t % (2 * math.pi)
+    span = norm(t1 - t0)
+    if norm(tm - t0) > span:
+        span -= 2 * math.pi
+    return [(ux + r * math.cos(t0 + span * i / n), uy + r * math.sin(t0 + span * i / n)) for i in range(n + 1)]
+
+
+def _shape_points(node):
+    """The polyline (or closed polygon) of a gr_/fp_ graphic, and whether it is closed."""
+    kind = node[0][3:]  # line, arc, rect, circle, poly
+    get = {k[0]: k for k in node[1:] if isinstance(k, list) and k}
+    if kind == "line":
+        return [_xy(get["start"]), _xy(get["end"])], False
+    if kind == "arc":
+        if "mid" in get:
+            return _arc_points(_xy(get["start"]), _xy(get["mid"]), _xy(get["end"])), False
+        # KiCad 6: (start centre) (end point) (angle)
+        c, p = _xy(get["start"]), _xy(get["end"])
+        ang = math.radians(float(get["angle"][1]))
+        r, t0 = math.hypot(p[0] - c[0], p[1] - c[1]), math.atan2(p[1] - c[1], p[0] - c[0])
+        return [(c[0] + r * math.cos(t0 + ang * i / 12), c[1] + r * math.sin(t0 + ang * i / 12)) for i in range(13)], False
+    if kind == "rect":
+        (x0, y0), (x1, y1) = _xy(get["start"]), _xy(get["end"])
+        return [(x0, y0), (x1, y0), (x1, y1), (x0, y1)], True
+    if kind == "circle":
+        c, e = _xy(get["center"]), _xy(get["end"])
+        r = math.hypot(e[0] - c[0], e[1] - c[1])
+        return [(c[0] + r * math.cos(2 * math.pi * i / 36), c[1] + r * math.sin(2 * math.pi * i / 36)) for i in range(36)], True
+    if kind == "poly":
+        pts = get.get("pts")
+        return ([_xy(p) for p in pts[1:] if isinstance(p, list) and p[0] == "xy"] if pts else []), True
+    return [], False
+
+
+def _loops(pieces, tol=0.02):
+    """Chain open polylines end to end into closed loops."""
+    loops = [p for p, closed in pieces if closed and len(p) >= 3]
+    open_ = [list(p) for p, closed in pieces if not closed and len(p) >= 2]
+    near = lambda a, b: abs(a[0] - b[0]) < tol and abs(a[1] - b[1]) < tol  # noqa: E731
+    while open_:
+        chain = open_.pop(0)
+        grew = True
+        while grew and not near(chain[0], chain[-1]):
+            grew = False
+            for i, seg in enumerate(open_):
+                if near(chain[-1], seg[0]):
+                    chain += seg[1:]
+                elif near(chain[-1], seg[-1]):
+                    chain += seg[::-1][1:]
+                elif near(chain[0], seg[-1]):
+                    chain = seg[:-1] + chain
+                elif near(chain[0], seg[0]):
+                    chain = seg[::-1][:-1] + chain
+                else:
+                    continue
+                open_.pop(i)
+                grew = True
+                break
+        if near(chain[0], chain[-1]) and len(chain) >= 4:
+            loops.append(chain[:-1])
+    return loops
+
+
+def _area(poly):
+    return abs(sum(a[0] * b[1] - b[0] * a[1] for a, b in zip(poly, poly[1:] + poly[:1]))) / 2
+
+
+def _place(local, at, rot_deg):
+    """A footprint-local point on the page (KiCad: Y down, rotation counter-clockwise on screen)."""
+    t = math.radians(rot_deg)
+    x, y = local
+    return at[0] + x * math.cos(t) + y * math.sin(t), at[1] - x * math.sin(t) + y * math.cos(t)
+
+
+def board_geometry(kicad_pcb: str | Path) -> dict:
+    """The board's outline (the largest Edge.Cuts loop, page mm), its cutouts (the other loops), its
+    thickness, its holes (x, y, drill) and each footprint's courtyard outline on the page."""
+    board = parse(Path(kicad_pcb).read_text(encoding="utf-8"))
+    if not board or board[0] != "kicad_pcb":
+        raise ValueError(f"{kicad_pcb}: not a KiCad board")
+    general = _kids(board, "general")
+    thick = 1.6
+    if general:
+        t = _kids(general[0], "thickness")
+        thick = float(t[0][1]) if t else 1.6
+    pieces = []
+    for node in board[1:]:
+        if isinstance(node, list) and node and str(node[0]).startswith("gr_"):
+            layer = _kids(node, "layer")
+            if layer and layer[0][1] == "Edge.Cuts":
+                pieces.append(_shape_points(node))
+    loops = sorted(_loops(pieces), key=_area, reverse=True)
+    if not loops:
+        raise ValueError(f"{kicad_pcb}: no closed outline on Edge.Cuts")
+    holes, parts = [], {}
+    for fp in _kids(board, "footprint") + _kids(board, "module"):
+        at = (_kids(fp, "at") or [["at", "0", "0"]])[0]
+        pos, rot = (float(at[1]), float(at[2])), float(at[3]) if len(at) > 3 else 0.0
+        lib = fp[1] if len(fp) > 1 and isinstance(fp[1], str) else ""
+        refs = [p[2] for p in _kids(fp, "property") if len(p) >= 3 and p[1] == "Reference"]
+        refs += [t[2] for t in _kids(fp, "fp_text") if len(t) >= 3 and t[1] == "reference"]
+        ref = refs[0] if refs else ""
+        layer = (_kids(fp, "layer") or [["layer", "F.Cu"]])[0][1]
+        court = []
+        for g in fp[1:]:
+            if isinstance(g, list) and g and str(g[0]).startswith("fp_"):
+                gl = _kids(g, "layer")
+                if gl and gl[0][1] in ("F.CrtYd", "B.CrtYd"):
+                    pts, _ = _shape_points(g)
+                    court += [_place(p, pos, rot) for p in pts]
+        mounting = "mountinghole" in lib.lower().replace("_", "") or ref.upper().startswith(("H", "MH"))
+        for pad in _kids(fp, "pad"):
+            drill = _kids(pad, "drill")
+            if not drill or len(drill[0]) < 2:
+                continue
+            try:
+                d = float(drill[0][2] if drill[0][1] == "oval" else drill[0][1])
+            except (ValueError, IndexError):
+                continue
+            pat = (_kids(pad, "at") or [["at", "0", "0"]])[0]
+            px, py = _place((float(pat[1]), float(pat[2])), pos, rot)
+            if mounting or (pad[2] == "np_thru_hole" and 1.9 <= d <= 5.5):
+                holes.append((round(px, 4), round(py, 4), d))
+        if ref:
+            parts[ref] = {"lib": lib, "at": list(pos), "rotation": rot, "side": "bottom" if layer.startswith("B.") else "top",
+                          "courtyard": court, "has_model": bool(_kids(fp, "model")), "mounting": mounting}
+    return {"outline": loops[0], "cutouts": loops[1:], "thickness": thick, "holes": holes, "parts": parts}
+
+
+# Heights for parts with no model and no parts.json size, by footprint library name: typical, so a
+# box can be made; parts.json `body` or a 3D model should replace them.
+TYPICAL_HEIGHT = [("usb_c", 3.3), ("usb_micro", 2.7), ("usb_a", 7.0), ("rj45", 13.5), ("barrel", 11.0), ("dc_jack", 11.0),
+                  ("terminalblock", 10.0), ("pinheader", 8.5), ("pinsocket", 8.5), ("jst", 6.0), ("idc", 9.0),
+                  ("cp_radial", 12.0), ("button", 5.0), ("sw_", 5.0), ("led_d5", 8.6), ("led_d3", 5.3), ("led", 1.0),
+                  ("relay", 15.5), ("buzzer", 9.5), ("module", 4.0), ("sot", 1.2), ("soic", 1.8), ("qfn", 1.0),
+                  ("r_", 0.6), ("c_", 1.0)]
+
+
+def typical_height(lib: str) -> float:
+    key = lib.lower().split(":")[-1]
+    return next((h for k, h in TYPICAL_HEIGHT if k in key), 3.0)
+
+
+def board_solids(kicad_pcb: str | Path, specs: dict | None = None):
+    """The board as Named solids in the STEP frame (KiCad page (x, y) is (x, -y), board bottom at
+    z = 0): the plate with its holes, and a block for each footprint from its courtyard and a height
+    (parts.json `body`, else a typical one for its kind). Returns (solids, notes)."""
+    from build123d import Box, Cylinder, Polygon, Pos, extrude
+    from .geom import Named
+    g = board_geometry(kicad_pcb)
+    t = g["thickness"]
+    def slab(loop):
+        s = extrude(Polygon(*[(x, -y) for x, y in loop], align=None), amount=t)
+        z0 = s.bounding_box().min.Z
+        return Pos(0, 0, -z0) * s if abs(z0) > 1e-6 else s  # flipping Y reverses the winding
+    plate = slab(g["outline"])
+    for loop in g["cutouts"]:
+        plate -= slab(loop)
+    for x, y, d in g["holes"]:
+        plate -= Pos(x, -y, t / 2) * Cylinder(d / 2, t + 1)
+    solids, typical = [Named("PCB", plate)], []
+    for ref, p in g["parts"].items():
+        if p["mounting"] or len(p["courtyard"]) < 2:
+            continue
+        xs = [q[0] for q in p["courtyard"]]
+        ys = [-q[1] for q in p["courtyard"]]
+        spec = (specs or {}).get(ref)
+        if spec is not None and getattr(spec, "body", None):
+            h = spec.body[2]
+        else:
+            h = typical_height(p["lib"])
+            typical.append(f"{ref} {h:g}")
+        w, l = max(xs) - min(xs), max(ys) - min(ys)
+        cx, cy = (max(xs) + min(xs)) / 2, (max(ys) + min(ys)) / 2
+        # The courtyard keeps a margin round the part (0.25 mm in KiCad's libraries): take it off.
+        w, l = max(w - 0.5, 0.2), max(l - 0.5, 0.2)
+        z = t + 0.05 + h / 2 if p["side"] == "top" else -0.05 - h / 2
+        solids.append(Named(ref, Pos(cx, cy, z) * Box(w, l, h)))
+    notes = []
+    if typical:
+        notes.append("typical heights used (no 3D model or parts.json size): " + ", ".join(typical))
+    return solids, notes
+
+
+def outline_text(points, layer="Edge.Cuts", width=0.1) -> list[str]:
+    """gr_line items for a closed polyline (page mm)."""
+    out = []
+    for a, b in zip(points, points[1:] + points[:1]):
+        out.append(f'  (gr_line (start {_n(a[0])} {_n(a[1])}) (end {_n(b[0])} {_n(b[1])})\n'
+                   f'    (stroke (width {_n(width)}) (type default)) (layer {_q(layer)}) (tstamp {uuid.uuid4()}))')
+    return out

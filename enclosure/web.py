@@ -10,6 +10,7 @@ from __future__ import annotations
 import base64
 import io
 import json
+import re
 import tempfile
 import zipfile
 from dataclasses import asdict, fields
@@ -158,7 +159,7 @@ def preview(body: dict):
     except (ValueError, RuntimeError) as e:
         _bad(e)
     out = {"inner": made["inner"], "outer": made["outer"], "notes": made["notes"], "checks": made["checks"],
-           "estimate": made.get("estimate"),
+           "estimate": made.get("estimate"), "print_plan": made.get("print_plan"), "thermal": made.get("thermal"),
            "base": base64.b64encode(_stl(made["base"])).decode()}
     if made["lid"] is not None:
         out["lid"] = base64.b64encode(_stl(made["lid"])).decode()
@@ -282,7 +283,7 @@ async def enclosure_read(base: UploadFile | None = File(None), lid: UploadFile |
                    "base": base64.b64encode(_stl(b)).decode(),
                    "lid": base64.b64encode(_stl(l)).decode() if l is not None else None}
             try:
-                lim = kicad.limits(enc, d / "board.kicad_pcb", clearance=clearance, pcb_thickness=thickness)
+                lim = kicad.limits(enc, d / "board.kicad_pcb", clearance=clearance, pcb_thickness=thickness, base=b)
                 lim.pop("file")
                 out["limits"] = lim
                 out["kicad_pcb"] = (d / "board.kicad_pcb").read_text()
@@ -298,7 +299,7 @@ async def fit_check(board: UploadFile | None = File(None), base: UploadFile | No
                     lid: UploadFile | None = File(None), box: str | None = Form(None),
                     pcb: UploadFile | None = File(None), parts: UploadFile | None = File(None),
                     sample: bool = Form(False), clearance: float = Form(0.5),
-                    opening_margin: float = Form(0.25), max_setback: float = Form(2.0)):
+                    opening_margin: float = Form(0.25), max_setback: float = Form(2.0), material: str = Form("PETG")):
     """Check a finished board (KiCad's STEP export) in its enclosure."""
     from . import fit as fitmod, geom, parts as partsmod, report
     try:
@@ -317,6 +318,8 @@ async def fit_check(board: UploadFile | None = File(None), base: UploadFile | No
             specs = partsmod.load(parts_path) if parts_path else {}
             footprints = partsmod.from_board(pcb_path) if pcb_path else None
             result = fitmod.check(enc, b, l, geom.step_names(board_path), settings, None, specs, footprints)
+            from . import tolerance
+            tol = tolerance.stack(enc, result, tolerance.Tolerances(material=material))
             title = f"EncloSURE: {Path(board.filename).stem if board is not None and board.filename else name}"
             files = report.write(d / "fit", enc, result, b, l, title=title)
             j = result.to_json()
@@ -328,7 +331,7 @@ async def fit_check(board: UploadFile | None = File(None), base: UploadFile | No
                     done = kicad.move_footprints(pcb_path, moves, d / "fixed.kicad_pcb")
                     fixed = {"kicad_pcb": (d / "fixed.kicad_pcb").read_text(), "moved": done,
                              "name": Path(pcb.filename).stem + "_fixed.kicad_pcb"}
-            return {"fixed": fixed, "fits": j["fits"], "errors": j["errors"], "warnings": j["warnings"],
+            return {"tolerances": tol, "fixed": fixed, "fits": j["fits"], "errors": j["errors"], "warnings": j["warnings"],
                     "placement": j["placement"], "headroom": j["headroom"], "findings": j["findings"],
                     "punch_list": Path(files["punch_list"]).read_text(),
                     "report": json.loads(Path(files["report"]).read_text()),
@@ -342,6 +345,86 @@ def _title(body: dict) -> dict:
     return {k: str(v).strip()[:60] for k, v in t.items() if k in ("title", "part_number", "material", "drawn_by", "company") and str(v).strip()}
 
 
+def _library():
+    """The shared designs folder ($ENCLOSURE_DATA_DIR/library), or None when the server keeps none."""
+    import os
+    root = os.environ.get("ENCLOSURE_DATA_DIR")
+    if not root:
+        return None
+    p = Path(root) / "library"
+    p.mkdir(parents=True, exist_ok=True)
+    return p
+
+
+@app.get("/api/library")
+def library_list():
+    lib = _library()
+    if lib is None:
+        return {"enabled": False, "designs": []}
+    items = []
+    for f in sorted(lib.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
+        try:
+            d = json.loads(f.read_text())
+            items.append({"id": f.stem, "name": d["name"], "by": d.get("by", ""), "at": d.get("at", 0),
+                          "size": d["design"].get("size")})
+        except (ValueError, KeyError):
+            continue
+    return {"enabled": True, "designs": items}
+
+
+@app.get("/api/library/{item}")
+def library_get(item: str):
+    lib = _library()
+    if lib is None or not re.fullmatch(r"[0-9a-f]{32}", item) or not (lib / f"{item}.json").exists():
+        raise HTTPException(status_code=404, detail="no such design")
+    return json.loads((lib / f"{item}.json").read_text())
+
+
+@app.post("/api/library")
+def library_add(body: dict):
+    import time
+    import uuid
+    lib = _library()
+    if lib is None:
+        _bad(ValueError("this server keeps no shared library (set ENCLOSURE_DATA_DIR)"))
+    name = str(body.get("name", "")).strip()[:80]
+    if not name:
+        _bad(ValueError("give the design a name"))
+    design = body.get("design") or {}
+    try:
+        spec_from(dict(design))  # only boxes that build go in
+    except (ValueError, TypeError) as e:
+        _bad(e)
+    item = uuid.uuid4().hex
+    (lib / f"{item}.json").write_text(json.dumps({"name": name, "by": str(body.get("by", "")).strip()[:60],
+                                                  "at": int(time.time() * 1000), "design": design}) + "\n")
+    return {"id": item}
+
+
+@app.delete("/api/library/{item}")
+def library_delete(item: str):
+    lib = _library()
+    if lib is None or not re.fullmatch(r"[0-9a-f]{32}", item):
+        raise HTTPException(status_code=404, detail="no such design")
+    (lib / f"{item}.json").unlink(missing_ok=True)
+    return {"ok": True}
+
+
+@app.post("/api/onshape")
+def to_onshape(body: dict):
+    """Send the quick box's Onshape feature to a new Onshape document."""
+    from . import onshape, onshape_push
+    try:
+        spec = spec_from(body)
+        text, skipped = onshape.feature_studio(spec)
+        L, W, H = spec.inner
+        out = onshape_push.push(text, f"EncloSURE box {L:g}x{W:g}x{H:g}")
+        out["skipped"] = skipped
+        return out
+    except (ValueError, RuntimeError) as e:
+        _bad(e)
+
+
 @app.get("/api/health")
 def health():
     from . import drawing
@@ -350,7 +433,8 @@ def health():
         dw = True
     except RuntimeError:
         dw = False
-    return {"ok": True, "draftwright": dw}
+    from . import onshape_push
+    return {"ok": True, "draftwright": dw, "library": _library() is not None, "onshape": onshape_push.enabled()}
 
 
 @app.post("/api/drawing")
@@ -373,13 +457,15 @@ def make_drawing(body: dict):
 
 
 @app.post("/api/describe")
-def describe_box(body: dict):
+async def describe_box(text: str = Form(""), pcb: UploadFile | None = File(None)):
     from . import describe
-    text = str(body.get("text", ""))[:600]
-    if not text.strip():
+    text = text[:600]
+    if not text.strip() and (pcb is None or not pcb.filename):
         _bad(ValueError("describe the project first"))
     try:
-        r = describe.make(text)
+        with tempfile.TemporaryDirectory() as d:
+            pcb_path = await _save(pcb, Path(d) / "board.kicad_pcb")
+            r = describe.make(text, pcb=pcb_path)
         return {"spec": asdict(r["spec"]), "notes": r["notes"], "kicad_pcb": r["kicad_pcb"]}
     except (ValueError, RuntimeError) as e:
         _bad(e)
@@ -415,7 +501,7 @@ def fit_coupon():
 
 
 @app.post("/api/frompcb")
-async def from_board(board: UploadFile = File(...), pcb: UploadFile | None = File(None),
+async def from_board(board: UploadFile | None = File(None), pcb: UploadFile | None = File(None),
                      parts: UploadFile | None = File(None), lid: str = Form("screw"), wall: float = Form(2.0),
                      edge_gap: float = Form(1.0), standoff_height: float = Form(5.0), headroom: float = Form(2.0)):
     """A quick box designed around a board, checked with the board in it."""
@@ -427,8 +513,13 @@ async def from_board(board: UploadFile = File(...), pcb: UploadFile | None = Fil
             pcb_path = await _save(pcb, d / "board.kicad_pcb")
             parts_path = await _save(parts, d / "parts.json")
             st = frompcb.Settings(lid=lid, wall=wall, edge_gap=edge_gap, standoff_height=standoff_height, headroom=headroom)
-            r = frompcb.make(step, st, partsmod.load(parts_path) if parts_path else {},
-                             partsmod.from_board(pcb_path) if pcb_path else None)
+            specs = partsmod.load(parts_path) if parts_path else {}
+            if step is not None:
+                r = frompcb.make(step, st, specs, partsmod.from_board(pcb_path) if pcb_path else None)
+            elif pcb_path is not None:
+                r = frompcb.from_kicad(pcb_path, st, specs)
+            else:
+                raise ValueError("upload the board's STEP, or its .kicad_pcb")
             j = r["fit"].to_json()
             return {"spec": asdict(r["spec"]), "notes": r["notes"], "fits": j["fits"], "errors": j["errors"],
                     "warnings": j["warnings"], "findings": j["findings"]}

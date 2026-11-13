@@ -67,7 +67,7 @@ def design(board_step, settings: Settings | None = None, specs: dict | None = No
            footprints: dict | None = None):
     """The BoxSpec that fits the board, and notes on why each choice was made."""
     s = settings or Settings()
-    solids = step_names(board_step)
+    solids = board_step if isinstance(board_step, list) else step_names(board_step)
     pcb = fitmod.pcb_of(solids)
     pb = bbox(pcb.shape)
     (bx0, by0, bz0), (bx1, by1, bz1) = pb
@@ -125,7 +125,7 @@ def design(board_step, settings: Settings | None = None, specs: dict | None = No
 
     # A screw lid's corner posts fill a square in each inside corner: grow the box along the axis
     # with fewer connectors until the board's corners clear them.
-    if s.lid == "screw":
+    if s.lid in ("screw", "clamshell"):
         boss = boxmod._post_boss(boxmod.BoxSpec(lid="screw"), boxmod.BoxSpec().hole("M3", "insert")[0])
         need_x = boss - min(gap["-X"], gap["+X"]) + 0.5
         need_y = boss - min(gap["-Y"], gap["+Y"]) + 0.5
@@ -181,8 +181,28 @@ def design(board_step, settings: Settings | None = None, specs: dict | None = No
                      f"({'its datasheet cutout' if spec is not None and spec.cutout else 'its face plus ' + format(s.margin, 'g') + ' mm a side'})")
     spec = boxmod.BoxSpec(size=[L, W, H], wall=s.wall, floor=s.floor, lid=s.lid, standoffs=standoffs,
                           standoff_height=so_h, standoff_screw=screw, cutouts=cutouts, teardrop=False)
+    if s.lid == "clamshell":
+        # Part the shells above every wall opening, so each opening is whole in the lower shell.
+        tops = [c["at"][1] + c["size"][1] / 2 for c in cutouts if c["face"] in ("-X", "+X", "-Y", "+Y")]
+        need = (max(tops, default=0.0) + 1.0) / H
+        if need > 0.8:
+            spec.size[2] = H = round((max(tops) + 1.0) / 0.8, 1)
+            need = 0.8
+            notes.append(f"taller ({H:g} mm inside) so the clamshell parts above the openings")
+        spec.split = round(max(0.5, need), 3)
+        notes.append(f"clamshell parts at {spec.split * H:.1f} mm, above the wall openings")
     frame = {"board_to_box": [-cx, -cy, z_shift], "board_bounds": [list(pb[0]), list(pb[1])]}
     return spec, notes, frame
+
+
+def from_kicad(kicad_pcb, settings: Settings | None = None, specs: dict | None = None):
+    """A box from the .kicad_pcb alone: its outline, holes and footprints' courtyards, with heights
+    from parts.json or typical ones (listed in the notes)."""
+    from . import kicad
+    solids, notes = kicad.board_solids(kicad_pcb, specs)
+    r = make(solids, settings, specs)
+    r["notes"] = notes + r["notes"]
+    return r
 
 
 def make(board_step, settings: Settings | None = None, specs: dict | None = None, footprints: dict | None = None):
@@ -192,6 +212,6 @@ def make(board_step, settings: Settings | None = None, specs: dict | None = None
     spec.check()
     made = boxmod.build(spec)
     enc, _ = shell.read(made["base"], made["lid"])
-    result = fitmod.check(enc, made["base"], made["lid"], step_names(board_step), fitmod.Settings(), None,
-                          specs or {}, footprints)
+    board = board_step if isinstance(board_step, list) else step_names(board_step)
+    result = fitmod.check(enc, made["base"], made["lid"], board, fitmod.Settings(), None, specs or {}, footprints)
     return {"spec": spec, "notes": notes, "made": made, "enclosure": enc, "fit": result, "frame": frame}

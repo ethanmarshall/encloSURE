@@ -73,7 +73,7 @@ def exploded(spec: boxmod.BoxSpec, made: dict, board=None, gap: float = 25.0):
         lid.label = "Enclosure lid"
         parts.append(lid)
         bom.append({"item": "Enclosure lid", "qty": 1, "make": "make", "note": f"{spec.material}, printed"})
-        if spec.lid == "screw":
+        if spec.lid in ("screw", "clamshell"):
             m = spec.lid_screw
             length = _stock(spec.lid_thickness / 2 + (spec.insert_depth or boxmod.SCREWS[m][3]))
             name = f"{m}x{length} screw"

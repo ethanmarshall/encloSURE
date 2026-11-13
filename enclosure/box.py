@@ -29,7 +29,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from build123d import (Align, Axis, Box, Compound, Cone, Cylinder, Location, Polygon, Pos, Rot, Text,
+from build123d import (Shape, Align, Axis, Box, Compound, Cone, Cylinder, Location, Polygon, Pos, Rot, Text,
                        chamfer, export_step, export_stl, extrude, fillet)
 
 from .presets import GLANDS, PRESETS, resolve
@@ -43,7 +43,8 @@ SCREWS = {
     "M3": (3.4, 2.5, 4.0, 5.7, 5.5),
     "M4": (4.5, 3.4, 5.6, 8.1, 7.0),
 }
-LIDS = ("screw", "friction", "snap", "slide", "none")
+LIDS = ("screw", "friction", "snap", "slide", "none", "clamshell")
+TOP_LIDS = ("screw", "friction", "snap", "clamshell")  # a lid across the top
 PIN_HOLE = {"M2": 2.2, "M2.5": 2.7, "M3": 3.2, "M4": 4.3}  # the board hole a pin goes through
 # Cells: (diameter, length) with a little room; AA and AAA are IEC 60086-2 maximums, 18650 and 21700
 # their names (18 x 65, 21 x 70 mm) plus room for protected cells. Check your cells.
@@ -164,6 +165,11 @@ class BoxSpec:
     tie_points: list[list[float]] = field(default_factory=list)
     cable_notches: list[dict] = field(default_factory=list)
     material: str = "PETG"  # for the weight estimate: PETG, PLA, ABS, ASA
+    # Clamshell: the box splits at this fraction of the inside height (from the floor) into two shells
+    split: float = 0.6
+    # Light pipes: tubes from the lid down to LEDs on the board: [{at: [x, y], d}]
+    light_pipes: list[dict] = field(default_factory=list)
+    power_w: float = 0.0  # heat the electronics give off, for the temperature estimate
 
     # The box's dimensions
     @property
@@ -208,7 +214,7 @@ class BoxSpec:
         if self.standoff_hole not in ("tap", "insert", "clearance", "pin"):
             raise ValueError("standoff_hole: tap, insert, clearance or pin (a snap-in peg)")
         L_in, W_in, _ = self.inner
-        if self.lid_standoffs and self.lid not in ("screw", "friction", "snap"):
+        if self.lid_standoffs and self.lid not in TOP_LIDS:
             raise ValueError("lid standoffs need a lid on top")
         if self.lid_standoff_screw not in SCREWS:
             raise ValueError(f"lid_standoff_screw: one of {', '.join(SCREWS)}")
@@ -220,6 +226,15 @@ class BoxSpec:
         for n in self.cable_notches:
             if face_name(n.get("face", "")) not in WALLS or not 2 <= n.get("d", 0) <= 30:
                 raise ValueError("cable notch: on a wall, 2 to 30 mm wide")
+        if self.lid == "clamshell" and not 0.2 <= self.split <= 0.8:
+            raise ValueError("split: where the clamshell parts, 0.2 to 0.8 of the inside height")
+        if self.light_pipes and self.lid not in TOP_LIDS:
+            raise ValueError("light pipes hang from a lid on top")
+        for lp in self.light_pipes:
+            if not 1.0 <= lp.get("d", 3.0) <= 10.0:
+                raise ValueError("light pipe: d, the pipe's diameter, 1 to 10 mm")
+        if not 0 <= self.power_w <= 200:
+            raise ValueError("power_w: the electronics' heat, 0 to 200 W")
         if self.material not in DENSITY:
             raise ValueError(f"material: one of {', '.join(DENSITY)}")
         for x in self.card_slots:
@@ -229,7 +244,7 @@ class BoxSpec:
             f = face_name(wdw.get("face", ""))
             if f not in ("lid", *WALLS):
                 raise ValueError("window: on the lid or a wall")
-            if f == "lid" and self.lid not in ("screw", "friction", "snap"):
+            if f == "lid" and self.lid not in TOP_LIDS:
                 raise ValueError("a lid window needs a lid on top")
             w, h = wdw.get("size", [0, 0])
             pw, ph = wdw.get("panel", [w + 4, h + 4])
@@ -259,7 +274,7 @@ class BoxSpec:
         for t in self.labels:
             if face_name(t.get("face", "")) not in ("lid", *WALLS) or not t.get("text"):
                 raise ValueError("label: {face: lid or a wall, text, size, at, depth}")
-            if t.get("face") == "lid" and self.lid not in ("screw", "friction", "snap"):
+            if t.get("face") == "lid" and self.lid not in TOP_LIDS:
                 raise ValueError("a lid label needs a lid on top")
 
     def hole(self, screw: str, kind: str) -> tuple[float, float | None]:
@@ -314,6 +329,8 @@ def _on_wall(tool, face: str, along: float, z: float, oL: float, oW: float):
 def build(spec: BoxSpec) -> dict:
     """The base and lid as solids, notes on what was made, and checks worth a look."""
     spec.check()
+    if spec.lid == "clamshell":
+        return _clamshell(spec)
     L, W, H = spec.inner
     oL, oW = L + 2 * spec.wall, W + 2 * spec.wall
     base_h = spec.base_height()
@@ -698,6 +715,25 @@ def build(spec: BoxSpec) -> dict:
         cut("base", _on_wall(Pos(0, (depth + 1) / 2 - (depth + 1) / 2, 0) * tool, face, a, top - (depth + 1) / 2 + 0.5, oL, oW))
         notes.append(f"cable notch {d:g} mm wide in the top of the {face} wall at {a:g}")
 
+    # Light pipes: a tube from the lid down to just above each LED, the pipe or a clear rod inside.
+    if spec.light_pipes and lid is not None:
+        board_top = spec.floor + spec.standoff_height + spec.board_thickness
+        for lp in spec.light_pipes:
+            (x, y), d = lp.get("at", [0, 0]), lp.get("d", 3.0)
+            gap = lp.get("gap", 1.0)
+            length = top - (board_top + gap)
+            if length < 1.0:
+                checks.append(f"light pipe at ({x:g}, {y:g}): no room between the board and the lid")
+                continue
+            lid += Cylinder(d / 2 + 1.2, length).locate(Location((x, y, top - length / 2)))
+            lid -= Cylinder(d / 2 + 0.1, length + spec.lid_thickness + 2).locate(Location((x, y, top + spec.lid_thickness / 2 - length / 2)))
+            for kx, ky, kr in keep_out:
+                if math.hypot(kx - x, ky - y) < kr + d / 2 + 1.2:
+                    checks.append(f"light pipe at ({x:g}, {y:g}) is over the standoff or post at ({kx:g}, {ky:g})")
+        notes.append(f"{len(spec.light_pipes)} light pipe tubes from the lid to {spec.light_pipes[0].get('gap', 1.0):g} mm "
+                     f"above the board (a {spec.board_thickness:g} mm board on {spec.standoff_height:g} mm standoffs): "
+                     f"fit a light pipe or clear rod of the pipe's diameter")
+
     # What will print badly.
     for name, v in (("wall", spec.wall), ("floor", spec.floor), ("lid", spec.lid_thickness if lid is not None else 9)):
         if v < 1.2:
@@ -718,6 +754,69 @@ def build(spec: BoxSpec) -> dict:
         if t.get("depth", -0.6) > 0 and t.get("size", 6.0) < 4:
             checks.append(f"raised text {t['text']!r} under 4 mm tall may not print cleanly")
 
+    # Support enforcers: the flat-topped wall openings, as blocks a slicer can use to force support there.
+    supports = []
+    for raw in spec.cutouts:
+        c = Cutout(**resolve(raw))
+        if c.face in WALLS and ((c.shape == "rect" and c.size[0] > 10) or (c.shape == "round" and not spec.teardrop and c.size[0] > 8)):
+            w = c.size[0]
+            h = c.size[1] if c.shape == "rect" else c.size[0]
+            supports.append(_on_wall(Box(w - 0.4, h - 0.4, spec.wall), c.face, c.at[0], spec.floor + c.at[1], oL, oW))
+    for wdw in spec.windows:
+        face = face_name(wdw["face"])
+        if face in WALLS and wdw["size"][0] > 10:
+            (w, h), (a, b) = wdw["size"], wdw.get("at", [0, 0])
+            supports.append(_on_wall(Box(w - 0.4, h - 0.4, spec.wall), face, a, spec.floor + b, oL, oW))
+    # Shift each block inward by half a wall so it sits in the wall, not outside it.
+    placed = []
+    for blk in supports:
+        bb = blk.bounding_box()
+        cx, cy = (bb.min.X + bb.max.X) / 2, (bb.min.Y + bb.max.Y) / 2
+        dx = -math.copysign(spec.wall / 2, cx) if abs(abs(cx) - oL / 2) < 0.01 else 0.0
+        dy = -math.copysign(spec.wall / 2, cy) if abs(abs(cy) - oW / 2) < 0.01 else 0.0
+        placed.append(Pos(dx, dy, 0) * blk)
+    print_plan = {
+        "base": "opening up, as modelled" + ("; support the flat-topped wall openings (support_enforcers.stl marks them)" if placed else ", no supports"),
+        "lid": None if lid is None else (
+            "top face down (the STL is flipped that way)" + ("; raised text on top would be on the bed: recess it, or print top up with supports"
+                                                              if any(t.get("depth", -0.6) > 0 and face_name(t.get("face", "")) == "lid" for t in spec.labels) else "")),
+    }
+    if spec.lid == "slide":
+        print_plan["lid"] = "flat on the bed"
+
+    # Temperature rise, roughly: still air round a plastic box, plus air through the vents by chimney effect.
+    thermal = None
+    if spec.power_w > 0:
+        oH = base_h + (spec.lid_thickness if lid is not None else 0)
+        area = 2 * (oL * oW + oL * oH + oW * oH) / 1e6  # m2
+        hcoef = 6.0  # W/m2K: natural convection and radiation, a rough figure for a plastic box in still air
+        vent_area, zs = 0.0, []
+        for v in spec.vents:
+            (w, h), slot, pitch = v["size"], v.get("slot", 2.0), v.get("pitch", 4.0)
+            n = max(1, int((w - slot) // pitch) + 1)
+            vent_area += n * slot * h / 1e6
+            zs.append(v.get("at", [0, 0])[1] if face_name(v["face"]) in WALLS else (base_h if face_name(v["face"]) == "lid" else 0.0))
+        stack = max((max(zs) - min(zs)) / 1000, base_h / 2000) if zs else 0.0
+        def removed(dt):
+            air = 0.0
+            if vent_area > 0:
+                q = 0.6 * (vent_area / 2) * math.sqrt(max(2 * 9.81 * stack * dt / 300.0, 0.0))
+                air = 1.2 * 1005 * q * dt
+            return hcoef * area * dt + air
+        lo, hi = 0.0, 500.0
+        for _ in range(60):
+            mid = (lo + hi) / 2
+            lo, hi = (mid, hi) if removed(mid) < spec.power_w else (lo, mid)
+        dt = round(hi, 1)
+        sealed = round(spec.power_w / (hcoef * area), 1)
+        thermal = {"power_w": spec.power_w, "rise_c": dt, "sealed_rise_c": sealed, "vent_area_mm2": round(vent_area * 1e6),
+                   "note": "rough: still air, even heat; a hot part runs hotter than the air inside"}
+        notes.append(f"{spec.power_w:g} W inside: the air inside runs about {dt:g} °C above the room"
+                     + (f" ({sealed:g} °C if it were sealed)" if vent_area else " (no vents)"))
+        if dt > 15:
+            checks.append(f"about {dt:g} °C above the room with {spec.power_w:g} W: add vents low and high (a chimney), "
+                          f"make the box bigger, or move heat out through a metal panel")
+
     # Weight and print time, roughly.
     vol = base.volume + (lid.volume if lid is not None else 0.0)
     grams = vol / 1000 * DENSITY[spec.material]
@@ -727,7 +826,62 @@ def build(spec: BoxSpec) -> dict:
     notes.append(f"about {grams:.0f} g of {spec.material} and {hours:.1f} h to print (solid; rough, a slicer knows better)")
 
     return {"base": base, "lid": lid, "notes": notes, "checks": checks, "estimate": estimate,
+            "supports": placed, "print_plan": print_plan, "thermal": thermal,
             "inner": [round(v, 3) for v in spec.inner], "outer": [round(v, 3) for v in spec.outer]}
+
+
+def _clamshell(spec: BoxSpec) -> dict:
+    """Two shells: the whole box built closed (a screw lid, no lip), then parted at `split` of the
+    inside height. The lower shell keeps the corner posts' inserts at the parting line and a tongue
+    round the wall; the upper shell (with the top) gets clearance holes down the posts and the
+    matching groove. Screws go in from the top."""
+    import copy
+    work = copy.deepcopy(spec)
+    work.lid, work.lip, work.gasket = "screw", 0.0, 0.0
+    made = build(work)
+    base, top_part = made["base"], made["lid"]
+    L, W, H = spec.inner
+    oL, oW = L + 2 * spec.wall, W + 2 * spec.wall
+    z_s = spec.floor + spec.split * H
+    big = max(oL, oW) * 3
+    below = Box(big, big, z_s + 50).locate(Location((0, 0, (z_s - 50) / 2)))
+    lower = base & below
+    upper = (base - below) + top_part
+    lower = lower if isinstance(lower, Shape) else Compound(children=list(lower))
+    # Corner posts: inserts (or pilots) in the lower half, clearance down the upper half.
+    d, depth = spec.hole(spec.lid_screw, spec.lid_screw_hole)
+    clear, *_ = SCREWS[spec.lid_screw]
+    boss = _post_boss(spec, d)
+    top = spec.base_height()
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            x, y = sx * (L / 2 - boss / 2), sy * (W / 2 - boss / 2)
+            hd = depth or 8.0
+            lower -= Cylinder(d / 2, hd).locate(Location((x, y, z_s - hd / 2 + 0.01)))
+            upper -= Cylinder(clear / 2, top - z_s + 1).locate(Location((x, y, (z_s + top) / 2)))
+    # Tongue and groove round the wall's middle.
+    c = spec.fit_clearance
+    tw, th = spec.wall / 2, 1.5
+    r_out = spec.corner_radius
+    def ring(w_out, w_in, h, z0):
+        return (_rounded_box(oL - 2 * w_out, oW - 2 * w_out, h, max(r_out - w_out, 0.0), z0=z0)
+                - _rounded_box(oL - 2 * w_in, oW - 2 * w_in, h, max(r_out - w_in, 0.0), z0=z0))
+    lower += ring(spec.wall / 4, spec.wall * 3 / 4, th, z_s)
+    upper -= ring(spec.wall / 4 - c, spec.wall * 3 / 4 + c, th + 0.3, z_s - 0.01)
+    notes = [n for n in made["notes"] if not n.startswith(("lid:", "screw lid"))]
+    notes.insert(0, f"clamshell: parts {spec.split * H:.1f} mm above the floor; {spec.lid_screw} screws from the top through "
+                    f"the upper shell into {spec.lid_screw_hole} holes in the lower posts; a {tw:g} x {th:g} mm tongue in a groove")
+    checks = list(made["checks"])
+    if spec.cutouts or spec.vents:
+        for raw in spec.cutouts:
+            cfa = face_name(raw.get("face", ""))
+            if cfa in WALLS:
+                h = Cutout(**resolve(raw))
+                hh = h.size[1] if h.shape == "rect" else h.size[0]
+                zc = spec.floor + h.at[1]
+                if zc - hh / 2 < z_s + th + 0.5 and zc + hh / 2 > z_s - 0.5:
+                    checks.append(f"{cfa} opening at {h.at} crosses the parting line: move it, or the split")
+    return {**made, "base": lower, "lid": upper, "notes": notes, "checks": checks}
 
 
 def write(spec: BoxSpec, folder: str | Path, stl: bool = True, formats=("step",)) -> dict:
@@ -753,8 +907,12 @@ def write(spec: BoxSpec, folder: str | Path, stl: bool = True, formats=("step",)
             if made["lid"] is not None:
                 lid = made["lid"]  # for printing, the lid lies on its top face
                 top = lid.bounding_box().max.Z
-                export_stl(Pos(0, 0, top) * (Rot(180, 0, 0) * lid), str(folder / "lid.stl"))
+                flipped = Rot(180, 0, 0) * lid
+                export_stl(Pos(0, 0, -flipped.bounding_box().min.Z) * flipped, str(folder / "lid.stl"))
                 files["lid_stl"] = str(folder / "lid.stl")
+            if made.get("supports"):
+                export_stl(Compound(children=made["supports"]), str(folder / "support_enforcers.stl"))
+                files["support_enforcers"] = str(folder / "support_enforcers.stl")
     if "onshape" in formats:
         from .onshape import feature_studio
         text, skipped = feature_studio(spec)
@@ -765,7 +923,8 @@ def write(spec: BoxSpec, folder: str | Path, stl: bool = True, formats=("step",)
     (folder / "box.json").write_text(json.dumps(asdict(spec), indent=2) + "\n")
     files["settings"] = str(folder / "box.json")
     return {"files": files, "inner": made["inner"], "outer": made["outer"], "notes": made["notes"],
-            "checks": made["checks"]}
+            "checks": made["checks"], "estimate": made.get("estimate"), "print_plan": made.get("print_plan"),
+            "thermal": made.get("thermal")}
 
 
 def load(path: str | Path) -> BoxSpec:

@@ -16,7 +16,7 @@ from __future__ import annotations
 import math
 from dataclasses import asdict, dataclass, field
 
-from build123d import Box, GeomType, Pos, Rot, Shape
+from build123d import Compound, Box, GeomType, Pos, Rot, Shape
 
 from .geom import Named, bbox, distance, named_solids, overlap_volume
 from .shell import Enclosure, board_hole_for
@@ -271,11 +271,29 @@ def check(enc: Enclosure, base: Shape, lid: Shape | None, board,
     (wx0, wy0, _), (wx1, wy1, _) = enc.cavity_bounds
     for side, gap, move in (("-X", bx0 - wx0, [1, 0, 0]), ("+X", wx1 - bx1, [-1, 0, 0]),
                             ("-Y", by0 - wy0, [0, 1, 0]), ("+Y", wy1 - by1, [0, -1, 0])):
-        if gap < settings.clearance:
+        if gap < settings.clearance - 0.01:
             need = settings.clearance - gap
             findings.append(_f("error" if gap < 0 else "warning", "board_edge_clearance", f"board edge {side}",
                                f"{gap:.2f} mm from the {side} wall (want {settings.clearance:.2f})",
                                f"pull this edge in {need:.2f} mm", [v * need for v in move], p))
+
+    # The board itself against the enclosure: corner posts, ribs, a gasket ledge (the box check
+    # above only sees the walls).
+    for label, body in (("base", base), ("lid", lid)):
+        if body is None:
+            continue
+        vol = overlap_volume(pcb_shape, body)
+        if vol > 0.05:
+            common = pcb_shape & body
+            pieces = list(common) if isinstance(common, list) else common.solids()
+            where = []
+            for piece in pieces[:6]:
+                (ox0, oy0, _), (ox1, oy1, _) = bbox(piece)
+                where.append(f"({(ox0 + ox1) / 2:.1f}, {(oy0 + oy1) / 2:.1f})")
+            findings.append(_f("error", "board_collision", "board",
+                               f"runs into the {label} ({vol:.1f} mm³ overlap) at {', '.join(where)} in the enclosure's "
+                               f"frame: a corner post, rib or ledge where the board is",
+                               "notch the board outline round it (enclosure limits draws the free outline), or move the obstacle"))
 
     # 3. Parts against the enclosure: overlaps, clearance, headroom.
     ceiling = enc.ceiling
