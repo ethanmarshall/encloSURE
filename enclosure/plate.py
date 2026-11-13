@@ -109,7 +109,7 @@ def slice_numbers(path_3mf, material: str = "PETG", layer: float = 0.2, infill: 
                "--filament-density", str(DENSITY.get(material, 1.25)), "--dont-arrange", "-o", str(out)]
         global LAST_ERROR
         try:
-            subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=True)
+            run = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=True)
         except subprocess.CalledProcessError as e:
             LAST_ERROR = ((e.stderr or "") + (e.stdout or "")).strip()[-400:]
             return None
@@ -117,6 +117,9 @@ def slice_numbers(path_3mf, material: str = "PETG", layer: float = 0.2, infill: 
             LAST_ERROR = str(e)[:400]
             return None
         text = out.read_text(errors="replace")[-40000:] if out.exists() else ""
+        if "estimated printing time" not in text:
+            made = [p.name for p in Path(d).iterdir()]
+            LAST_ERROR = (f"no time in the G-code (files: {made}); " + (run.stdout or "")[-300:] + (run.stderr or "")[-200:]).strip()
     t = re.search(r"estimated printing time \(normal mode\) = ([^\n]+)", text)
     g = re.search(r"total filament used \[g\] = ([\d.]+)", text)
     mm = re.search(r"filament used \[mm\] = ([\d.]+)", text)
