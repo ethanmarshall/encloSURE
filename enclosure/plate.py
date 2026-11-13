@@ -18,7 +18,7 @@ from build123d import Mesher, Pos, Rot
 
 GAP = 5.0  # between parts on the bed, mm
 LAST_ERROR = ""  # why the slicer last failed, for the health check
-BEDS = {"prusa-mk4": (250, 210), "prusa-mini": (180, 180), "bambu-x1": (256, 256), "ender-3": (220, 220),
+BEDS = {"prusa-mk4": (250, 210), "prusa-mini": (180, 180), "bambu-x1": (256, 256), "bambu-h3c": (330, 320), "ender-3": (220, 220),
         "prusa-xl": (360, 360), "voron-350": (350, 350)}
 DENSITY = {"PETG": 1.27, "PLA": 1.24, "ABS": 1.04, "ASA": 1.07, "nylon": 1.14}
 
