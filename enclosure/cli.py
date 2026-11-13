@@ -244,6 +244,34 @@ def cmd_sample(args):
     return samples.write(args.out)
 
 
+def _value(text: str):
+    low = text.lower()
+    if low in ("true", "yes", "on"):
+        return True
+    if low in ("false", "no", "off"):
+        return False
+    try:
+        return float(text)
+    except ValueError:
+        return text
+
+
+def cmd_part(args):
+    from . import hardware
+    if args.kind == "list":
+        return {k: {"label": v["label"], "settings": {f["name"]: f["default"] for f in v["fields"]},
+                    "modes": v["modes"], "material": v["material"]} for k, v in hardware.catalog()["kinds"].items()}
+    params = {}
+    for item in args.settings:
+        name, eq, val = item.partition("=")
+        if not eq:
+            raise ValueError(f"{item!r}: write settings as name=value")
+        params[name.strip()] = _value(val.strip())
+    r = hardware.write(args.kind, args.out or args.kind, stl=not args.no_stl, **params)
+    return {"ok": True, "part": r["label"], "size": r["size"], "files": r["files"], "notes": r["notes"],
+            "checks": r["checks"], "info": r["info"], "buy": r["buy"]}
+
+
 def main(argv=None) -> int:
     ap = argparse.ArgumentParser(prog="enclosure", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
@@ -415,6 +443,17 @@ def main(argv=None) -> int:
     p.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to let other computers on your network in")
     p.add_argument("--port", type=int, default=8000)
     p.set_defaults(fn=cmd_web)
+
+    p = sub.add_parser("part", help="a screw, nut, washer, spacer, spring or clip, as STEP and STL",
+                       description="Settings as name=value: enclosure part screw size=M3 length=12 type=button; "
+                                   "add mode=print for a part to 3D print (threads modelled with clearance=0.2). "
+                                   "enclosure part list shows every part and its settings.")
+    p.add_argument("kind", help="screw, nut, washer, spacer, insert, compression_spring, extension_spring, "
+                                "torsion_spring, snap_hook, cable_clip, tie_mount, board_clip, din_clip, or list")
+    p.add_argument("settings", nargs="*", help="name=value")
+    p.add_argument("--no-stl", action="store_true")
+    p.add_argument("-o", "--out", default=None, help="folder (default: the part's name)")
+    p.set_defaults(fn=cmd_part)
 
     p = sub.add_parser("sample", help="write a sample enclosure, lid and board")
     p.add_argument("-o", "--out", default="sample")

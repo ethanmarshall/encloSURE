@@ -126,6 +126,7 @@
     <button role="tab" aria-selected="true" data-tab="box">Quick box</button>
     <button role="tab" aria-selected="false" data-tab="fit">Fit a board</button>
     <button role="tab" aria-selected="false" data-tab="stock">Bought box</button>
+    <button role="tab" aria-selected="false" data-tab="parts">Parts</button>
   </div>
 </header>
 <main>
@@ -524,6 +525,29 @@
   <div class="actions"><button class="go" type="submit">Make templates</button></div>
 </form>
 
+<form id="partform" autocomplete="off" novalidate hidden>
+  <p class="intro">Screws, nuts, washers, spacers, springs and clips. Reference parts are the standard part at its standard size, to drop into an assembly; parts for printing have their threads modelled with clearance, so a printed bolt goes into a printed nut.</p>
+  <fieldset class="first">
+    <legend>Part</legend>
+    <div class="grid g2">
+      <label class="f">Part<select name="kind" id="pkind"></select></label>
+      <div class="f" id="pmode-wrap"><span>Made as</span>
+        <div class="seg" role="radiogroup" aria-label="Made as">
+          <input type="radio" name="pmode" id="pm-ref" value="reference" checked><label for="pm-ref">Reference</label>
+          <input type="radio" name="pmode" id="pm-print" value="print"><label for="pm-print">For printing</label>
+        </div>
+      </div>
+    </div>
+    <p class="hint" id="pdoc"></p>
+    <div class="grid" id="pfields"></div>
+    <div class="grid" id="pprint">
+      <label class="f" id="pclear-wrap">Thread and hole clearance (radial)<span class="unit" data-unit="mm"><input name="pclearance" type="number" min="0" step="0.05" value="0.2"></span></label>
+      <label class="f" id="pmat-wrap">Plastic<select name="pmaterial"></select></label>
+    </div>
+  </fieldset>
+  <div class="actions"><button class="go" type="submit">Download STEP + STL</button><span class="hint" id="pstate"></span></div>
+</form>
+
 <section class="view">
   <div id="canvas"><div class="empty" id="empty" hidden></div></div>
   <iframe id="fitview" title="Fit check 3D view" hidden></iframe>
@@ -784,7 +808,8 @@ function setUnits(next) {
   }
   for (const r of document.querySelectorAll("[name=units]")) r.checked = (r.value === UNIT());
   try { localStorage.setItem("enclosure.units", UNIT()); } catch {}
-  if (boxData && !boxData.error) boxReport(boxData);
+  if (boxData && !boxData.error && tab === "box") boxReport(boxData);
+  if (tab === "parts") partReport();
 }
 for (const inp of document.querySelectorAll(".unit input")) {
   inp.dataset.mmstep = inp.step || "0.1";
@@ -832,7 +857,7 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 2.2));
 const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(1, 2, 1.5); scene.add(sun);
 const world = new THREE.Group(); world.rotation.x = -Math.PI / 2; scene.add(world);
 const loader = new STLLoader();
-const views = { box: null, fit: null, stock: null };
+const views = { box: null, fit: null, stock: null, parts: null };
 let current = null, tab = "box";
 function themeColors() { scene.background = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue("--view").trim()); }
 themeColors(); matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeColors);
@@ -871,12 +896,13 @@ function empty(text) { $("#empty").hidden = !text; $("#empty").textContent = tex
 const report = $("#report");
 const msg = (cls, text, fix) => h("div", { class: "msg " + cls }, text, fix ? h("span", { class: "fix" }, fix) : null);
 // Report text from the server is in mm: in inch mode, "12 x 4.5 mm" reads "0.472 x 0.177 in", and Ø/mm3 too.
+// A number stuck to a letter, # or / is a name (M3-0.5, #4-40), not a length, and stays.
 function inUnits(text) {
   if (U === 1 || typeof text !== "string") return text;
   const n = x => +(parseFloat(x) / 25.4).toFixed(3);
   return text
     .replace(/(-?\d+(?:\.\d+)?)\s?mm(?:\u00b3|3\b)/g, (_, v) => `${+(parseFloat(v) / 16387.064).toFixed(4)} in³`)
-    .replace(/((?:[Ø±]?-?\d+(?:\.\d+)?\s*(?:x|×|to|-)\s*)*[Ø±]?-?\d+(?:\.\d+)?)\s?mm\b/g,
+    .replace(/(?<![\w#/.\-])((?:[Ø±]?-?\d+(?:\.\d+)?\s*(?:x|×|to|-)\s*)*[Ø±]?-?\d+(?:\.\d+)?)\s?mm\b/g,
       (_, run) => run.replace(/-?\d+(?:\.\d+)?/g, m => String(n(m))) + " in");
 }
 function boxReport(data, error) {
@@ -1359,11 +1385,123 @@ stockform.addEventListener("submit", async ev => {
   });
 });
 
+
+// ---------- Parts: screws, nuts, washers, spacers, springs, clips ----------
+const partform = $("#partform");
+let PARTS = null, partData = null, partTimer = null;
+const NUMTYPE = new Set(["num"]);
+let partKind = null;
+function partFields() {
+  const kindName = partform.elements.kind.value, k = PARTS.kinds[kindName];
+  // Same part, mode switched: keep what was typed.
+  const keep = {};
+  if (kindName === partKind) for (const el of $$("#pfields input, #pfields select")) keep[el.name] = el.type === "checkbox" ? el.checked : el.value;
+  partKind = kindName;
+  $("#pdoc").textContent = k.doc;
+  $("#pmode-wrap").hidden = !k.modes;
+  const printing = k.modes && partform.elements.pmode.value === "print";
+  $("#pclear-wrap").hidden = !printing || ["compression_spring", "extension_spring", "torsion_spring"].includes(partform.elements.kind.value);
+  $("#pmat-wrap").hidden = !k.material || (k.modes && !printing);
+  // Printed parts always have their threads; a pitch other than standard only matters for printing.
+  const shownFields = k.fields.filter(f => !(f.name === "threads" && printing) && !(f.name === "pitch" && !printing));
+  $("#pfields").replaceChildren(...shownFields.map(f => {
+    if (f.type === "select") return field(f.label, h("select", { name: "p_" + f.name }, f.options.map(o => h("option", { value: o, selected: o === f.default }, PARTS.wires[o] || o))));
+    if (f.type === "bool") return h("label", { class: "check" }, h("input", { type: "checkbox", name: "p_" + f.name, checked: !!f.default }), " " + f.label);
+    if (f.type === "text") {
+      const id = "dl_" + f.name;
+      return field(f.label, h("span", {}, h("input", { name: "p_" + f.name, value: f.default, list: id }), h("datalist", { id }, f.options.map(o => h("option", { value: o })))));
+    }
+    if (f.type === "len") {
+      const el = f.default === null ? h("input", { type: "number", name: "p_" + f.name, step: U === 1 ? "0.1" : "0.01", min: "0" }) : lenIn("p_" + f.name, f.default, "0.1", 0);
+      el.dataset.mmstep = "0.1";
+      return field(f.label, el, UNIT());
+    }
+    return field(f.label, h("input", { type: "number", name: "p_" + f.name, value: f.default ?? "", step: "1" }));
+  }));
+  for (const [name, v] of Object.entries(keep)) {
+    const el = partform.elements[name]; if (!el) continue;
+    if (el.type === "checkbox") el.checked = v; else if (el.value !== v) { el.value = v; delete el.dataset.mm; }
+  }
+}
+// The threads only mean something for screws, nuts and threaded spacers in reference mode (print always has them).
+function partBody() {
+  const e = partform.elements, kind = e.kind.value, k = PARTS.kinds[kind], params = {};
+  for (const f of k.fields) {
+    const el = e["p_" + f.name]; if (!el) continue;
+    if (f.type === "bool") params[f.name] = el.checked;
+    else if (f.type === "len") params[f.name] = el.value === "" ? null : +len(el).toFixed(4);
+    else if (f.type === "num") params[f.name] = el.value === "" ? null : +el.value;
+    else params[f.name] = el.value.trim();
+  }
+  if (k.modes) params.mode = e.pmode.value;
+  if (k.modes && e.pmode.value === "print" && !$("#pclear-wrap").hidden) params.clearance = +len(e.pclearance).toFixed(4);
+  if (k.material && !$("#pmat-wrap").hidden) params.material = e.pmaterial.value;
+  return { kind, params };
+}
+function partReport() {
+  if (tab !== "parts") return;
+  if (!partData) { report.replaceChildren(h("div", { class: "hint" }, "Change any setting and the part redraws.")); return; }
+  if (partData.error) { report.replaceChildren(msg("err", partData.error)); return; }
+  const d = partData, f = v => +(v / U).toFixed(U === 1 ? 2 : 3);
+  const rows = Object.entries(d.info).filter(([, v]) => v !== null && v !== undefined).map(([k, v]) =>
+    h("tr", {}, h("td", {}, k.replace(/_/g, " ")), h("td", {}, typeof v === "number" ? String(+v.toFixed(4)) : String(v))));
+  report.replaceChildren(
+    h("div", { class: "dims" }, d.label, ": ", h("b", {}, d.size.map(f).join(" × ")), ` ${UNIT()} overall`),
+    ...d.checks.map(c => msg("warn", inUnits(c))),
+    h("ul", { class: "notes" }, d.notes.map(n => h("li", {}, inUnits(n)))),
+    ...[rows.length ? h("details", { open: true }, h("summary", {}, "Numbers (mm, N, MPa)"), h("div", { class: "summary" }, h("table", {}, rows))) : null,
+      d.buy ? h("div", { class: "hint" }, "To buy: " + d.buy) : null].filter(Boolean));
+}
+let partSeq = 0, partAbort = null;
+const PAGE_ID = Math.random().toString(36).slice(2);
+async function partPreview() {
+  if (!PARTS) return;
+  const mine = ++partSeq;  // only the latest request's answer is shown
+  partAbort?.abort(); partAbort = new AbortController();
+  const body = { ...partBody(), page: PAGE_ID, seq: mine };
+  $("#pstate").textContent = body.params.mode === "print" || body.params.threads ? "Drawing (threads take a few seconds)..." : "Drawing...";
+  let res;
+  try { res = await fetch("api/part", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body), signal: partAbort.signal }); }
+  catch { return; }
+  if (mine !== partSeq) return;
+  $("#pstate").textContent = "";
+  if (!res.ok) { partData = { error: await errorOf(res) }; partReport(); return; }
+  const got = await res.json();
+  if (got.stale || mine !== partSeq) return;
+  partData = got;
+  const g = new THREE.Group(), m = mesh(partData.mesh, 0xb8bec4);
+  m.geometry.computeBoundingBox();
+  const pb = m.geometry.boundingBox, c = pb.getCenter(new THREE.Vector3());
+  m.position.set(-c.x, -c.y, -pb.min.z);  // centred, standing on the floor of the view
+  g.add(m);
+  const bb = new THREE.Box3().setFromObject(g);
+  views.parts = { group: g, lid: null, top: 0, size: bb.getSize(new THREE.Vector3()), framed: false };
+  if (tab === "parts") { empty(""); showView(views.parts); }
+  partReport();
+}
+const partSoon = () => { clearTimeout(partTimer); partTimer = setTimeout(partPreview, 350); };
+partform.addEventListener("change", ev => { if (ev.target.name === "kind" || ev.target.name === "pmode") partFields(); partSoon(); });
+partform.addEventListener("input", partSoon);
+partform.addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const b = partBody();
+  await busy(ev.submitter, "Making...", async () => {
+    const r = await download(await fetch("api/part/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(b) }), `${b.kind}.zip`);
+    if (r.error) { partData = { error: r.error }; partReport(); }
+  });
+});
+fetch("api/parts").then(r => r.json()).then(c => {
+  PARTS = c;
+  partform.elements.kind.replaceChildren(...Object.entries(c.kinds).map(([k, v]) => h("option", { value: k }, v.label)));
+  partform.elements.pmaterial.replaceChildren(...c.materials.map(m => h("option", { value: m, selected: m === "PETG" }, m)));
+  partFields(); partPreview();
+}).catch(() => {});
+
 // ---------- Tabs ----------
 function selectTab(name) {
   tab = name;
   for (const b of $$("[data-tab]")) b.setAttribute("aria-selected", b.dataset.tab === name);
-  boxform.hidden = name !== "box"; fitform.hidden = name !== "fit"; stockform.hidden = name !== "stock";
+  boxform.hidden = name !== "box"; fitform.hidden = name !== "fit"; stockform.hidden = name !== "stock"; partform.hidden = name !== "parts";
   $("#status").textContent = "";
   if (name !== "fit") showFitView(false);
   if (name === "box") { empty(""); showView(views.box); boxData?.error ? boxReport(null, boxData.error) : boxData && boxReport(boxData); }
@@ -1371,7 +1509,8 @@ function selectTab(name) {
     if (!$("#fitview").srcdoc) { showView(views.fit); empty(views.fit ? "" : "Read an enclosure to see it here."); }
     else showFitView(true);
     if (!views.fit && !$("#fitview").srcdoc) report.replaceChildren(h("div", { class: "hint" }, "Step 1: pick the enclosure and read it."));
-  } else { showView(null); empty("Your bought box's holes come back as STEP and a drilling template PDF."); report.replaceChildren(); }
+  } else if (name === "parts") { empty(views.parts ? "" : "Pick a part."); showView(views.parts); partReport(); }
+  else { showView(null); empty("Your bought box's holes come back as STEP and a drilling template PDF."); report.replaceChildren(); }
 }
 for (const b of $$("[data-tab]")) b.onclick = () => selectTab(b.dataset.tab);
 

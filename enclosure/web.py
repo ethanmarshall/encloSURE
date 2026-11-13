@@ -164,6 +164,61 @@ def presets():
             for name, (s, size, r, src) in PRESETS.items()}
 
 
+# ---------- Parametric parts: screws, nuts, washers, spacers, springs, clips ----------
+
+@app.get("/api/parts")
+def parts_catalog():
+    from . import hardware
+    return hardware.catalog()
+
+
+def _part_params(body: dict) -> tuple[str, dict]:
+    kind = str(body.get("kind", ""))
+    params = {k: v for k, v in (body.get("params") or {}).items() if v is not None and v != ""}
+    return kind, params
+
+
+import threading  # noqa: E402
+
+_PART_LOCK = threading.Lock()
+_PART_LATEST: dict[str, int] = {}  # each page's newest preview request
+
+
+@app.post("/api/part")
+def part_preview(body: dict):
+    """A part's mesh for the viewer, with its notes, checks and worked-out numbers. Previews run one
+    at a time; one that a newer request from the same page has overtaken while it waited is skipped."""
+    from . import hardware
+    page_id, seq = str(body.get("page", ""))[:40], int(body.get("seq") or 0)
+    if page_id:
+        _PART_LATEST[page_id] = max(_PART_LATEST.get(page_id, 0), seq)
+        while len(_PART_LATEST) > 500:
+            _PART_LATEST.pop(next(iter(_PART_LATEST)))
+    with _PART_LOCK:
+        if page_id and seq < _PART_LATEST.get(page_id, 0):
+            return {"stale": True}
+        try:
+            kind, params = _part_params(body)
+            r = hardware.make(kind, **params)
+        except (ValueError, RuntimeError, TypeError) as e:
+            _bad(e)
+    return {"label": r["label"], "notes": r["notes"], "checks": r["checks"], "info": r["info"], "size": r["size"],
+            "buy": r["buy"], "mesh": base64.b64encode(_stl(r["shape"])).decode()}
+
+
+@app.post("/api/part/download")
+def part_download(body: dict):
+    """The part as STEP and STL, with a notes file."""
+    from . import hardware
+    try:
+        kind, params = _part_params(body)
+        with tempfile.TemporaryDirectory() as d:
+            hardware.write(kind, Path(d) / "part", **params)
+            return _zip(Path(d) / "part", kind)
+    except (ValueError, RuntimeError, TypeError) as e:
+        _bad(e)
+
+
 @app.post("/api/preview")
 def preview(body: dict):
     try:

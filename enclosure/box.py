@@ -682,20 +682,7 @@ def build(spec: BoxSpec) -> dict:
 
     # DIN rail clip under the floor: a fixed hook on +Y and a sprung latch on -Y.
     if spec.din_rail:
-        gap = 0.2
-        hook_y = RAIL_W / 2 + gap
-        drop = RAIL_T + gap + 1.2  # below the floor: the rail's lip, clearance, the hook's lip
-        hook = Box(oL * 0.5, 2.0, drop).locate(Location((0, hook_y + 1.0, -drop / 2)))
-        hook += Box(oL * 0.5, 2.0 + 1.0, 1.2).locate(Location((0, hook_y + 1.0 - 0.5, -drop + 0.6)))
-        base += hook
-        # The latch: a beam along X, free at one end, its lip ramped so the box snaps on.
-        beam_len, bt = min(0.4 * oL, 30.0), 1.6
-        ly = -(RAIL_W / 2 + gap + bt / 2)
-        pad = Box(6.0, bt + 4.0, drop).locate(Location((-beam_len / 2 - 3.0, ly - 1.0, -drop / 2)))
-        beam = Box(beam_len, bt, drop).locate(Location((0, ly, -drop / 2)))
-        lip = extrude(Polygon((0, 0), (1.2, 0), (0, 2.4), align=None), amount=4.0, both=True)
-        lip = Pos(beam_len / 2 - 4.0, ly + bt / 2, -drop) * (Rot(0, 0, 90) * (Rot(90, 0, 0) * lip))
-        base += pad + beam + lip
+        base += din_clip(oL)
         notes.append("DIN rail clip (TS35, rail along X): hook on +Y, sprung latch on -Y; print a test first")
 
     # Labels: raised (depth > 0) or recessed (depth < 0) text.
@@ -895,6 +882,24 @@ def build(spec: BoxSpec) -> dict:
     return {"base": base, "lid": lid, "notes": notes, "checks": checks, "estimate": estimate,
             "supports": placed, "print_plan": print_plan, "thermal": thermal,
             "inner": [round(v, 3) for v in spec.inner], "outer": [round(v, 3) for v in spec.outer]}
+
+
+def din_clip(length: float):
+    """A TS35 rail clip hanging below z = 0, the rail along X: a fixed hook on +Y and a sprung
+    latch beam on -Y whose ramped lip snaps over the rail's edge. *length* is what it hangs from."""
+    gap = 0.2
+    hook_y = RAIL_W / 2 + gap
+    drop = RAIL_T + gap + 1.2  # below the floor: the rail's lip, clearance, the hook's lip
+    hook = Box(length * 0.5, 2.0, drop).locate(Location((0, hook_y + 1.0, -drop / 2)))
+    hook += Box(length * 0.5, 2.0 + 1.0, 1.2).locate(Location((0, hook_y + 1.0 - 0.5, -drop + 0.6)))
+    # The latch: a beam along X, free at one end, its lip ramped so it snaps on.
+    beam_len, bt = min(0.4 * length, 30.0), 1.6
+    ly = -(RAIL_W / 2 + gap + bt / 2)
+    pad = Box(6.0, bt + 4.0, drop).locate(Location((-beam_len / 2 - 3.0, ly - 1.0, -drop / 2)))
+    beam = Box(beam_len, bt, drop).locate(Location((0, ly, -drop / 2)))
+    lip = extrude(Polygon((0, 0), (1.2, 0), (0, 2.4), align=None), amount=4.0, both=True)
+    lip = Pos(beam_len / 2 - 4.0, ly + bt / 2, -drop) * (Rot(0, 0, 90) * (Rot(90, 0, 0) * lip))
+    return hook + pad + beam + lip
 
 
 def _clamshell(spec: BoxSpec) -> dict:

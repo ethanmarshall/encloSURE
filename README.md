@@ -254,6 +254,35 @@ The base, board, lid and screws pulled apart along Z, drawn by draftwright's ass
 balloons and a parts list (`assembly/pack/pack.pdf`), plus `parts_list.csv` (screws sized to stock
 lengths, inserts, the O-ring cord, feet and panel parts) and the exploded STEP.
 
+## Parts: screws, nuts, washers, springs, clips
+
+```
+enclosure part screw size=M3 length=12 type=button          # a reference ISO 7380 button head screw
+enclosure part nut size=M8 mode=print                        # a nut to print, threads 0.2 mm oversize
+enclosure part compression_spring d=1 od=10 free_length=20 coils=8 working_length=14
+enclosure part list                                          # every part and its settings
+```
+
+Each part comes as STEP and STL with a notes file, and the page's Parts tab draws it as you change it.
+
+- **Reference** parts are the standard part at its standard size, from
+  [bd_warehouse](https://github.com/gumyr/bd_warehouse)'s tables: socket, button, flat, hex, pan
+  and set screws (ISO 4762, 7380, 10642, 4017, 14583, 4026; ASME B18.3 and B18.6.3 in inch sizes), hex,
+  thin, square, flange and cap nuts, plain washers (ISO 7089 to 7094) and heat-set inserts. Inch hex
+  nuts follow ASME B18.6.3 and B18.2.2. Threads are drawn plain so assemblies stay quick; turn on
+  `threads=true` to model them.
+- **For printing** (`mode=print`), threads are always modelled, `clearance` (0.2 mm by default)
+  smaller on bolts and bigger in nuts and holes, so a printed bolt turns into a printed nut. Under M6
+  the page says printed threads come out rough and suggests an insert.
+- **Springs**: compression (closed, closed and ground, or open ends), extension (a crossover loop
+  each end) and torsion (tangent legs). The rate, solid height, force at your working length and the
+  wire's stress against what it takes are worked out as in Shigley's *Mechanical Engineering Design*
+  (music wire, 302 stainless or hard-drawn steel). Printed springs get a rough rate and a warning.
+- **Clips**: a snap-fit hook with its strain, push-on and pull-off forces (the straight-beam
+  formulas from the Bayer snap-fit guide), a snap-in cable clip, a cable-tie mount, a board edge
+  clip, and the DIN rail clip on its own plate. The strain limits for printed plastics are rules of
+  thumb: print one and try it.
+
 ## A box you bought
 
 `enclosure stock` puts cutouts in an off-the-shelf box and prints drilling templates for it.
