@@ -107,12 +107,31 @@
   [hidden] { display: none !important; }
   @media (max-width: 860px) {
     main { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; }
+    /* The 3D view and its report first, the settings under it. */
+    main > .view { order: -1; }
     form { border-right: none; padding: 8px 16px 0; }
-    #canvas, #fitview { height: 60vh; flex: none; }
-    header { padding: 10px 16px; flex-wrap: wrap; }
-    .tabs { margin-left: 0; }
-    .report { max-height: none; }
+    #canvas, #fitview { height: 46vh; min-height: 260px; flex: none; }
+    header { padding: 8px 12px; flex-wrap: wrap; gap: 8px; position: sticky; top: 0; z-index: 20; background: var(--bg); }
+    /* One row of tabs that scrolls sideways instead of wrapping onto two or three. */
+    .tabs { margin-left: 0; flex-wrap: nowrap; overflow-x: auto; width: 100%; order: 3; scrollbar-width: none; -webkit-overflow-scrolling: touch; }
+    .tabs::-webkit-scrollbar { display: none; }
+    .tabs button { flex: none; padding: 8px 12px; }
+    .report { max-height: 38vh; overflow-y: auto; }
+    #guide { padding: 14px 16px 40px; }
+    #guide table.gt td:first-child { white-space: normal; min-width: 92px; }
+    body #tojump { display: flex; }
   }
+  @media (max-width: 560px) {
+    .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    /* 16 px inputs: phones don't zoom the page when one gets focus. */
+    input, select, textarea { font-size: 16px; }
+    button, .links button { min-height: 40px; }
+    .seg label { min-height: 40px; display: inline-flex; align-items: center; }
+    .actions { position: sticky; bottom: 0; background: var(--panel); padding: 8px 0; z-index: 5; }
+  }
+  #tojump { display: none; position: fixed; right: 12px; bottom: 84px; z-index: 30; gap: 6px; }
+  #tojump button { border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 20px; padding: 8px 14px;
+    font: inherit; font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
   #guide { grid-column: 1 / -1; overflow: auto; padding: 18px 28px 40px; max-width: 980px; }
   #guide h2 { margin: 4px 0 6px; font-size: 20px; }
   #guide h3 { margin: 22px 0 6px; font-size: 15px; }
@@ -894,6 +913,7 @@
   </section>
 </article>
 </main>
+<div id="tojump" aria-label="Jump"><button type="button" id="jumpview">3D view</button><button type="button" id="jumpform">Settings</button></div>
 
 <script type="importmap">
 { "imports": {
@@ -2175,6 +2195,19 @@ fetch("api/presets").then(r => r.json()).then(p => {
 sync();
 </script>
 <script>
+// On a phone: buttons to jump between the 3D view (at the top) and the settings under it.
+document.getElementById("jumpview").onclick = () => window.scrollTo({ top: 0, behavior: "smooth" });
+document.getElementById("jumpform").onclick = () => {
+  const f = [...document.querySelectorAll("main > form, #guide")].find(el => !el.hidden);
+  if (f) window.scrollTo({ top: f.getBoundingClientRect().top + window.scrollY - 100, behavior: "smooth" });
+};
+// Show just the button that goes somewhere else: "3D view" down in the settings, "Settings" up at the view.
+function whichJump() {
+  const v = document.querySelector("main > .view"), down = v && !v.hidden && window.scrollY > v.offsetTop + v.offsetHeight * 0.6;
+  document.getElementById("jumpview").hidden = !down;
+  document.getElementById("jumpform").hidden = down;
+}
+window.addEventListener("scroll", whichJump, { passive: true }); whichJump();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 </script>
 </body>
