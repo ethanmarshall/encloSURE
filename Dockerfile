@@ -12,7 +12,8 @@ RUN git clone --filter=blob:none "$DRAFTWRIGHT_REPO" /src \
 
 # 2. The web page.
 FROM python:3.12-slim
-RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libxrender1 fonts-dejavu-core \
+# PrusaSlicer slices the print plate for real print times and grams (its command line runs headless).
+RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libxrender1 fonts-dejavu-core prusa-slicer \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=draftwright /draftwright /usr/local/bin/draftwright
 ENV DRAFTWRIGHT=/usr/local/bin/draftwright

@@ -79,9 +79,11 @@ def _vent(v) -> dict:
         return boxmod.parse_vent(v)
     d = {"face": boxmod.face_name(str(v.get("face", ""))), "size": [_num(x, "vent size") for x in v.get("size", [])],
          "at": [_num(x, "vent position") for x in v.get("at", [0, 0])]}
-    for k in ("slot", "pitch"):
+    for k in ("slot", "pitch", "cell", "web"):
         if v.get(k) not in (None, ""):
             d[k] = _num(v[k], f"vent {k}")
+    if v.get("pattern") in ("slots", "honeycomb"):
+        d["pattern"] = v["pattern"]
     return d
 
 
@@ -206,6 +208,21 @@ def part_preview(body: dict):
             "buy": r["buy"], "mesh": base64.b64encode(_stl(r["shape"])).decode()}
 
 
+@app.post("/api/part/onshape")
+def part_to_onshape(body: dict):
+    """The part's STEP, imported into a new Onshape document."""
+    from . import hardware, onshape_push
+    try:
+        kind, params = _part_params(body)
+        with tempfile.TemporaryDirectory() as d:
+            r = hardware.write(kind, Path(d) / "part", stl=False, **params)
+            data = Path(r["files"]["step"]).read_bytes()
+        label = r["label"] + (f" {params['size']}" if params.get("size") else "") + (f" x {params['length']:g}" if params.get("length") else "")
+        return onshape_push.push_step(data, f"{kind}.step", f"EncloSURE {label}")
+    except (ValueError, RuntimeError, TypeError) as e:
+        _bad(e)
+
+
 @app.post("/api/part/download")
 def part_download(body: dict):
     """The part as STEP and STL, with a notes file."""
@@ -215,6 +232,133 @@ def part_download(body: dict):
         with tempfile.TemporaryDirectory() as d:
             hardware.write(kind, Path(d) / "part", **params)
             return _zip(Path(d) / "part", kind)
+    except (ValueError, RuntimeError, TypeError) as e:
+        _bad(e)
+
+
+def _plate_items(body: dict) -> list:
+    """The box's printed parts (when a box is given) and the listed parts, qty each."""
+    from . import hardware, plate
+    items = []
+    if body.get("box"):
+        spec = spec_from(body["box"])
+        items += plate.box_items(spec, boxmod.build(spec))
+    for i, p in enumerate(body.get("parts") or []):
+        kind, params = _part_params(p)
+        qty = int(p.get("qty") or 1)
+        if not 1 <= qty <= 50:
+            raise ValueError("qty: 1 to 50 of each part")
+        r = hardware.make(kind, **params)
+        for n in range(qty):
+            items.append(plate.part_item(kind, r["shape"], f"{kind}_{i + 1}" + (f"_{n + 1}" if qty > 1 else "")))
+    if not items:
+        raise ValueError("nothing to print: add the box or some parts")
+    if len(items) > 80:
+        raise ValueError("up to 80 parts on a plate")
+    return items
+
+
+def _bed(body: dict) -> tuple[float, float]:
+    from . import plate
+    bed = body.get("bed") or "prusa-mk4"
+    if isinstance(bed, str):
+        if bed not in plate.BEDS:
+            raise ValueError(f"bed: one of {', '.join(plate.BEDS)}, or [width, depth]")
+        return plate.BEDS[bed]
+    w, d = (float(v) for v in bed)
+    if not (50 <= w <= 1000 and 50 <= d <= 1000):
+        raise ValueError("bed: 50 to 1000 mm each way")
+    return w, d
+
+
+@app.post("/api/plate")
+def print_plate(body: dict):
+    """Lay the parts out on the bed: a picture of each plate, and PrusaSlicer's time and grams."""
+    from . import plate
+    try:
+        with _PART_LOCK, tempfile.TemporaryDirectory() as d:
+            items, bed = _plate_items(body), _bed(body)
+            r = plate.write(items, Path(d), bed, str(body.get("material") or "PETG"))
+            from build123d import Compound
+            laid = plate.make(items, bed)["plates"]
+            meshes = [base64.b64encode(_stl(Compound(children=[s for _, s in p]))).decode() for p in laid]
+            return {"notes": r["notes"], "checks": r["checks"], "parts": r["parts"], "slicer": r.get("slicer"),
+                    "bed": _bed(body), "meshes": meshes}
+    except (ValueError, RuntimeError, TypeError) as e:
+        _bad(e)
+
+
+@app.post("/api/plate/download")
+def print_plate_download(body: dict):
+    """The plate (or plates) as 3MF."""
+    from . import plate
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            r = plate.write(_plate_items(body), Path(d) / "plate", _bed(body), str(body.get("material") or "PETG"), slice_it=False)
+            return _zip(Path(d) / "plate", "print_plate")
+    except (ValueError, RuntimeError, TypeError) as e:
+        _bad(e)
+
+
+# ---------- Other ways to make the box: bent sheet metal, laser-cut panels; and a moulding check ----------
+
+def _cutouts_of(spec) -> list:
+    return [dict(c) for c in spec.cutouts]
+
+
+@app.post("/api/sheetmetal")
+def sheet_metal(body: dict):
+    """The box as bent sheet metal: flat pattern DXFs (base and cover), a STEP, notes."""
+    from . import sheetmetal
+    try:
+        spec = spec_from(body.get("box") or {})
+        o = body.get("sheet") or {}
+        sheet = sheetmetal.Sheet(size=list(spec.inner), thickness=_num(o.get("thickness", 1.5), "thickness"),
+                                 bend_radius=_num(o["bend_radius"], "bend radius") if o.get("bend_radius") not in (None, "") else None,
+                                 material=str(o.get("material", "aluminium 5052")), lip=_num(o.get("lip", 10.0), "lip"),
+                                 screw=str(o.get("screw", "M3")), cutouts=_cutouts_of(spec))
+        if body.get("preview"):
+            made = sheetmetal.formed(sheet)
+            return {"notes": sheetmetal.notes_for(sheet), "grams": made["grams"],
+                    "base": base64.b64encode(_stl(made["base"])).decode(), "lid": base64.b64encode(_stl(made["cover"])).decode()}
+        with tempfile.TemporaryDirectory() as d:
+            sheetmetal.write(sheet, Path(d) / "sheet")
+            return _zip(Path(d) / "sheet", "sheet_metal_enclosure")
+    except (ValueError, RuntimeError, TypeError, KeyError) as e:
+        _bad(e)
+
+
+@app.post("/api/lasercut")
+def laser_cut(body: dict):
+    """The box as laser-cut panels with finger joints: one DXF, a STEP put together, notes."""
+    from . import lasercut
+    try:
+        spec = spec_from(body.get("box") or {})
+        o = body.get("laser") or {}
+        box = lasercut.Laser(size=list(spec.inner), thickness=_num(o.get("thickness", 3.0), "thickness"),
+                             kerf=_num(o.get("kerf", 0.15), "kerf"), lid=str(o.get("lid", "fixed")), cutouts=_cutouts_of(spec))
+        if body.get("preview"):
+            whole = lasercut.assembled(box)
+            ch = list(whole.children)
+            from build123d import Compound
+            return {"notes": [f"six {box.thickness:g} mm panels with finger joints; outside "
+                              f"{' x '.join(f'{v + 2 * box.thickness:g}' for v in box.size)} mm"],
+                    "base": base64.b64encode(_stl(Compound(children=[c for i, c in enumerate(ch) if i != 1]))).decode(),
+                    "lid": base64.b64encode(_stl(ch[1])).decode()}
+        with tempfile.TemporaryDirectory() as d:
+            lasercut.write(box, Path(d) / "laser")
+            return _zip(Path(d) / "laser", "laser_cut_box")
+    except (ValueError, RuntimeError, TypeError, KeyError) as e:
+        _bad(e)
+
+
+@app.post("/api/moulding")
+def moulding_check(body: dict):
+    """Is this box ready to be injection moulded? Findings against the usual rules."""
+    from . import dfm
+    try:
+        spec = spec_from(body.get("box") or body)
+        return dfm.check(spec, boxmod.build(spec), str(body.get("resin") or "ABS"))
     except (ValueError, RuntimeError, TypeError) as e:
         _bad(e)
 
@@ -231,6 +375,9 @@ def preview(body: dict):
            "base": base64.b64encode(_stl(made["base"])).decode()}
     if made["lid"] is not None:
         out["lid"] = base64.b64encode(_stl(made["lid"])).decode()
+    if made.get("extras"):
+        out["extras"] = [{"name": n, "mesh": base64.b64encode(_stl(e)).decode()} for n, e in made["extras"]]
+    out["screws"] = made.get("screws")
     if body.get("format") in ("onshape", "both"):
         from .onshape import unsupported
         skipped = unsupported(spec)
@@ -444,8 +591,12 @@ def library_list():
     for f in sorted(lib.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True):
         try:
             d = json.loads(f.read_text())
-            items.append({"id": f.stem, "name": d["name"], "by": d.get("by", ""), "at": d.get("at", 0),
-                          "size": d["design"].get("size")})
+            if d.get("part"):
+                items.append({"id": f.stem, "name": d["name"], "by": d.get("by", ""), "at": d.get("at", 0),
+                              "type": "part", "kind": d["part"].get("kind")})
+            else:
+                items.append({"id": f.stem, "name": d["name"], "by": d.get("by", ""), "at": d.get("at", 0),
+                              "type": "box", "size": d["design"].get("size")})
         except (ValueError, KeyError):
             continue
     return {"enabled": True, "designs": items}
@@ -470,13 +621,21 @@ def library_add(body: dict):
     if not name:
         _bad(ValueError("give the design a name"))
     design = body.get("design") or {}
+    part = body.get("part")
     try:
-        spec_from(dict(design))  # only boxes that build go in
+        if part:  # a part's settings: only ones that build go in
+            from . import hardware
+            kind, params = _part_params(part)
+            hardware.make(kind, **params)
+            record = {"part": {"kind": kind, "params": params}}
+        else:
+            spec_from(dict(design))  # only boxes that build go in
+            record = {"design": design}
     except (ValueError, TypeError) as e:
         _bad(e)
     item = uuid.uuid4().hex
     (lib / f"{item}.json").write_text(json.dumps({"name": name, "by": str(body.get("by", "")).strip()[:60],
-                                                  "at": int(time.time() * 1000), "design": design}) + "\n")
+                                                  "at": int(time.time() * 1000), **record}) + "\n")
     return {"id": item}
 
 
@@ -596,7 +755,16 @@ def _costed(spec, body):
         per_kg = float(body.get("filament_per_kg") or costing.FILAMENT_PER_KG)
     except (TypeError, ValueError):
         per_kg = costing.FILAMENT_PER_KG
-    return made, costing.price(bom, made.get("estimate"), per_kg)
+    est = made.get("estimate")
+    if body.get("slice"):
+        from . import plate
+        with tempfile.TemporaryDirectory() as d:
+            r = plate.write(plate.box_items(spec, made), Path(d), material=spec.material)
+        if r.get("slicer"):
+            sl = r["slicer"]
+            est = {**(est or {}), "grams": sl["grams"], "hours": sl["hours"], "source": sl["settings"]}
+            made = {**made, "estimate": est}
+    return made, costing.price(bom, est, per_kg)
 
 
 @app.post("/api/bom")

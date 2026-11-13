@@ -18,7 +18,7 @@ import re
 from fractions import Fraction
 
 from build123d import (Align, Axis, Box, Cylinder, Edge, Location, Plane, Polygon, Pos, RegularPolygon, Rot,
-                       Spline, Torus, Wire, Circle, extrude, sweep)
+                       Spline, Text, Torus, Wire, Circle, chamfer, extrude, fillet, sweep)
 
 from .box import RAIL_T, RAIL_W, SCREWS, din_clip
 
@@ -598,6 +598,261 @@ def din_rail_clip(length=40.0, thickness=3.0, screw="M3"):
             "notes": [f"DIN rail clip {length:g} mm long, {screw} holes {length - 10:g} mm apart; hook on +Y, latch on -Y; print a test first"]}
 
 
+# ---------- Gears, pulleys, knobs, caps, hinges, latches ----------
+
+def _bore(shape, height, bore: str, d: float, set_screw: str | None, z0: float = -1.0):
+    """Cut a shaft bore up Z from z0 for *height*: round or D-flat (a 6 mm shaft's flat at 4.5 mm,
+    others at 0.75 x d), with an optional set screw across it halfway up (tap size hole)."""
+    if bore == "none":
+        return shape
+    tool = Cylinder(d / 2, height, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    if bore == "d":
+        flat = 4.5 + (d - 6.0) if abs(d - 6.0) < 0.6 else round(d * 0.75, 2)  # across the flat, with the clearance
+        tool -= Box(d * 2, d, height * 3).locate(Location((0, flat, height / 2)))  # removes y > flat - d / 2
+    elif bore != "round":
+        raise ValueError("bore: round, d (D-flat) or none")
+    shape = shape - Pos(0, 0, z0) * tool
+    if set_screw:
+        c = SCREWS[set_screw][1] if set_screw in SCREWS else 2.5
+        shape -= Pos(0, -30, z0 + height / 2) * Cylinder(c / 2, 60, rotation=(90, 0, 0))
+    return shape
+
+
+def spur_gear(module=1.0, teeth=20, thickness=6.0, pressure_angle=20.0, bore="round", bore_d=5.0, hub=0.0,
+              set_screw=None, clearance=0.15):
+    """A spur gear (involute teeth, bd_warehouse), lying on z = 0, with a bore and an optional hub.
+    Two gears mesh at (teeth1 + teeth2) x module / 2 apart."""
+    from bd_warehouse.gear import SpurGear
+    if not 6 <= int(teeth) <= 300 or not 0.3 <= module <= 10:
+        raise ValueError("teeth 6 to 300, module 0.3 to 10")
+    g = SpurGear(module, int(teeth), pressure_angle, thickness)
+    g = Pos(0, 0, thickness / 2) * g
+    total = thickness
+    if hub > 0:
+        hub_d = max(bore_d * 2, bore_d + 6)
+        if hub_d > 2 * g.root_radius:
+            raise ValueError("the hub is bigger than the gear's teeth' roots: a smaller hub or a bigger gear")
+        g += Pos(0, 0, thickness) * Cylinder(hub_d / 2, hub, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        total += hub
+    g = _bore(g, total + 2, bore, bore_d + 2 * clearance, set_screw)
+    pd = module * teeth
+    checks = []
+    if teeth < 17 and pressure_angle == 20:
+        checks.append(f"under 17 teeth at 20°, involute teeth are undercut at the root: fine for printing, weaker")
+    if module < 0.8:
+        checks.append("teeth under module 0.8 are small for FDM: print with a 0.25 mm nozzle or go up a module")
+    return {"shape": g, "checks": checks,
+            "notes": [f"spur gear: {int(teeth)} teeth, module {module:g} ({pressure_angle:g}° pressure angle), pitch diameter "
+                      f"{pd:g} mm, outside {pd + 2 * module:g} mm, {thickness:g} mm thick; two gears mesh with their centres "
+                      f"(teeth1 + teeth2) x {module:g} / 2 mm apart, plus about 0.1 mm for printed backlash"],
+            "info": {"pitch_d": pd, "outside_d": pd + 2 * module, "root_d": round(pd - 2.5 * module, 3), "module": module,
+                     "teeth": int(teeth)},
+            "buy": None}
+
+
+GT2_PITCH = 2.0
+
+
+def gt2_pulley(teeth=20, belt_width=6.0, bore="round", bore_d=5.0, flanges=True, hub=7.0, set_screw="M3"):
+    """A GT2 (2 mm pitch) timing pulley. Its pitch diameter is teeth x 2 / pi; the outside is 0.508 mm
+    smaller (the belt's pitch line sits 0.254 mm out). The groove is a round-bottomed stand-in for
+    Gates' GT2 profile, 0.75 mm deep: close enough to print and run, not a moulded profile."""
+    n = int(teeth)
+    if not 10 <= n <= 120:
+        raise ValueError("teeth: 10 to 120")
+    pd = n * GT2_PITCH / math.pi
+    od = pd - 0.508
+    width = belt_width + 1.0
+    body = Cylinder(od / 2, width, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    groove = Cylinder(0.555, width * 3, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    groove += Box(1.11, 1.0, width * 3).locate(Location((0, 0.5, 0)))
+    r_g = od / 2 - 0.75 + 0.555
+    for i in range(n):
+        a = 360 * i / n
+        body -= Rot(0, 0, a) * Pos(0, r_g, width / 2) * groove
+    z = 0.0
+    shape = body
+    if flanges:
+        fd = od + 3.0
+        shape = Cylinder(fd / 2, 1.0, align=(Align.CENTER, Align.CENTER, Align.MIN)) + Pos(0, 0, 1.0) * shape
+        shape += Pos(0, 0, 1.0 + width) * Cylinder(fd / 2, 1.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        z = 2.0 + width
+    else:
+        z = width
+    if hub > 0:
+        hub_d = max(bore_d + 7, min(od - 1, 16))
+        shape += Pos(0, 0, z) * Cylinder(hub_d / 2, hub, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    total = z + hub
+    shape = _bore(shape, total + 2, bore, bore_d + 0.3, None)
+    if set_screw and hub > 0:
+        c = SCREWS[set_screw][1]
+        shape -= Pos(0, -20, z + hub / 2) * Cylinder(c / 2, 40, rotation=(90, 0, 0))
+    return {"shape": shape, "checks": [] if n >= 16 else ["under 16 teeth, a GT2 belt wraps too tightly to last"],
+            "notes": [f"GT2 pulley, {n} teeth: pitch diameter {pd:.2f} mm, outside {od:.2f} mm, for a {belt_width:g} mm belt, "
+                      f"bore {bore_d:g} mm" + (f", {set_screw} set screw in the hub (tap size hole)" if set_screw and hub > 0 else "")],
+            "info": {"pitch_d": round(pd, 3), "outside_d": round(od, 3), "mm_per_turn": n * GT2_PITCH}, "buy": None}
+
+
+def knob(diameter=20.0, height=15.0, shaft="d", shaft_d=6.0, depth=10.0, grip=24, pointer=True, set_screw=None, clearance=0.1):
+    """A knob for a pot or encoder shaft: a D-shaft (6 mm with a 4.5 mm flat), round with a set screw,
+    or knurled (18 splines, pressed on). Grip ridges round it and a pointer line on top."""
+    if depth >= height - 1.5:
+        raise ValueError("the shaft hole must stop at least 1.5 mm under the top")
+    k = Cylinder(diameter / 2, height, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    try:
+        k = chamfer(k.edges().sort_by(Axis.Z)[-1], min(1.0, height / 10))
+    except Exception:
+        pass
+    if grip:
+        rib = Cylinder(0.6, height * 3)
+        for i in range(int(grip)):
+            k -= Rot(0, 0, 360 * i / grip) * Pos(diameter / 2 + 0.2, 0, 0) * rib
+    if pointer:
+        k -= Pos(0, diameter / 4, height) * Box(1.0, diameter / 2 - 1.5, 1.2)
+    sd = shaft_d + 2 * clearance
+    if shaft == "d":
+        k = _bore(k, depth + 0.01, "d", sd, None, z0=-0.01)
+    elif shaft == "round":
+        k = _bore(k, depth + 0.01, "round", sd, None, z0=-0.01)
+        set_screw = set_screw or "M3"
+    elif shaft == "knurled":
+        k -= Pos(0, 0, -0.01) * Cylinder(shaft_d / 2 - 0.15, depth + 0.01, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    else:
+        raise ValueError("shaft: d, round or knurled")
+    if set_screw:
+        c = SCREWS[set_screw][1]
+        k -= Pos(0, -diameter / 2, depth / 2) * Cylinder(c / 2, diameter, rotation=(90, 0, 0))
+    return {"shape": k, "checks": [],
+            "notes": [f"knob Ø{diameter:g} x {height:g} mm for a {shaft_d:g} mm {shaft} shaft, {depth:g} mm deep"
+                      + (f", {set_screw} set screw (tap size hole)" if set_screw else "") + "; print it upside down (top on the bed)"],
+            "info": {"hole": round(sd if shaft != "knurled" else shaft_d - 0.3, 3)}, "buy": None}
+
+
+def button_cap(diameter=10.0, height=6.0, stem_d=3.5, stem_depth=2.5, panel=2.0, flange=1.5, clearance=0.1):
+    """A cap for a tactile switch, through a hole in a panel: the round top, a flange under the panel
+    so it can't fall out, and a socket for the switch's round actuator."""
+    top_h = height
+    cap = Cylinder(diameter / 2, top_h, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    try:
+        cap = fillet(cap.edges().sort_by(Axis.Z)[-1], min(1.0, diameter / 6))
+    except Exception:
+        pass
+    fl = Cylinder(diameter / 2 + flange, 1.2, align=(Align.CENTER, Align.CENTER, Align.MAX))
+    shape = cap + fl
+    shape -= Pos(0, 0, -1.2) * Cylinder(stem_d / 2 + clearance, stem_depth * 2)
+    hole = diameter + 0.4
+    return {"shape": shape, "checks": [] if height > panel + 1 else ["the cap barely clears the panel: make it taller"],
+            "notes": [f"button cap Ø{diameter:g} mm standing {height - panel:g} mm proud of a {panel:g} mm panel; cut a "
+                      f"Ø{hole:g} mm hole (a round cutout on the lid); flange Ø{diameter + 2 * flange:g} mm inside; "
+                      f"socket Ø{stem_d + 2 * clearance:g} mm for the switch's actuator"],
+            "info": {"panel_hole": hole, "proud": height - panel}, "buy": None}
+
+
+def hinge(length=40.0, leaf_width=15.0, thickness=2.5, knuckles=5, pin="filament", screw="M3", clearance=0.3):
+    """A two-leaf hinge, printed flat as two parts side by side: knuckles along X, a pin of 1.75 mm
+    filament or an M3 screw, and two countersunk-free screw holes in each leaf."""
+    n = int(knuckles)
+    if n < 3 or n % 2 == 0:
+        raise ValueError("knuckles: an odd number, 3 or more")
+    rk = thickness / 2 + 1.2
+    pin_d = 1.75 + 0.35 if pin == "filament" else 3.4
+    if 2 * rk < pin_d + 1.6:
+        rk = (pin_d + 1.6) / 2
+    seg = (length - (n - 1) * clearance) / n
+    clear, _, _, _, head = SCREWS[screw]
+    leaves = []
+    for side in (0, 1):
+        leaf = Box(length, leaf_width, thickness, align=(Align.CENTER, Align.MIN, Align.MIN))
+        for i in range(n):
+            if i % 2 != side:
+                continue
+            x0 = -length / 2 + i * (seg + clearance)
+            leaf += Pos(x0 + seg / 2, 0, rk) * Cylinder(rk, seg, rotation=(0, 90, 0))
+            leaf += Box(seg, rk, rk, align=(Align.CENTER, Align.MIN, Align.MIN)).locate(Location((x0 + seg / 2, 0, 0)))
+        # Keep the other leaf's knuckles free: cut their room (plus clearance) out of this leaf.
+        for i in range(n):
+            if i % 2 == side:
+                continue
+            x0 = -length / 2 + i * (seg + clearance)
+            leaf -= Pos(x0 + seg / 2, 0, rk) * Cylinder(rk + clearance, seg + 2 * clearance, rotation=(0, 90, 0))
+        leaf -= Pos(0, 0, rk) * Cylinder(pin_d / 2, length * 2, rotation=(0, 90, 0))
+        for x in (-length / 3, length / 3):
+            leaf -= Pos(x, leaf_width - head / 2 - 2, 0) * Cylinder(clear / 2, thickness * 4)
+        leaf = Pos(0, -rk, 0) * leaf  # the pin on y = 0
+        leaves.append(leaf if side == 0 else Rot(0, 0, 180) * leaf)
+    a, b = leaves
+    b = Pos(0, -(2 * leaf_width + 6), 0) * b  # laid out apart on the bed
+    shape = a + b
+    return {"shape": shape, "checks": [],
+            "notes": [f"hinge {length:g} mm long, leaves {leaf_width:g} mm, {n} knuckles Ø{2 * rk:.1f}, pin "
+                      + ("1.75 mm filament (melt the ends)" if pin == "filament" else f"an M3 x {length + 4:.0f} screw and nut")
+                      + f"; {screw} holes in each leaf; printed as two parts, flat"],
+            "info": {"knuckle_d": round(2 * rk, 2), "pin_hole": pin_d}, "buy": None}
+
+
+def latch(width=10.0, reach=8.0, undercut=1.2, thickness=1.8, material="PETG"):
+    """A snap latch with a finger tab, and its keeper (a ledge to glue or screw on), side by side."""
+    hook = snap_hook(length=reach + 6, thickness=thickness, width=width, undercut=undercut, entry_angle=35,
+                     retention_angle=80, material=material)
+    shape = hook["shape"]
+    L = reach + 6
+    shape += Box(6, width, thickness, align=(Align.MIN, Align.CENTER, Align.MIN)).locate(Location((L, 0, 0)))  # finger tab
+    keeper = Box(width + 6, 6, undercut + 2.5, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    keeper = Pos(L / 2, width + 10, 0) * keeper
+    shape += keeper
+    return {"shape": shape, "checks": hook["checks"],
+            "notes": [f"latch {width:g} mm wide with a finger tab: lift the tab to open; the keeper's ledge is "
+                      f"{undercut + 2.5:g} mm tall, {width + 6:g} mm long, for the hook's {undercut:g} mm catch"] + hook["notes"][:1],
+            "info": hook["info"], "buy": None}
+
+
+def test_print(size="M8", clearances="0.1,0.15,0.2,0.25,0.3", hooks="0.6,1.0,1.4", material="PETG"):
+    """Find your printer's settings once: a strip of threaded holes at several clearances with a bolt
+    for each (the number on the strip and on each bolt's head), and snap hooks of three undercuts
+    with a plate to snap through."""
+    _, d, p, _ = thread_size(size)
+    cs = [float(c) for c in str(clearances).split(",") if c.strip()]
+    us = [float(u) for u in str(hooks).split(",") if u.strip()]
+    if not 1 <= len(cs) <= 6 or not 0 <= len(us) <= 4:
+        raise ValueError("1 to 6 clearances and up to 4 hook undercuts")
+    pitch_x = d * 2 + 6
+    t = max(6.0, d * 0.8)
+    strip = Box(pitch_x * len(cs), d * 2 + 10, t, align=(Align.MIN, Align.CENTER, Align.MIN))
+    threads = []
+    for i, c in enumerate(cs):
+        x = pitch_x * (i + 0.5)
+        strip -= Pos(x, -2, 0) * Cylinder(d / 2 + c + 0.02, t * 3)
+        threads.append(Pos(x, -2, 0) * _thread(d, p, t, False, c, ("fade", "fade")))
+        strip -= Pos(x, d + 2.5, t - 0.6) * extrude(Text(f"{c:g}", 3.0, align=(Align.CENTER, Align.CENTER)), amount=0.6)
+    pieces = [strip.fuse(*threads)]  # one boolean for all the threads: much quicker than one at a time
+    for i, c in enumerate(cs):
+        b = screw(size, length=t + 2, type="hex" if d >= 5 else "socket", mode="print", clearance=c)["shape"]
+        b = Rot(180, 0, 0) * b  # head down, as it prints
+        bb = b.bounding_box()
+        pieces.append(Pos(pitch_x * (i + 0.5) - (bb.min.X + bb.max.X) / 2, -(d * 2 + 10) / 2 - 4 - bb.max.Y, -bb.min.Z) * b)
+    notes = [f"{size} threads at clearances {', '.join(f'{c:g}' for c in cs)} mm: each hole has its number beside it, "
+             f"each bolt is in line with its hole. Try each bolt in its hole; the smallest number that turns by hand "
+             f"is your printer's clearance (use it for parts printed for printing)"]
+    if us:
+        # Hooks, and a plate with a slot for each to snap through.
+        y0 = d * 2 + 20
+        hb, ht, plate_t, L = 6.0, 1.6, 2.0, 12.0
+        plate = Box(len(us) * 14 + 6, 10, plate_t, align=(Align.MIN, Align.MIN, Align.MIN)).locate(Location((0, y0, 0)))
+        for j, u in enumerate(us):
+            x = 6 + j * 14 + 1
+            plate -= Box(hb + 0.4, ht + 0.3, plate_t * 3).locate(Location((x, y0 + 5, 0)))
+            plate -= Pos(x, y0 + 8.6, plate_t - 0.4) * extrude(Text(f"{u:g}", 2.0, align=(Align.CENTER, Align.CENTER)), amount=0.6)
+            hk = Rot(90, 0, 0) * snap_hook(length=L, thickness=ht, width=hb, undercut=u, material=material)["shape"]
+            bb = hk.bounding_box()
+            pieces.append(Pos(x - (bb.min.X + bb.max.X) / 2, y0 + 16 - bb.min.Y, -bb.min.Z) * hk)
+        pieces.append(plate)
+        notes.append(f"snap hooks with {', '.join(f'{u:g}' for u in us)} mm undercuts (the number by each slot): push each "
+                     "through its slot in the plate; pick the biggest that goes in without cracking and holds")
+    from build123d import Compound
+    shape = Compound(children=pieces)
+    return {"shape": shape, "checks": [], "notes": notes, "info": {"clearances": cs, "hook_undercuts": us}, "buy": None}
+
+
 # ---------- Registry ----------
 
 KINDS = {
@@ -616,9 +871,24 @@ KINDS = {
     "tie_mount": (tie_mount, "Cable-tie mount", {"tie_width": 4.8, "tie_thickness": 1.3, "screw": "M3", "size": 20.0}),
     "board_clip": (board_clip, "Board edge clip", {"board_thickness": 1.6, "height": 5.0, "grip": 2.5, "screw": "M3", "length": 10.0}),
     "din_clip": (din_rail_clip, "DIN rail clip", {"length": 40.0, "thickness": 3.0, "screw": "M3"}),
+    "spur_gear": (spur_gear, "Spur gear", {"module": 1.0, "teeth": 20, "thickness": 6.0, "pressure_angle": 20.0,
+                                           "bore": "round", "bore_d": 5.0, "hub": 0.0, "set_screw": None}),
+    "gt2_pulley": (gt2_pulley, "GT2 timing pulley", {"teeth": 20, "belt_width": 6.0, "bore": "round", "bore_d": 5.0,
+                                                    "flanges": True, "hub": 7.0, "set_screw": "M3"}),
+    "knob": (knob, "Knob", {"diameter": 20.0, "height": 15.0, "shaft": "d", "shaft_d": 6.0, "depth": 10.0, "grip": 24,
+                            "pointer": True, "set_screw": None}),
+    "button_cap": (button_cap, "Button cap", {"diameter": 10.0, "height": 6.0, "stem_d": 3.5, "stem_depth": 2.5, "panel": 2.0}),
+    "hinge": (hinge, "Hinge", {"length": 40.0, "leaf_width": 15.0, "thickness": 2.5, "knuckles": 5, "pin": "filament", "screw": "M3"}),
+    "latch": (latch, "Latch with keeper", {"width": 10.0, "reach": 8.0, "undercut": 1.2, "thickness": 1.8}),
+    "test_print": (test_print, "Thread and snap test print", {"size": "M8", "clearances": "0.1,0.15,0.2,0.25,0.3", "hooks": "0.6,1.0,1.4"}),
 }
+# How each part sits on the print bed: a turn (x, y, z degrees) from how it is modelled.
+PRINT_ROTATION = {"screw": (180, 0, 0), "snap_hook": (90, 0, 0), "din_clip": (180, 0, 0), "knob": (180, 0, 0),
+                  "button_cap": (180, 0, 0), "latch": (90, 0, 0),
+                  "extension_spring": (0, 0, 0), "torsion_spring": (0, 0, 0)}
 # Parts that are always printed (no bought version): mode is ignored, and material matters.
-PRINTED_ONLY = {"snap_hook", "cable_clip", "tie_mount", "board_clip", "din_clip"}
+PRINTED_ONLY = {"snap_hook", "cable_clip", "tie_mount", "board_clip", "din_clip", "spur_gear", "gt2_pulley", "knob",
+                "button_cap", "hinge", "latch", "test_print"}
 
 
 _CACHE: dict = {}
@@ -697,7 +967,21 @@ LABELS = {
     "cable_d": ("Cable diameter", "len"), "screw": ("Screw", "select"), "wall": ("Wall", "len"), "tie_width": ("Tie width", "len"),
     "tie_thickness": ("Tie thickness", "len"), "board_thickness": ("Board thickness", "len"), "height": ("Board height above foot", "len"),
     "grip": ("Grip depth", "len"),
+    "module": ("Module", "num"), "teeth": ("Teeth", "num"), "pressure_angle": ("Pressure angle, °", "num"),
+    "bore_d": ("Bore", "len"), "hub": ("Hub length (0 for none)", "len"), "set_screw": ("Set screw", "select"),
+    "belt_width": ("Belt width", "len"), "flanges": ("Flanges", "bool"), "diameter": ("Diameter", "len"),
+    "shaft": ("Shaft", "select"), "shaft_d": ("Shaft diameter", "len"), "depth": ("Hole depth", "len"),
+    "pointer": ("Pointer line", "bool"), "stem_d": ("Switch actuator diameter", "len"), "stem_depth": ("Socket depth", "len"),
+    "panel": ("Panel thickness", "len"), "leaf_width": ("Leaf width", "len"), "knuckles": ("Knuckles", "num"),
+    "pin": ("Pin", "select"), "reach": ("Reach", "len"), "clearances": ("Clearances to try (mm, commas)", "text"),
+    "hooks": ("Hook undercuts to try (mm, commas)", "text"),
 }
+
+
+# Where one setting name means something else for a part.
+KIND_LABELS = {("knob", "height"): ("Height", "len"), ("knob", "grip"): ("Grip ridges (0 for none)", "num"),
+               ("button_cap", "height"): ("Height", "len"), ("button_cap", "diameter"): ("Cap diameter", "len"),
+               ("spacer", "od"): ("Across (blank for stock)", "len"), ("test_print", "size"): ("Thread", "text")}
 
 
 def catalog() -> dict:
@@ -707,12 +991,16 @@ def catalog() -> dict:
         ("spacer", "shape"): ["hex", "round"], ("spacer", "bore"): ["clearance", "thread", "insert"],
         ("insert", "maker"): ["CNCKitchen", "ruthex", "McMaster-Carr", "Hilitchi", "AE-SamZhihui"],
         ("compression_spring", "ends"): ["closed-ground", "closed", "open"],
+        ("spur_gear", "bore"): ["round", "d", "none"], ("gt2_pulley", "bore"): ["round", "d"],
+        ("spur_gear", "set_screw"): ["", "M2", "M2.5", "M3", "M4"], ("gt2_pulley", "set_screw"): ["", "M2", "M2.5", "M3", "M4"],
+        ("knob", "set_screw"): ["", "M2", "M2.5", "M3"], ("knob", "shaft"): ["d", "round", "knurled"],
+        ("hinge", "pin"): ["filament", "M3"],
     }
     out = {}
     for kind, (fn, label, defaults) in KINDS.items():
         fields = []
         for name, default in defaults.items():
-            lab, typ = LABELS.get(name, (name.replace("_", " ").capitalize(), "len"))
+            lab, typ = KIND_LABELS.get((kind, name)) or LABELS.get(name, (name.replace("_", " ").capitalize(), "len"))
             opts = choices.get((kind, name))
             if name == "wire":
                 opts = list(WIRE)
@@ -724,6 +1012,10 @@ def catalog() -> dict:
             if name == "size":
                 f["options"] = SIZES_METRIC + SIZES_INCH
                 f["type"] = "text"
+            if typ == "text" and name != "size":
+                f.pop("options", None)
+                f["type"] = "text"
+                f["options"] = []
             fields.append(f)
         import inspect
         params = inspect.signature(fn).parameters

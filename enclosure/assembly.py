@@ -21,9 +21,30 @@ LENGTHS = (4, 5, 6, 8, 10, 12, 16, 20, 25)
 
 
 def _screw(m: str, length: float, name: str):
-    d = float(m[1:])
-    head_d, head_h = boxmod.SCREWS[m][4], 0.6 * d
-    s = Cylinder(d / 2, length).locate(Location((0, 0, -length / 2))) + Cylinder(head_d / 2, head_h).locate(Location((0, 0, head_h / 2)))
+    """A real ISO 4762 socket head cap screw (plain threads), its head on z = 0."""
+    from . import hardware
+    try:
+        s = hardware.make("screw", size=m, length=float(length), type="socket")["shape"]
+        s = Compound(children=[s]) if not isinstance(s, Compound) else s
+    except Exception:  # a size the tables lack: a plain stand-in
+        d = float(m[1:])
+        head_d, head_h = boxmod.SCREWS[m][4], 0.6 * d
+        s = Cylinder(d / 2, length).locate(Location((0, 0, -length / 2))) + Cylinder(head_d / 2, head_h).locate(Location((0, 0, head_h / 2)))
+    s.label = name
+    return s
+
+
+def _insert(m: str, name: str):
+    """A heat-set insert (CNC Kitchen's), its top on z = 0."""
+    from . import hardware
+    try:
+        s = hardware.make("insert", size=m)["shape"]
+        bb = s.bounding_box()
+        s = Pos(0, 0, -bb.max.Z) * s
+    except Exception:
+        _, _, d, depth, _ = boxmod.SCREWS[m]
+        s = Cylinder(d / 2, depth).locate(Location((0, 0, -depth / 2)))
+    s = Compound(children=[s])
     s.label = name
     return s
 
@@ -35,6 +56,7 @@ def _stock(length: float) -> int:
 def exploded(spec: boxmod.BoxSpec, made: dict, board=None, gap: float = 25.0):
     """The parts, each named and lifted apart, and the parts list (what draftwright should call each)."""
     parts, bom = [], []
+    plan = boxmod.screw_plan(spec)
     base = made["base"]
     base.label = "Enclosure base"
     parts.append(base)
@@ -57,11 +79,13 @@ def exploded(spec: boxmod.BoxSpec, made: dict, board=None, gap: float = 25.0):
         parts.append(board)
         if spec.standoff_hole != "pin":
             m = spec.standoff_screw
-            length = _stock(1.6 + (spec.insert_depth or boxmod.SCREWS[m][3]))
-            name = f"{m}x{length} screw"
+            length = plan["board"]["length"]
+            name = f"{m}x{length:g} screw"
             for i, (x, y) in enumerate(spec.standoffs):
                 s = Pos(x, y, seat + 1.6 + lift + gap * 0.6) * _screw(m, length, name)
                 parts.append(s)
+                if spec.standoff_hole == "insert":
+                    parts.append(Pos(x, y, seat + gap * 0.35) * _insert(m, f"{m} heat-set insert"))
             kind = "into heat-set inserts" if spec.standoff_hole == "insert" else "self-tapping" if spec.standoff_hole == "tap" else "with nuts"
             bom.append({"item": name, "qty": len(spec.standoffs), "make": "buy", "note": f"board screws, {kind}"})
             if spec.standoff_hole == "insert":
@@ -75,14 +99,16 @@ def exploded(spec: boxmod.BoxSpec, made: dict, board=None, gap: float = 25.0):
         bom.append({"item": "Enclosure lid", "qty": 1, "make": "make", "note": f"{spec.material}, printed"})
         if spec.lid in ("screw", "clamshell"):
             m = spec.lid_screw
-            length = _stock(spec.lid_thickness / 2 + (spec.insert_depth or boxmod.SCREWS[m][3]))
-            name = f"{m}x{length} screw"
+            length = plan["lid"]["length"] if "lid" in plan else _stock(spec.lid_thickness / 2 + boxmod.SCREWS[m][3])
+            name = f"{m}x{length:g} screw"
             L, W, _ = spec.inner
             boss = boxmod._post_boss(spec, spec.hole(m, spec.lid_screw_hole)[0])
             for sx in (-1, 1):
                 for sy in (-1, 1):
-                    s = Pos(sx * (L / 2 - boss / 2), sy * (W / 2 - boss / 2), top + spec.lid_thickness + lid_lift + gap * 0.6) * _screw(m, length, name)
+                    s = Pos(sx * (L / 2 - boss / 2), sy * (W / 2 - boss / 2), top + spec.lid_thickness / 2 + lid_lift + gap * 0.6) * _screw(m, length, name)
                     parts.append(s)
+                    if spec.lid_screw_hole == "insert" and spec.lid == "screw":
+                        parts.append(Pos(sx * (L / 2 - boss / 2), sy * (W / 2 - boss / 2), top + lift * 0 + gap * 0.35) * _insert(m, f"{m} heat-set insert"))
             bom.append({"item": name, "qty": 4, "make": "buy", "note": "lid screws"})
             if spec.lid_screw_hole == "insert":
                 bom.append({"item": f"{m} heat-set insert", "qty": 4, "make": "buy", "note": "in the corner posts"})

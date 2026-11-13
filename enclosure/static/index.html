@@ -217,6 +217,7 @@
           <option value="tap">Screw straight in (tapped)</option>
           <option value="clearance">Through, with a nut</option>
         </select></label>
+        <label class="f">Lid screw length (blank: pick a stock length)<span class="unit" data-unit="mm"><input name="lid_screw_length" type="number" min="3" step="1"></span></label>
       </div>
       <div data-show="gasket">
       <label class="check"><input type="checkbox" id="gasket_on"> Seal with an O-ring gasket</label>
@@ -253,6 +254,7 @@
         <option value="insert">Screw in insert</option><option value="tap">Screw, tapped</option><option value="clearance">Screw and nut</option><option value="pin">Snap-in pins</option>
       </select></label>
     </div>
+    <label class="f" style="max-width:260px">Board screw length (blank: pick a stock length)<span class="unit" data-unit="mm"><input name="board_screw_length" type="number" min="3" step="1"></span></label>
     <p class="hint" data-pin>Snap-in pins: a split peg with a barb goes up through each mounting hole and the board clicks down over them. Print them solid.</p>
     <label class="check" data-so="any"><input type="checkbox" name="standoff_ribs" checked> Support ribs at their feet</label>
   </fieldset>
@@ -347,6 +349,24 @@
     </div>
     <p class="hint">0 means none. Keyholes go in the floor so the box hangs on two screws.</p>
     <label class="check"><input type="checkbox" name="din_rail"> DIN rail clip (35 mm rail) under the floor</label>
+    <label class="check"><input type="checkbox" name="wall_bracket"> Wall bracket: a French cleat under the floor and a bracket to screw to the wall</label>
+    <label class="check"><input type="checkbox" name="stacking"> Stacking: pins on the lid, sockets under the floor</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Battery door and cables</legend>
+    <label class="check"><input type="checkbox" name="bd_on" id="bd_on"> A battery door in the floor</label>
+    <div class="grid" id="bd_fields">
+      <label class="f">Opening width<span class="unit" data-unit="mm"><input name="bd_w" type="number" min="5" step="1" value="30"></span></label>
+      <label class="f">Opening length<span class="unit" data-unit="mm"><input name="bd_l" type="number" min="5" step="1" value="35"></span></label>
+      <label class="f">Screws<select name="bd_screw"><option>M2</option><option>M2.5</option><option>M3</option></select></label>
+      <label class="f">X<span class="unit" data-unit="mm"><input name="bd_x" type="number" step="1" value="0"></span></label>
+      <label class="f">Y<span class="unit" data-unit="mm"><input name="bd_y" type="number" step="1" value="0"></span></label>
+    </div>
+    <p class="hint">The door prints as its own part and screws on flush. Size the opening to your battery holder.</p>
+    <div class="rows" id="sr_rows"></div>
+    <button type="button" class="add" data-add="sr">+ Add a cable strain relief</button>
+    <p class="hint">A hole in the wall for the cable and a clamp bar on two posts inside it (the bar prints as its own part).</p>
   </fieldset>
 
   <fieldset>
@@ -383,6 +403,25 @@
     <div class="links"><button class="plain" type="button" id="bombtn">Price the parts</button>
       <button class="plain" type="button" id="sumbtn">One-page summary PDF</button></div>
     <div id="bomout"></div>
+    <label class="check"><input type="checkbox" name="use_slicer" checked> Weigh and time it with PrusaSlicer (a few seconds more)</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Made another way</legend>
+    <p class="hint">The same inside size and holes as bent sheet metal or laser-cut panels, as DXF files a shop can cut; or a check of this printed design against the rules for injection moulding.</p>
+    <div class="grid">
+      <label class="f">Sheet metal<select name="sm_mat"><option>aluminium 5052</option><option>steel (CRS)</option><option>stainless 304</option></select></label>
+      <label class="f">Sheet thickness<span class="unit" data-unit="mm"><input name="sm_t" type="number" min="0.5" max="4" step="0.1" value="1.5"></span></label>
+      <label class="f">Laser sheet thickness<span class="unit" data-unit="mm"><input name="lc_t" type="number" min="1" max="12" step="0.5" value="3"></span></label>
+      <label class="f">Laser kerf<span class="unit" data-unit="mm"><input name="lc_kerf" type="number" min="0" max="0.6" step="0.01" value="0.15"></span></label>
+      <label class="f">Laser box top<select name="lc_lid"><option value="fixed">Fixed (fingered)</option><option value="loose">Lift-off, with a lip</option></select></label>
+      <label class="f">Moulding resin<select name="resin"><option>ABS</option><option>PC</option><option>PC/ABS</option><option>nylon</option><option>PP</option><option>acetal</option><option>PBT</option><option>TPE</option></select></label>
+    </div>
+    <div class="links">
+      <button class="plain" type="button" id="smshow">Show sheet metal</button><button class="plain" type="button" id="smdl">Sheet metal DXF</button>
+      <button class="plain" type="button" id="lcshow">Show laser-cut</button><button class="plain" type="button" id="lcdl">Laser-cut DXF</button>
+      <button class="plain" type="button" id="mouldbtn">Moulding check</button>
+    </div>
   </fieldset>
 
   <div class="actions">
@@ -545,7 +584,28 @@
       <label class="f" id="pmat-wrap">Plastic<select name="pmaterial"></select></label>
     </div>
   </fieldset>
-  <div class="actions"><button class="go" type="submit">Download STEP + STL</button><span class="hint" id="pstate"></span></div>
+  <div class="actions"><button class="go" type="submit">Download STEP + STL</button><button class="plain" type="button" id="padd">Add to print plate</button><button class="plain" type="button" id="pos" hidden>Send to Onshape</button><span class="hint" id="pstate"></span></div>
+  <details id="plib" hidden>
+    <summary>Team library: saved parts</summary>
+    <div class="grid g2" style="margin-top:6px"><label class="f">Name<input id="plib_name" maxlength="80" placeholder="M3 printed knob"></label>
+      <label class="f">Your name<input id="plib_by" maxlength="60"></label></div>
+    <button class="plain" type="button" id="plibsave">Save this part's settings</button>
+    <div id="plibout"></div>
+  </details>
+  <fieldset>
+    <legend>Print plate</legend>
+    <p class="hint">Everything you'll print, laid out on one bed as a 3MF file, each part turned the way it prints best. With PrusaSlicer on the server you also get its print time and grams.</p>
+    <div id="platelist"></div>
+    <label class="check"><input type="checkbox" name="plate_box" checked> The box from Quick box (base and lid)</label>
+    <div class="grid g2">
+      <label class="f">Printer bed<select name="plate_bed">
+        <option value="prusa-mk4">Prusa MK4 / MK3 (250 x 210)</option><option value="prusa-mini">Prusa Mini (180 x 180)</option>
+        <option value="bambu-x1">Bambu X1 / P1 (256 x 256)</option><option value="ender-3">Ender 3 (220 x 220)</option>
+        <option value="prusa-xl">Prusa XL (360 x 360)</option><option value="voron-350">Voron 350</option></select></label>
+      <label class="f">Plastic<select name="plate_mat"><option>PETG</option><option>PLA</option><option>ABS</option><option>ASA</option></select></label>
+    </div>
+    <div class="links"><button class="plain" type="button" id="plateshow">Lay it out</button><button class="go" type="button" id="platedl">Download 3MF</button></div>
+  </fieldset>
 </form>
 
 <section class="view">
@@ -677,21 +737,31 @@ function readHole(item) {
 function ventRow(o = {}) {
   const item = h("div", { class: "item" },
     h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
-    h("div", { class: "grid g2 head" }, field("Face", faceSel(o.face || "right"))),
+    h("div", { class: "grid g2 head" }, field("Face", faceSel(o.face || "right")),
+      field("Pattern", h("select", { name: "pattern" }, h("option", { value: "slots", selected: o.pattern !== "honeycomb" }, "Slots"),
+        h("option", { value: "honeycomb", selected: o.pattern === "honeycomb" }, "Honeycomb")))),
     h("div", { class: "grid" },
       field("Area width", lenIn("w", o.w ?? 30, "1", "2"), "mm"), field("Area height", lenIn("hh", o.hh ?? 20, "1", "2"), "mm"),
-      field("Slot width", lenIn("slot", o.slot ?? 2, "0.1", "0.5"), "mm")),
+      h("label", { class: "f", "data-v": "slot" }, "Slot width", h("span", { class: "unit", "data-unit": UNIT() }, lenIn("slot", o.slot ?? 2, "0.1", "0.5")))),
     h("div", { class: "grid" },
       h("label", { class: "f", "data-pos": "a" }, "Along wall", h("span", { class: "unit", "data-unit": "mm" }, lenIn("a", o.a ?? 0))),
       h("label", { class: "f", "data-pos": "b" }, "Up from floor", h("span", { class: "unit", "data-unit": "mm" }, lenIn("b", o.b ?? 15))),
-      field("Slot pitch", lenIn("pitch", o.pitch ?? 4, "0.1", "1"), "mm")));
-  item.addEventListener("change", () => posLabels(item));
-  item._sync = () => posLabels(item);
+      h("label", { class: "f", "data-v": "pitch" }, "Slot pitch", h("span", { class: "unit", "data-unit": UNIT() }, lenIn("pitch", o.pitch ?? 4, "0.1", "1")))));
+  // Honeycomb: the same two fields are the hexagon's size across the flats and the web between them.
+  const ventLabels = () => {
+    const hc = item.querySelector("[name=pattern]").value === "honeycomb";
+    item.querySelector("[data-v=slot]").firstChild.textContent = hc ? "Hexagon across flats" : "Slot width";
+    item.querySelector("[data-v=pitch]").firstChild.textContent = hc ? "Web between hexagons" : "Slot pitch";
+  };
+  item.addEventListener("change", () => { posLabels(item); ventLabels(); });
+  item._sync = () => { posLabels(item); ventLabels(); };
   return item;
 }
 const readVent = item => {
   const e = n => len(item.querySelector(`[name=${n}]`));
-  return { face: item.querySelector("[name=face]").value, size: [e("w"), e("hh")], at: [e("a"), e("b")], slot: e("slot"), pitch: e("pitch") };
+  const base = { face: item.querySelector("[name=face]").value, size: [e("w"), e("hh")], at: [e("a"), e("b")] };
+  return item.querySelector("[name=pattern]").value === "honeycomb"
+    ? { ...base, pattern: "honeycomb", cell: e("slot"), web: e("pitch") } : { ...base, slot: e("slot"), pitch: e("pitch") };
 };
 function labelRow(o = {}) {
   const item = h("div", { class: "item" },
@@ -778,7 +848,17 @@ function lpRow(o = {}) {
   item._sync = () => {};
   return item;
 }
-const ROWS = { lp: ["#lp_rows", lpRow], lso: ["#lso_rows", xyRow], bat: ["#bat_rows", batRow], tie: ["#tie_rows", xyRow], notch: ["#notch_rows", notchRow],
+function srRow(o = {}) {
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid" }, field("Wall", h("select", { name: "face" }, FACES.filter(([v]) => WALL.has(v)).map(([v, t]) => h("option", { value: v, selected: v === (o.face || "right") }, t)))),
+      field("Cable diameter", lenIn("d", o.d ?? 6, "0.5", "2"), UNIT()), field("Along wall", lenIn("a", o.a ?? 0), UNIT()),
+      field("Cable height above floor", lenIn("b", o.b ?? 6, "0.5", "1"), UNIT())));
+  item._sync = () => {};
+  return item;
+}
+const readSr = it => ({ face: $("[name=face]", it).value, d: len($("[name=d]", it)), at: [len($("[name=a]", it)), len($("[name=b]", it))] });
+const ROWS = { sr: ["#sr_rows", srRow], lp: ["#lp_rows", lpRow], lso: ["#lso_rows", xyRow], bat: ["#bat_rows", batRow], tie: ["#tie_rows", xyRow], notch: ["#notch_rows", notchRow],
   card: ["#card_rows", cardRow], win: ["#win_rows", winRow], cut: ["#cut_rows", holeRow], vent: ["#vent_rows", ventRow], label: ["#label_rows", labelRow], so: ["#so_rows", soRow], stock: ["#stock_rows", holeRow] };
 function addRow(kind, opts) {
   const [sel, make] = ROWS[kind];
@@ -874,6 +954,16 @@ function makeView(data) {
   g.add(mesh(data.base, 0x8d9aa6));
   const lid = data.lid ? mesh(data.lid, 0xd9a066) : null;
   if (lid) g.add(lid);
+  // Extra printed parts (a battery door, clamp bars, a wall bracket) laid beside the box.
+  if (data.extras && data.extras.length) {
+    const bb0 = new THREE.Box3().setFromObject(g);
+    let x = bb0.max.x + 15;
+    for (const ex of data.extras) {
+      const m = mesh(ex.mesh, 0x9bbf8a); m.geometry.computeBoundingBox();
+      const pb = m.geometry.boundingBox;
+      m.position.set(x - pb.min.x, -(pb.min.y + pb.max.y) / 2, -pb.min.z); x += pb.max.x - pb.min.x + 10; g.add(m);
+    }
+  }
   const bb = new THREE.Box3().setFromObject(g);
   return { group: g, lid, top: bb.max.z - bb.min.z, size: bb.getSize(new THREE.Vector3()), framed: false };
 }
@@ -951,6 +1041,11 @@ function boxBody() {
     cutouts: $$("#cut_rows .item").map(readHole), vents: $$("#vent_rows .item").map(readVent), labels: $$("#label_rows .item").map(readLabel),
     flange: len(e.flange), feet: len(e.feet), feet_depth: len(e.feet_depth), keyholes: e.keyholes.value || null,
     din_rail: e.din_rail.checked, bottom_chamfer: len(e.bottom_chamfer), teardrop: e.teardrop.checked,
+    wall_bracket: e.wall_bracket.checked, stacking: e.stacking.checked,
+    battery_door: $("#bd_on").checked ? { size: [len(e.bd_w), len(e.bd_l)], at: [len(e.bd_x), len(e.bd_y)], screw: e.bd_screw.value } : null,
+    strain_reliefs: $$("#sr_rows .item").map(readSr),
+    board_screw_length: e.board_screw_length.value ? len(e.board_screw_length) : null,
+    lid_screw_length: e.lid_screw_length.value ? len(e.lid_screw_length) : null,
     format: e.format.value, stl: e.stl.checked,
   };
 }
@@ -1005,7 +1100,8 @@ $("#tofit").onclick = () => { fitform.elements.src.value = "box"; sync(); select
 const FACE_OF = { "-X": "left", "+X": "right", "-Y": "front", "+Y": "back", lid: "lid", floor: "floor", top: "lid", bottom: "floor" };
 function applySpec(sp) {
   const LEN = new Set(["L", "W", "H", "wall", "floor", "corner_radius", "lid_thickness", "lip", "fit_clearance", "standoff_height",
-    "flange", "feet", "feet_depth", "bottom_chamfer", "gasket", "so_x", "so_y", "board_thickness", "lid_standoff_height"]);
+    "flange", "feet", "feet_depth", "bottom_chamfer", "gasket", "so_x", "so_y", "board_thickness", "lid_standoff_height",
+    "bd_w", "bd_l", "bd_x", "bd_y"]);
   const e = boxform.elements, set = (n, v) => {
     if (v === undefined || v === null || !e[n]) return;
     if (LEN.has(n) && typeof v === "number") { e[n].value = show(v); e[n].dataset.mm = String(v); } else e[n].value = v;
@@ -1017,7 +1113,12 @@ function applySpec(sp) {
     "standoff_height", "standoff_screw", "standoff_hole", "flange", "feet", "feet_depth", "bottom_chamfer"]) set(n, sp[n]);
   $("#gasket_on").checked = !!sp.gasket; if (sp.gasket) set("gasket", sp.gasket);
   e.keyholes.value = sp.keyholes || "";
-  for (const n of ["din_rail", "teardrop", "standoff_ribs"]) if (n in sp) e[n].checked = !!sp[n];
+  for (const n of ["din_rail", "teardrop", "standoff_ribs", "wall_bracket", "stacking"]) if (n in sp) e[n].checked = !!sp[n];
+  $("#bd_on").checked = !!sp.battery_door;
+  if (sp.battery_door) { set("bd_w", sp.battery_door.size[0]); set("bd_l", sp.battery_door.size[1]); set("bd_x", (sp.battery_door.at || [0, 0])[0]);
+    set("bd_y", (sp.battery_door.at || [0, 0])[1]); e.bd_screw.value = sp.battery_door.screw || "M2"; }
+  $("#sr_rows").replaceChildren(); for (const r of sp.strain_reliefs || []) addRow("sr", { face: FACE_OF[r.face] || r.face, d: r.d, a: (r.at || [0, 6])[0], b: (r.at || [0, 6])[1] });
+  for (const n of ["board_screw_length", "lid_screw_length"]) { e[n].value = sp[n] ? show(sp[n]) : ""; if (sp[n]) e[n].dataset.mm = String(sp[n]); else delete e[n].dataset.mm; }
   let so = sp.standoffs || [];
   if (typeof so === "string") {
     const m = /^rect:([\d.]+)x([\d.]+)$/.exec(so.trim());
@@ -1048,7 +1149,8 @@ function applySpec(sp) {
   $("#win_rows").replaceChildren();
   for (const w of sp.windows || []) addRow("win", { face: FACE_OF[w.face] || w.face, w: w.size[0], hh: w.size[1], a: w.at[0], b: w.at[1], pw: w.panel[0], ph: w.panel[1], pt: w.panel_t });
   $("#vent_rows").replaceChildren();
-  for (const v of sp.vents || []) addRow("vent", { face: FACE_OF[v.face] || v.face, w: v.size[0], hh: v.size[1], a: v.at[0], b: v.at[1], slot: v.slot ?? 2, pitch: v.pitch ?? 4 });
+  for (const v of sp.vents || []) addRow("vent", { face: FACE_OF[v.face] || v.face, w: v.size[0], hh: v.size[1], a: v.at[0], b: v.at[1],
+    pattern: v.pattern, slot: v.pattern === "honeycomb" ? (v.cell ?? 4) : (v.slot ?? 2), pitch: v.pattern === "honeycomb" ? (v.web ?? 1.2) : (v.pitch ?? 4) });
   $("#label_rows").replaceChildren();
   for (const t of sp.labels || []) {
     const it = addRow("label", { face: FACE_OF[t.face] || t.face, text: t.text, a: t.at[0], b: t.at[1], size: t.size ?? 6, depth: Math.abs(t.depth ?? 0.6) });
@@ -1110,7 +1212,7 @@ $("#dwbtn").onclick = async () => {
   });
 };
 $("#bombtn").onclick = async () => {
-  const body = { ...boxBody(), filament_per_kg: num(boxform.elements.filament_per_kg.value) };
+  const body = { ...boxBody(), filament_per_kg: num(boxform.elements.filament_per_kg.value), slice: boxform.elements.use_slicer.checked };
   await busy($("#bombtn"), "Pricing...", async () => {
     const res = await fetch("api/bom", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
     if (!res.ok) { boxReport(null, await errorOf(res)); return; }
@@ -1126,7 +1228,7 @@ $("#bombtn").onclick = async () => {
 };
 $("#sumbtn").onclick = async () => {
   const e = boxform.elements;
-  const body = { ...boxBody(), filament_per_kg: num(e.filament_per_kg.value), units: UNIT(), title: { title: e.dw_title.value } };
+  const body = { ...boxBody(), filament_per_kg: num(e.filament_per_kg.value), units: UNIT(), title: { title: e.dw_title.value }, slice: e.use_slicer.checked };
   await busy($("#sumbtn"), "Making...", async () => {
     const r = await download(await fetch("api/summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), "enclosure_summary.pdf");
     if (r.error) boxReport(null, r.error);
@@ -1144,7 +1246,7 @@ $("#asmbtn").onclick = async () => {
 fetch("api/health").then(r => r.json()).then(hh => {
   if (!hh.draftwright) for (const el of $$("[data-drawing]")) el.hidden = true;
   if (hh.library) { $("#library").hidden = false; loadLibrary(); }
-  if (hh.onshape) { $("#toonshape").hidden = false; $("#updonshape").hidden = !osDoc(); $("#src-os-wrap").hidden = false; }
+  if (hh.onshape) { $("#pos").hidden = false; $("#toonshape").hidden = false; $("#updonshape").hidden = !osDoc(); $("#src-os-wrap").hidden = false; }
 }).catch(() => {});
 // The Onshape document the last Send made, so Update changes the same one.
 const OS_KEY = "enclosure.onshape.v1";
@@ -1176,7 +1278,8 @@ $("#updonshape").onclick = async () => {
 async function loadLibrary() {
   const r = await fetch("api/library"); if (!r.ok) return;
   const d = await r.json();
-  $("#liblist").replaceChildren(...d.designs.map(it => h("div", { class: "links", style: "align-items:center;margin:4px 0" },
+  showPartLibrary(d);
+  $("#liblist").replaceChildren(...d.designs.filter(it => it.type !== "part").map(it => h("div", { class: "links", style: "align-items:center;margin:4px 0" },
     h("span", { style: "flex:1;font-size:12.5px" }, h("b", {}, it.name),
       h("span", { class: "hint" }, ` · ${(it.size || []).join(" x ")} mm${it.by ? " · " + it.by : ""} · ${new Date(it.at).toLocaleDateString()}`)),
     h("button", { class: "plain", type: "button", onclick: async () => {
@@ -1185,6 +1288,34 @@ async function loadLibrary() {
     h("button", { class: "plain", type: "button", "aria-label": `Remove ${it.name}`, onclick: async () => {
       await fetch(`api/library/${it.id}`, { method: "DELETE" }); loadLibrary(); } }, "Remove"))));
 }
+
+function showPartLibrary(d) {
+  $("#plib").hidden = !d.enabled;
+  const parts = d.designs.filter(it => it.type === "part");
+  $("#plibout").replaceChildren(...parts.map(it => h("div", { class: "links", style: "align-items:center;margin:4px 0" },
+    h("span", { style: "flex:1;font-size:12.5px" }, h("b", {}, it.name), h("span", { class: "hint" }, ` · ${PARTS?.kinds[it.kind]?.label || it.kind}${it.by ? " · " + it.by : ""}`)),
+    h("button", { class: "plain", type: "button", onclick: async () => {
+      const g = await fetch(`api/library/${it.id}`); if (!g.ok) return;
+      const doc = await g.json();
+      partform.elements.kind.value = doc.part.kind; partKind = null; partFields();
+      const k = PARTS.kinds[doc.part.kind];
+      for (const f of k.fields) {
+        const el = partform.elements["p_" + f.name], v = doc.part.params[f.name]; if (!el || v === undefined) continue;
+        if (f.type === "bool") el.checked = !!v; else if (f.type === "len" && typeof v === "number") { el.value = show(v); el.dataset.mm = String(v); } else el.value = v;
+      }
+      if (doc.part.params.mode) { partform.elements.pmode.value = doc.part.params.mode; partKind = doc.part.kind; partFields(); }
+      partPreview(); } }, "Open"),
+    h("button", { class: "plain", type: "button", "aria-label": `Remove ${it.name}`, onclick: async () => {
+      await fetch(`api/library/${it.id}`, { method: "DELETE" }); loadLibrary(); } }, "Remove"))));
+}
+$("#plibsave").onclick = async () => {
+  const name = $("#plib_name").value.trim();
+  if (!name) { $("#pstate").textContent = "Give the part a name first."; return; }
+  const res = await fetch("api/library", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, by: $("#plib_by").value.trim(), part: partBody() }) });
+  $("#pstate").textContent = res.ok ? `Saved "${name}" to the team library.` : await errorOf(res);
+  loadLibrary();
+};
 $("#libsave").onclick = async () => {
   const name = $("#lib_name").value.trim();
   if (!name) { $("#sharestate").textContent = "Give the design a name first."; return; }
@@ -1386,6 +1517,40 @@ stockform.addEventListener("submit", async ev => {
 });
 
 
+
+// ---------- Made another way: sheet metal, laser-cut, moulding check ----------
+const smBody = () => ({ box: boxBody(), sheet: { thickness: len(boxform.elements.sm_t), material: boxform.elements.sm_mat.value } });
+const lcBody = () => ({ box: boxBody(), laser: { thickness: len(boxform.elements.lc_t), kerf: len(boxform.elements.lc_kerf), lid: boxform.elements.lc_lid.value } });
+async function altShow(btn, url, body, title) {
+  await busy(btn, "Making...", async () => {
+    const res = await fetch(url, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, preview: true }) });
+    if (!res.ok) { boxReport(null, await errorOf(res)); return; }
+    const d = await res.json();
+    showView(makeView(d));
+    report.replaceChildren(h("div", { class: "dims" }, title, d.grams ? h("span", { class: "hint" }, ` · about ${Math.round(d.grams)} g`) : null),
+      h("ul", { class: "notes" }, d.notes.map(n => h("li", {}, inUnits(n)))),
+      h("div", { class: "hint" }, "Change any setting to go back to the printed box."));
+  });
+}
+$("#smshow").onclick = () => altShow($("#smshow"), "api/sheetmetal", smBody(), "Bent sheet metal: base and cover");
+$("#lcshow").onclick = () => altShow($("#lcshow"), "api/lasercut", lcBody(), "Laser-cut panels with finger joints");
+$("#smdl").onclick = async () => busy($("#smdl"), "Making...", async () => {
+  const r = await download(await fetch("api/sheetmetal", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(smBody()) }), "sheet_metal_enclosure.zip");
+  if (r.error) boxReport(null, r.error);
+});
+$("#lcdl").onclick = async () => busy($("#lcdl"), "Making...", async () => {
+  const r = await download(await fetch("api/lasercut", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(lcBody()) }), "laser_cut_box.zip");
+  if (r.error) boxReport(null, r.error);
+});
+$("#mouldbtn").onclick = async () => busy($("#mouldbtn"), "Checking...", async () => {
+  const res = await fetch("api/moulding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ box: boxBody(), resin: boxform.elements.resin.value }) });
+  if (!res.ok) { boxReport(null, await errorOf(res)); return; }
+  const d = await res.json();
+  report.replaceChildren(msg(d.ready ? "ok verdict" : "err verdict", `Moulding in ${d.resin}: ${d.summary}.`),
+    ...d.findings.map(f => msg(f.severity === "error" ? "err" : f.severity === "warning" ? "warn" : "ok", h("span", {}, h("b", {}, f.what + ": "), inUnits(f.message)), f.fix ? inUnits(f.fix) : null)),
+    h("div", { class: "hint" }, `Walls for ${d.resin}: ${d.wall_range[0]} to ${d.wall_range[1]} mm (Protolabs). A moulder reviews it too; this catches the big things first.`));
+});
+
 // ---------- Parts: screws, nuts, washers, spacers, springs, clips ----------
 const partform = $("#partform");
 let PARTS = null, partData = null, partTimer = null;
@@ -1405,7 +1570,7 @@ function partFields() {
   // Printed parts always have their threads; a pitch other than standard only matters for printing.
   const shownFields = k.fields.filter(f => !(f.name === "threads" && printing) && !(f.name === "pitch" && !printing));
   $("#pfields").replaceChildren(...shownFields.map(f => {
-    if (f.type === "select") return field(f.label, h("select", { name: "p_" + f.name }, f.options.map(o => h("option", { value: o, selected: o === f.default }, PARTS.wires[o] || o))));
+    if (f.type === "select") return field(f.label, h("select", { name: "p_" + f.name }, f.options.map(o => h("option", { value: o, selected: o === (f.default ?? "") }, PARTS.wires[o] || o || "(none)"))));
     if (f.type === "bool") return h("label", { class: "check" }, h("input", { type: "checkbox", name: "p_" + f.name, checked: !!f.default }), " " + f.label);
     if (f.type === "text") {
       const id = "dl_" + f.name;
@@ -1416,7 +1581,7 @@ function partFields() {
       el.dataset.mmstep = "0.1";
       return field(f.label, el, UNIT());
     }
-    return field(f.label, h("input", { type: "number", name: "p_" + f.name, value: f.default ?? "", step: "1" }));
+    return field(f.label, h("input", { type: "number", name: "p_" + f.name, value: f.default ?? "", step: "any" }));
   }));
   for (const [name, v] of Object.entries(keep)) {
     const el = partform.elements[name]; if (!el) continue;
@@ -1490,6 +1655,66 @@ partform.addEventListener("submit", async ev => {
     if (r.error) { partData = { error: r.error }; partReport(); }
   });
 });
+
+// The print plate: parts added from this tab, kept in this browser.
+const PLATE = "enclosure.plate.v1";
+function plateItems() { try { return JSON.parse(localStorage.getItem(PLATE) || "[]"); } catch { return []; } }
+function keepPlate(list) { try { localStorage.setItem(PLATE, JSON.stringify(list)); } catch {} showPlate(); }
+function showPlate() {
+  const list = plateItems();
+  $("#platelist").replaceChildren(...(list.length ? list.map((it, i) => h("div", { class: "links", style: "align-items:center;margin:3px 0" },
+    h("span", { style: "flex:1;font-size:12.5px" }, it.label),
+    h("input", { type: "number", min: "1", max: "50", value: it.qty, style: "width:60px", "aria-label": "How many", onchange: ev => { const l = plateItems(); l[i].qty = Math.max(1, Math.min(50, +ev.target.value || 1)); keepPlate(l); } }),
+    h("button", { class: "plain", type: "button", "aria-label": "Remove", onclick: () => { const l = plateItems(); l.splice(i, 1); keepPlate(l); } }, "Remove")))
+    : [h("div", { class: "hint" }, "No parts yet: pick one above and press Add to print plate.")]));
+}
+$("#pos").onclick = async () => {
+  await busy($("#pos"), "Sending...", async () => {
+    const res = await fetch("api/part/onshape", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(partBody()) });
+    if (!res.ok) { partData = { error: await errorOf(res) }; partReport(); return; }
+    const d = await res.json();
+    report.prepend(msg("ok", h("span", {}, "In Onshape: ", h("a", { href: d.document, target: "_blank", rel: "noopener" }, "open the document"),
+      ". It's an imported part: to change it, change it here and send it again.")));
+  });
+};
+$("#padd").onclick = () => {
+  const b = partBody(), k = PARTS.kinds[b.kind];
+  const sz = b.params.size ? ` ${b.params.size}` : "", len_ = b.params.length ? ` x ${b.params.length}` : "";
+  const l = plateItems(); l.push({ kind: b.kind, params: b.params, qty: 1, label: `${k.label}${sz}${len_}${b.params.mode === "print" ? " (printed)" : ""}` });
+  keepPlate(l);
+};
+function plateBody() {
+  const e = partform.elements;
+  return { box: e.plate_box.checked ? boxBody() : null, parts: plateItems().map(({ kind, params, qty }) => ({ kind, params, qty })),
+           bed: e.plate_bed.value, material: e.plate_mat.value };
+}
+$("#plateshow").onclick = async () => {
+  await busy($("#plateshow"), "Laying out...", async () => {
+    const res = await fetch("api/plate", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(plateBody()) });
+    if (!res.ok) { partData = { error: await errorOf(res) }; partReport(); return; }
+    const d = await res.json();
+    const g = new THREE.Group();
+    d.meshes.forEach((m, i) => { const mm = mesh(m, 0xb8bec4); mm.position.x = i * (d.bed[0] + 20); g.add(mm); });
+    const bed = new THREE.Mesh(new THREE.PlaneGeometry(d.bed[0], d.bed[1]), new THREE.MeshStandardMaterial({ color: 0x555555, transparent: true, opacity: .25 }));
+    g.add(bed);
+    const bb = new THREE.Box3().setFromObject(g);
+    views.parts = { group: g, lid: null, top: 0, size: bb.getSize(new THREE.Vector3()), framed: false };
+    empty(""); showView(views.parts);
+    const sl = d.slicer;
+    report.replaceChildren(h("div", { class: "dims" }, "Print plate: ", h("b", {}, d.parts.length > 1 ? `${d.parts.length} plates` : "1 plate"),
+      sl ? ` · ${sl.hours} h, ${sl.grams} g` : ""),
+      ...d.checks.map(c => msg("warn", inUnits(c))),
+      h("ul", { class: "notes" }, [...d.notes, ...(sl ? [`From ${sl.settings}: check them against your own printer profile.`] : [])].map(n => h("li", {}, inUnits(n)))),
+      h("div", { class: "hint" }, d.parts.map((p, i) => `Plate ${i + 1}: ${p.join(", ")}`).join(" · ")));
+  });
+};
+$("#platedl").onclick = async () => {
+  await busy($("#platedl"), "Making...", async () => {
+    const r = await download(await fetch("api/plate/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(plateBody()) }), "print_plate.zip");
+    if (r.error) { partData = { error: r.error }; partReport(); }
+  });
+};
+showPlate();
 fetch("api/parts").then(r => r.json()).then(c => {
   PARTS = c;
   partform.elements.kind.replaceChildren(...Object.entries(c.kinds).map(([k, v]) => h("option", { value: k }, v.label)));

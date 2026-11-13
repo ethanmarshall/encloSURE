@@ -282,6 +282,49 @@ Each part comes as STEP and STL with a notes file, and the page's Parts tab draw
   formulas from the Bayer snap-fit guide), a snap-in cable clip, a cable-tie mount, a board edge
   clip, and the DIN rail clip on its own plate. The strain limits for printed plastics are rules of
   thumb: print one and try it.
+- **Gears and pulleys**: involute spur gears (bd_warehouse) with a bore, hub and set screw; GT2 timing
+  pulleys from the tooth count (pitch diameter = teeth x 2 / pi, outside 0.508 mm smaller), with a
+  round-bottomed stand-in for the GT2 groove.
+- **Knobs and caps**: knobs for 6 mm D-shafts (4.5 mm flat), round shafts with a set screw, or
+  knurled shafts; button caps for tactile switches that report the panel hole to cut.
+- **Hinges and latches**: a two-leaf hinge with a filament or M3 pin, and a snap latch with its keeper.
+- **Test print** (`test_print`): a strip of threaded holes at several clearances with a bolt for each,
+  and snap hooks of three undercuts with a plate to push them through. Print it once; the clearance
+  that turns by hand is the one to use.
+
+### Print plate
+
+`POST /api/plate` (the Print plate panel on the Parts tab) lays the box's printed parts and any parts
+out on your bed, each turned the way it prints best, as a 3MF. With PrusaSlicer on the server (the
+Docker image has it) it also slices the plate for the real print time and grams, which the summary
+PDF and parts list then use. The times come from PrusaSlicer's default printer settings: your own
+profile will differ.
+
+## Made another way
+
+The Quick box tab's "Made another way" makes the same inside size and holes as:
+
+- **Bent sheet metal**: a base (floor, end walls, side lips) and a cover (top and sides) that screws
+  to the lips, as flat pattern DXFs with bend lines (layer BEND) and a formed STEP. Flat lengths use
+  the bend allowance BA = (pi/2)(R + K t) per bend; check your shop's K-factor or bend table.
+- **Laser-cut panels**: six panels with finger joints from one DXF, outlines grown by half the kerf.
+- **A moulding check**: draft on faces along the pull, even walls, boss and rib thickness against the
+  wall, inside corner radii, the wall range for the resin (Protolabs' table), and openings that need
+  side actions in the mould.
+
+## More on the box
+
+- **Screws**: board and lid screws are picked from stock lengths so they never bottom out and bite
+  enough (or give your own length); a screw that's too long or too short is flagged. The assembly
+  uses real ISO 4762 screws and heat-set inserts.
+- **Honeycomb vents**, counted in the temperature estimate.
+- **Battery door**: an opening in the floor with a flush door that screws on (the door is its own part).
+- **Cable strain relief**: a hole for the cable and a clamp bar on two posts inside.
+- **Wall bracket**: a French cleat under the floor and a bracket to screw to the wall.
+- **Stacking**: pins on the lid and sockets under the floor.
+- **Getting the board in**: the fit check lowers the board in from above and says whether anything
+  stands over it, and whether connectors reaching into wall openings need the board slid or tilted in.
+- **Parts in the team library** next to boxes, and **parts to Onshape** (imported as a Part Studio).
 
 ## A box you bought
 

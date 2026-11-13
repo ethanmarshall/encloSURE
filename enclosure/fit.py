@@ -439,10 +439,94 @@ def check(enc: Enclosure, base: Shape, lid: Shape | None, board,
                 findings.append(_f("warning", "connector_no_opening", part.name,
                                    f"sits at the {side} wall beside an empty opening, not in it", fix, move, p))
 
+    # 6. Getting it in: the board drops in from above, past whatever stands over it.
+    findings += insertion(enc, base, pcb_shape, placed, settings, p)
+
     # A connector in its opening sits close to the wall by design: its fit is the opening check.
     findings = [f for f in findings if not (f.code == "tight" and f.subject in behind)]
     findings.sort(key=lambda f: ({"error": 0, "warning": 1, "info": 2}[f.severity], f.code, f.subject))
     return Fit(placement, findings, headroom, rows, pcb_shape, placed)
+
+
+def insertion(enc, base, pcb_shape, placed, settings, placement=None) -> list:
+    """Can the board go in? It is lowered from above the rim to where it sits. Anything of the base
+    over the board's footprint (a ledge, a post, a guide) stops it; a connector reaching into a wall
+    opening needs the board shifted away from that wall while it drops, then slid back; with
+    connectors through opposite walls it can't go in without flexing the walls."""
+    from build123d import Box as _Box, Pos as _Pos
+    out = []
+    rim = enc.rim
+    (cx0, cy0, _), (cx1, cy1, _) = enc.cavity_bounds
+    pieces = [Named("board", pcb_shape)] + list(placed)
+    # Straight down: each piece's box swept up to the rim, against the base (walls excluded by the cavity box).
+    blockers = []
+    for pc in pieces:
+        (x0, y0, z0), (x1, y1, z1) = bbox(pc.shape)
+        x0, y0, x1, y1 = max(x0, cx0 + 0.05), max(y0, cy0 + 0.05), min(x1, cx1 - 0.05), min(y1, cy1 - 0.05)
+        if x1 <= x0 or y1 <= y0 or z1 >= rim:
+            continue
+        prism = _Pos((x0 + x1) / 2, (y0 + y1) / 2, (z1 + rim + 1) / 2) * _Box(x1 - x0, y1 - y0, rim + 1 - z1)
+        if pc.name == "board":
+            # The board's own outline (it may be notched round posts), swept up from its top face.
+            from build123d import Axis as _Axis, extrude as _extrude
+            tops = [f for f in pc.shape.faces() if f.normal_at().Z > 0.99]
+            if tops:
+                top = max(tops, key=lambda f: f.area)
+                prism = _extrude(top, amount=rim + 1 - top.center().Z) & _Pos((x0 + x1) / 2, (y0 + y1) / 2, rim / 2) * _Box(x1 - x0, y1 - y0, rim * 3)
+        v = overlap_volume(prism, base)
+        if v > 0.5:
+            hit = prism & base
+            hb = bbox(hit)
+            blockers.append((pc.name, v, ((hb[0][0] + hb[1][0]) / 2, (hb[0][1] + hb[1][1]) / 2, hb[0][2])))
+    for name, v, (hx, hy, hz) in blockers[:6]:
+        out.append(_f("error", "insertion_blocked", name,
+                      f"something of the base stands over it at ({hx:.1f}, {hy:.1f}), {hz:.1f} mm up: lowering the board "
+                      "in from above would catch on it", "move the post, ledge or guide, or plan to tilt the board past it"))
+    # Connectors into wall openings: how far each reaches past the walls.
+    reach = {"-X": 0.0, "+X": 0.0, "-Y": 0.0, "+Y": 0.0}
+    for pc in placed:
+        (x0, y0, _), (x1, y1, _) = bbox(pc.shape)
+        reach["-X"] = max(reach["-X"], cx0 - x0)
+        reach["+X"] = max(reach["+X"], x1 - cx1)
+        reach["-Y"] = max(reach["-Y"], cy0 - y0)
+        reach["+Y"] = max(reach["+Y"], y1 - cy1)
+    reach = {k: v for k, v in reach.items() if v > 0.05}
+    if not reach:
+        return out
+    (bx0, by0, _), (bx1, by1, _) = bbox(pcb_shape)
+    whole = [bbox(pc.shape) for pc in pieces]
+    lo_x, hi_x = min(b[0][0] for b in whole), max(b[1][0] for b in whole)
+    lo_y, hi_y = min(b[0][1] for b in whole), max(b[1][1] for b in whole)
+    for a, b_, lo, hi, c0, c1 in (("-X", "+X", lo_x, hi_x, cx0, cx1), ("-Y", "+Y", lo_y, hi_y, cy0, cy1)):
+        if a in reach and b_ in reach and reach[a] + reach[b_] <= 0.3:
+            continue  # a tenth or two: nothing worth saying
+        if a in reach and b_ in reach and reach[a] + reach[b_] <= 0.6:
+            out.append(_f("info", "insertion_flex", f"{a} and {b_} connectors",
+                          f"parts reach {reach[a]:.1f} and {reach[b_]:.1f} mm into the {a} and {b_} openings: the walls flex that "
+                          "much as the board goes in"))
+            continue
+        if a in reach and b_ in reach:
+            out.append(_f("error", "insertion_both_walls", f"{a} and {b_} connectors",
+                          f"parts reach {reach[a]:.1f} mm through {a} and {reach[b_]:.1f} mm through {b_}: the board can't be "
+                          "lowered in or slid into both openings", "move one connector back inside the wall, or split the box (clamshell)"))
+            continue
+        for side in (a, b_):
+            if side not in reach:
+                continue
+            p_ = reach[side] + 0.3
+            # Shift away from that wall by p_: does everything still fit across the cavity?
+            span = (hi - lo) - reach[side]
+            if span + p_ <= (c1 - c0) + 1e-6:
+                out.append(_f("info", "insertion_slide", f"{side} connectors",
+                              f"they reach {reach[side]:.1f} mm into the {side} wall: lower the board in {p_:.1f} mm toward the "
+                              f"far wall, then slide it into the opening"))
+            else:
+                need = span + p_ - (c1 - c0)
+                out.append(_f("warning", "insertion_tilt", f"{side} connectors",
+                              f"they reach {reach[side]:.1f} mm into the {side} wall but there is only room to shift "
+                              f"{p_ - need:.1f} mm: it has to go in tilted, connectors first",
+                              f"make the cavity {need:.1f} mm longer that way, or check the tilt on the real board"))
+    return out
 
 
 def _span(shape: Shape, axis: int):

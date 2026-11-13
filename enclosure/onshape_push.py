@@ -21,7 +21,7 @@ def enabled() -> bool:
     return bool(os.environ.get("ONSHAPE_ACCESS_KEY") and os.environ.get("ONSHAPE_SECRET_KEY"))
 
 
-def _signed_headers(method: str, path: str, query: str = "") -> dict:
+def _signed_headers(method: str, path: str, query: str = "", ctype: str = "application/json") -> dict:
     """Onshape's request signing for API keys: an HMAC-SHA256 of the method, a nonce, the date, the
     content type, the path and the query, lowercased, keyed with the secret key."""
     import email.utils
@@ -32,7 +32,6 @@ def _signed_headers(method: str, path: str, query: str = "") -> dict:
     key, secret = os.environ["ONSHAPE_ACCESS_KEY"], os.environ["ONSHAPE_SECRET_KEY"]
     nonce = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(25))
     date = email.utils.formatdate(usegmt=True)
-    ctype = "application/json"
     text = f"{method}\n{nonce}\n{date}\n{ctype}\n{path}\n{query}\n".lower()
     sig = base64.b64encode(hmac.new(secret.encode(), text.encode(), hashlib.sha256).digest()).decode()
     return {"Date": date, "On-Nonce": nonce, "Content-Type": ctype, "Accept": "application/json",
@@ -123,6 +122,52 @@ def update(ids: dict, feature_text: str) -> dict:
     ids = {**ids, "feature": r["feature"]["featureId"]}
     status = (r.get("featureState") or {}).get("featureStatus", "OK")
     return {"ids": ids, **_links(ids), "status": status}
+
+
+def _multipart(fields: dict, file_field: str, filename: str, data: bytes) -> tuple[bytes, str]:
+    import uuid
+    boundary = uuid.uuid4().hex
+    parts = []
+    for k, v in fields.items():
+        parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{k}"\r\n\r\n{v}\r\n'.encode())
+    parts.append(f'--{boundary}\r\nContent-Disposition: form-data; name="{file_field}"; filename="{filename}"\r\n'
+                 f'Content-Type: application/octet-stream\r\n\r\n'.encode() + data + b"\r\n")
+    parts.append(f"--{boundary}--\r\n".encode())
+    return b"".join(parts), f"multipart/form-data; boundary={boundary}"
+
+
+def push_step(data: bytes, filename: str, name: str) -> dict:
+    """A new document with a STEP file imported into a Part Studio (Onshape translates it)."""
+    import time
+    if not enabled():
+        raise RuntimeError("set ONSHAPE_ACCESS_KEY and ONSHAPE_SECRET_KEY on the server to send parts to Onshape")
+    doc = _call("POST", "/api/documents", {"name": name[:100]})
+    did, wid = doc["id"], doc["defaultWorkspace"]["id"]
+    body, ctype = _multipart({"encodedFilename": filename, "translate": "true", "storeInDocument": "false",
+                              "flattenAssemblies": "true", "formatName": "STEP"}, "file", filename, data)
+    path = f"/api/blobelements/d/{did}/w/{wid}"
+    headers = _signed_headers("POST", path, "", ctype)
+    req = urllib.request.Request(BASE + path, data=body, method="POST", headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=120) as r:
+            up = json.loads(r.read().decode() or "{}")
+    except urllib.error.HTTPError as e:
+        raise RuntimeError(f"Onshape said {e.code} to the upload: {e.read().decode(errors='replace')[:300]}") from None
+    tid = up.get("translationId")
+    ps = None
+    if tid:
+        for _ in range(60):
+            st = _call("GET", f"/api/translations/{tid}")
+            if st.get("requestState") != "ACTIVE":
+                break
+            time.sleep(2)
+        if st.get("requestState") != "DONE":
+            raise RuntimeError(f"Onshape could not import the STEP: {st.get('failureReason') or st.get('requestState')}")
+        ps = (st.get("resultElementIds") or [None])[0]
+    if not ps:
+        studios = [e for e in _call("GET", f"/api/documents/d/{did}/w/{wid}/elements") if e.get("elementType") == "PARTSTUDIO"]
+        ps = studios[-1]["id"] if studios else up.get("id")
+    return {"document": f"{BASE}/documents/{did}/w/{wid}/e/{ps}", "ids": {"did": did, "wid": wid, "element": ps}}
 
 
 def parse_link(url: str) -> tuple[str, str, str, str]:

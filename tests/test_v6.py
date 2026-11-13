@@ -106,7 +106,7 @@ def test_assembly_and_drawing_endpoints(tmp_path):
     r = assembly.make(spec, tmp_path / "a")
     assert r["files"].get("drawing") and not r["notes"]
     items = {row["item"]: row for row in r["parts_list"]}
-    assert items["M3x8 screw"]["qty"] == 8 and items["Rubber foot Ø10 mm"]["qty"] == 4 and "pg9" in items
+    assert items["M3x6 screw"]["qty"] == 8 and items["Rubber foot Ø10 mm"]["qty"] == 4 and "pg9" in items
     c = TestClient(app)
     assert c.get("/api/health").json()["draftwright"] is True
     body = {"size": [80, 50, 30], "standoffs": "rect:60x30", "standard": "iso", "title": {"part_number": "T-1"}}

@@ -60,7 +60,8 @@ def make(spec, made: dict, cost: dict | None = None, fit: dict | None = None, ti
     facts = []
     est = made.get("estimate") or {}
     if est:
-        facts.append(f"About {est['grams']:.0f} g of {est['material']}, {est['hours']} h to print")
+        facts.append(f"About {est['grams']:.0f} g of {est['material']}, {est['hours']} h to print"
+                     + (" (PrusaSlicer, " + est["source"].split(", ", 1)[1] + ")" if est.get("source") else " (rough)"))
     th = made.get("thermal")
     if th:
         facts.append(f"{th['power_w']:g} W inside: air about {th['rise_c']:g} °C over the room")

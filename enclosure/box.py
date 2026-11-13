@@ -29,7 +29,7 @@ import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from build123d import (Plane, Shape, Align, Axis, Box, Compound, Cone, Cylinder, Location, Polygon, Pos, Rot, Text,
+from build123d import (Plane, RegularPolygon, Shape, Align, Axis, Box, Compound, Cone, Cylinder, Location, Polygon, Pos, Rot, Text,
                        chamfer, export_step, export_stl, extrude, fillet)
 
 from .presets import FANS, GLANDS, PRESETS, expand, resolve
@@ -159,6 +159,8 @@ class BoxSpec:
     # Posts under the lid for a display or button board behind it: [x, y] from the centre
     lid_standoffs: list[list[float]] = field(default_factory=list)
     lid_standoff_height: float = 4.0  # down from the lid's underside
+    board_screw_length: float | None = None  # the board screws' length; None picks a stock length
+    lid_screw_length: float | None = None
     lid_standoff_screw: str = "M2.5"
     # Batteries: a cradle on the floor: {cell, count, at [x, y], axis x|y}
     batteries: list[dict] = field(default_factory=list)
@@ -171,6 +173,12 @@ class BoxSpec:
     # Light pipes: tubes from the lid down to LEDs on the board: [{at: [x, y], d}]
     light_pipes: list[dict] = field(default_factory=list)
     power_w: float = 0.0  # heat the electronics give off, for the temperature estimate
+    # A battery door in the floor: {size [w, l] of the opening, at [x, y], screw}; the door is its own part
+    battery_door: dict | None = None
+    # Cable strain relief: a clamp inside behind a cable hole: [{face, d (cable), at [along, height]}]
+    strain_reliefs: list[dict] = field(default_factory=list)
+    wall_bracket: bool = False  # a French-cleat rail on the floor and a bracket for the wall (its own part)
+    stacking: bool = False  # pins on the lid and sockets under the floor so boxes stack in line
 
     # The box's dimensions
     @property
@@ -326,6 +334,32 @@ def _profile(shape: str, size, radius: float, depth: float, teardrop: bool = Fal
     return tool
 
 
+def _honeycomb(w: float, h: float, cell: float, web: float) -> list[tuple[float, float]]:
+    """Centres of hexagons (cell mm across the flats, flats up and down) filling a w x h area, web apart."""
+    pitch_x = cell + web
+    pitch_y = (cell + web) * math.sqrt(3) / 2
+    r = cell / math.sqrt(3)  # corner radius
+    out = []
+    rows = int((h - cell) // pitch_y) + 1 if h >= cell else 0
+    for j in range(rows):
+        y = -h / 2 + cell / 2 + j * pitch_y
+        off = pitch_x / 2 if j % 2 else 0.0
+        x = -w / 2 + r + off
+        while x + r <= w / 2 + 1e-6:
+            out.append((x, y))
+            x += pitch_x
+    # Centre the pattern.
+    if out:
+        xs, ys = [p[0] for p in out], [p[1] for p in out]
+        dx, dy = -(min(xs) + max(xs)) / 2, -(min(ys) + max(ys)) / 2
+        out = [(x + dx, y + dy) for x, y in out]
+    return out
+
+
+def _hex_area(cell: float) -> float:
+    return math.sqrt(3) / 2 * cell ** 2
+
+
 def _on_wall(tool, face: str, along: float, z: float, oL: float, oW: float):
     """Put a tool built along Z (local +Y up) through a wall, centred `along` it at height z."""
     sign = -1 if face.startswith("-") else 1
@@ -382,6 +416,77 @@ def _hinge(spec, lid, base, top, oL, oW, notes, checks):
             checks.append("a cutout on +Y sits under the hinge: check it clears the knuckles and wedges")
             break
     return lid, base
+
+
+# Screw lengths in stock (ISO 4762 / 7380 preferred lengths, mm).
+STOCK_LENGTHS = (3, 4, 5, 6, 8, 10, 12, 14, 16, 20, 25, 30, 35, 40)
+NUT_HEIGHT = {"M2": 1.6, "M2.5": 2.0, "M3": 2.4, "M4": 3.2}  # ISO 4032
+
+
+def _stock_length(need: float) -> int:
+    return next((n for n in STOCK_LENGTHS if n >= need - 0.25), STOCK_LENGTHS[-1])
+
+
+def screw_plan(spec: "BoxSpec") -> dict:
+    """The board and lid screws: the length (yours, or the stock length that suits), what it clamps,
+    how deep its hole is, how much thread it gets, and checks for one that bottoms out or barely bites."""
+    plan, checks = {}, []
+
+    def judge(role, m, kind, clamp, hole_depth, chosen, auto_need, nut=0.0):
+        d = float(m[1:])
+        want = (0.75 * SCREWS[m][3]) if kind == "insert" else 1.5 * d
+        if chosen:
+            length = chosen
+        elif kind == "clearance":
+            length = _stock_length(auto_need)
+        else:  # the longest stock screw that neither bottoms out nor runs past the insert (or 2.5 x d in plastic)
+            reach = min(hole_depth, SCREWS[m][3] if kind == "insert" else 2.5 * d)
+            length = max([n for n in STOCK_LENGTHS if n <= clamp + reach + 0.05] or [STOCK_LENGTHS[0]])
+        into = length - clamp
+        row = {"screw": m, "length": length, "clamp": round(clamp, 2), "hole_depth": round(hole_depth, 2), "kind": kind,
+               "engaged": round(min(into, hole_depth), 2)}
+        if kind == "clearance":  # through, into a nut underneath
+            row["engaged"] = round(max(into - hole_depth, 0.0), 2)
+            if into < hole_depth + nut:
+                checks.append(f"{role} screws {m}x{length:g}: {into:.1f} mm past the {role.split()[0]} but the nut sits "
+                              f"{hole_depth:.1f} mm down and is {nut:g} mm thick; use {_stock_length(clamp + hole_depth + nut + 0.5)} mm")
+        else:
+            if into > hole_depth + 0.05:
+                checks.append(f"{role} screws {m}x{length:g}: {into:.1f} mm below the {('board' if role.startswith('board') else 'lid')} "
+                              f"but the hole is {hole_depth:.1f} mm deep: it will bottom out. Use "
+                              f"{max([n for n in STOCK_LENGTHS if n <= clamp + hole_depth] or [STOCK_LENGTHS[0]])} mm")
+            if into < want - 0.05:
+                checks.append(f"{role} screws {m}x{length:g}: only {max(into, 0):.1f} mm of thread {'in the insert' if kind == 'insert' else 'in the plastic'}; "
+                              f"{want:.1f} mm or more holds well")
+        plan[role.replace(" ", "_")] = row
+
+    if spec.standoffs and spec.standoff_hole != "pin":
+        m = spec.standoff_screw
+        d_hole, depth = spec.hole(m, spec.standoff_hole)
+        h = spec.standoff_height
+        bt = spec.board_thickness
+        if spec.standoff_hole == "insert":
+            hole_depth = min(depth, h + spec.floor - 0.6)
+            need = bt + SCREWS[m][3] * 0.9
+        elif spec.standoff_hole == "tap":
+            hole_depth = h
+            need = bt + min(h, 2.5 * float(m[1:]))
+        else:
+            hole_depth = h + spec.floor
+            need = bt + hole_depth + NUT_HEIGHT.get(m, 2.4) + 0.5
+        judge("board", m, spec.standoff_hole, bt, hole_depth, spec.board_screw_length, need, NUT_HEIGHT.get(m, 2.4))
+    if spec.lid == "screw":
+        m = spec.lid_screw
+        d_hole, depth = spec.hole(m, spec.lid_screw_hole)
+        post_h = spec.base_height() - spec.floor
+        clamp = spec.lid_thickness / 2  # the heads sit in a counterbore half the lid deep
+        hole_depth = depth if depth else post_h - 1.0
+        need = clamp + (SCREWS[m][3] * 0.9 if spec.lid_screw_hole == "insert" else min(hole_depth, 2.5 * float(m[1:])))
+        if spec.lid_screw_hole == "clearance":
+            checks.append("lid screws in clearance holes have nothing to bite: use tap or insert for the corner posts")
+        else:
+            judge("lid", m, spec.lid_screw_hole, clamp, hole_depth, spec.lid_screw_length, need)
+    return {**plan, "checks": checks}
 
 
 def build(spec: BoxSpec) -> dict:
@@ -644,6 +749,23 @@ def build(spec: BoxSpec) -> dict:
     for v in spec.vents:
         face = face_name(v["face"])
         (w, h), (a, b) = v["size"], v.get("at", [0, 0])
+        if v.get("pattern") == "honeycomb":
+            cells = _honeycomb(w, h, v.get("cell", 4.0), v.get("web", 1.2))
+            thick = 50.0 if face in ("lid", "floor") else spec.wall * 4
+            hexagon = extrude(RegularPolygon(v.get("cell", 4.0) / 2, 6, major_radius=False), amount=thick / 2, both=True)
+            tools = [Pos(a + cx, b + cy, 0) * hexagon for cx, cy in cells]
+            if not tools:
+                raise ValueError("honeycomb vent: the area is smaller than one cell")
+            tool = tools[0].fuse(*tools[1:]) if len(tools) > 1 else tools[0]
+            if face in ("lid", "floor"):
+                cut("lid" if face == "lid" else "base", Pos(0, 0, top if face == "lid" else 0.0) * tool)
+            else:
+                # Built in the wall's own (along, up) plane, then turned onto the wall.
+                tool = Pos(-a, -b, 0) * tool
+                cut("base", _on_wall(tool, face, a, spec.floor + b, oL, oW))
+            notes.append(f"honeycomb vent on {face}: {len(cells)} hexagons {v.get('cell', 4.0):g} mm across the flats, "
+                         f"{v.get('web', 1.2):g} mm between them, {_hex_area(v.get('cell', 4.0)) * len(cells):.0f} mm² open")
+            continue
         slot, pitch = v.get("slot", 2.0), v.get("pitch", 4.0)
         n = max(1, int((w - slot) // pitch) + 1)
         start = a - (n - 1) * pitch / 2
@@ -847,8 +969,11 @@ def build(spec: BoxSpec) -> dict:
         vent_area, zs = 0.0, []
         for v in spec.vents:
             (w, h), slot, pitch = v["size"], v.get("slot", 2.0), v.get("pitch", 4.0)
-            n = max(1, int((w - slot) // pitch) + 1)
-            vent_area += n * slot * h / 1e6
+            if v.get("pattern") == "honeycomb":
+                vent_area += len(_honeycomb(w, h, v.get("cell", 4.0), v.get("web", 1.2))) * _hex_area(v.get("cell", 4.0)) / 1e6
+            else:
+                n = max(1, int((w - slot) // pitch) + 1)
+                vent_area += n * slot * h / 1e6
             zs.append(v.get("at", [0, 0])[1] if face_name(v["face"]) in WALLS else (base_h if face_name(v["face"]) == "lid" else 0.0))
         stack = max((max(zs) - min(zs)) / 1000, base_h / 2000) if zs else 0.0
         def removed(dt):
@@ -871,15 +996,116 @@ def build(spec: BoxSpec) -> dict:
             checks.append(f"about {dt:g} °C above the room with {spec.power_w:g} W: add vents low and high (a chimney), "
                           f"make the box bigger, or move heat out through a metal panel")
 
+    extras = []  # other printed parts: a battery door, clamp bars, a wall bracket
+
+    # Battery door: an opening in the floor, a rebate round it for a flush door, two screw bosses inside.
+    if spec.battery_door:
+        bd = spec.battery_door
+        (w, l), (x, y) = bd["size"], bd.get("at", [0, 0])
+        m = bd.get("screw", "M2")
+        ledge, dt = 4.0, spec.floor - 0.8
+        pilot = SCREWS[m][1]
+        base -= Pos(x, y, 0) * Box(w, l, spec.floor * 3)
+        base -= Pos(x, y, 0) * Box(w + 2 * ledge, l + 2 * ledge, 2 * dt)
+        bosses = [(x - w / 2 - ledge / 2, y), (x + w / 2 + ledge / 2, y)]
+        for bx, by in bosses:
+            base += Pos(bx, by, spec.floor) * Cylinder(pilot / 2 + 1.6, 5.0, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            base -= Pos(bx, by, dt) * Cylinder(pilot / 2, 5.0 + spec.floor, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        c = spec.fit_clearance
+        door = Box(w + 2 * ledge - 2 * c, l + 2 * ledge - 2 * c, dt, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        for bx, by in bosses:
+            door -= Pos(bx - x, by - y, 0) * Cylinder(SCREWS[m][0] / 2, dt * 3)
+        door -= Pos(0, (l + 2 * ledge) / 2 - 3, 0) * Box(8, 1.2, 0.8, align=(Align.CENTER, Align.CENTER, Align.MIN))  # a fingernail slot
+        extras.append(("battery_door", door))
+        if dt < 1.0:
+            checks.append(f"battery door: a {spec.floor:g} mm floor leaves a {dt:.1f} mm door; make the floor 2 mm or more")
+        if abs(x) + w / 2 + ledge + 3 > L / 2 or abs(y) + l / 2 + ledge > W / 2:
+            checks.append("battery door: the opening and its ledge run into the walls")
+        notes.append(f"battery door: {w:g} x {l:g} mm opening in the floor, a {dt:.1f} mm door flush in a {ledge:g} mm rebate, "
+                     f"two {m} screws into bosses inside (print the door flat)")
+
+    # Strain relief: the cable passes a hole in the wall and is clamped under a bar on two posts.
+    for i, sr in enumerate(spec.strain_reliefs):
+        face, d = face_name(sr["face"]), float(sr.get("d", 6.0))
+        along, height = sr.get("at", [0, d / 2 + 2])
+        if face not in WALLS:
+            raise ValueError("strain relief: on a wall")
+        cut("base", _on_wall(_profile("round", [d + 0.8], 0, spec.wall * 4, spec.teardrop), face, along, spec.floor + height, oL, oW))
+        inward = {"-X": (1, 0), "+X": (-1, 0), "-Y": (0, 1), "+Y": (0, -1)}[face]
+        across = (abs(inward[1]), abs(inward[0]))  # along the wall
+        wall_pos = {"-X": -L / 2, "+X": L / 2, "-Y": -W / 2, "+Y": W / 2}[face]
+        depth_in = 10.0
+        cx = (wall_pos + inward[0] * depth_in) if face in ("-X", "+X") else along
+        cy = (wall_pos + inward[1] * depth_in) if face in ("-Y", "+Y") else along
+        span = d / 2 + 4.0
+        post_top = height + d / 2 - 0.2 * d  # the bar's underside: it pinches a fifth of the cable
+        m = "M3"
+        posts = [(cx + across[0] * s * span, cy + across[1] * s * span) for s in (-1, 1)]
+        for px, py in posts:
+            base += Pos(px, py, spec.floor) * Cylinder(3.5, post_top, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            base -= Pos(px, py, spec.floor + post_top - 6) * Cylinder(SCREWS[m][1] / 2, 7, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        if height - d / 2 > 0.6:  # a saddle under the cable
+            saddle = Box(6 if face in ("-Y", "+Y") else 6, 6, height - d / 2, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            base += Pos(cx, cy, spec.floor) * saddle
+        bar_len = 2 * span + 7
+        bar = Box(bar_len, 7, 3, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        for s_ in (-1, 1):
+            bar -= Pos(s_ * span, 0, 0) * Cylinder(SCREWS[m][0] / 2, 10)
+        extras.append((f"cable_clamp_{i + 1}", bar))
+        keep_out += [(px, py, 3.5) for px, py in posts]
+        notes.append(f"strain relief on {face}: a Ø{d + 0.8:g} mm hole for a Ø{d:g} mm cable, clamped {depth_in:g} mm inside "
+                     f"under a bar on two posts (M3 self-tapping); the bar is its own part")
+
+    # Wall bracket: a French cleat. The rail under the floor (along X) hooks over the bracket's lip.
+    if spec.wall_bracket:
+        rail_h, rail_w = 5.0, 10.0
+        y_rail = W / 4
+        # Its underside slopes down toward the wall at 45°, so it hooks behind the bracket's bevelled lip.
+        prof = Polygon((0, 0), (rail_w, 0), (rail_w, -rail_h), (-rail_h, -rail_h), align=None)
+        rail = extrude(Plane.YZ * prof, amount=L * 0.7)
+        rb = rail.bounding_box()  # the extrusion's direction follows the profile's winding: centre it on X
+        base += Pos(-(rb.min.X + rb.max.X) / 2, y_rail - rail_w / 2, 0) * rail
+        bw = L * 0.7
+        bracket = Box(bw, rail_w + 25, 3, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        lip = extrude(Plane.YZ * Polygon((0, 0), (rail_h, 0), (rail_h + rail_h, rail_h), (0, rail_h), align=None), amount=bw)
+        lb = lip.bounding_box()
+        bracket += Pos(-(lb.min.X + lb.max.X) / 2, -(rail_w + 25) / 2, 3 - 0.01) * lip
+        for s_ in (-1, 1):
+            bracket -= Pos(s_ * bw / 3, 4, 0) * Cylinder(2.25, 20)
+            bracket -= Pos(s_ * bw / 3, 4, 3 - 1.5) * Cone(2.25, 4.5, 1.5, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        extras.append(("wall_bracket", bracket))
+        notes.append("wall bracket: screw it to the wall (two #8 / M4 countersunk screws), lip up; the cleat rail under the "
+                     "floor drops over it and holds the box with its floor to the wall, +Y up")
+
+    # Stacking: pins on the lid, sockets under the floor, inset from the corners.
+    if spec.stacking:
+        if lid is None or spec.lid not in PLATE_LIDS:
+            raise ValueError("stacking needs a lid on top")
+        if spec.floor < 2.5:
+            checks.append("stacking: the sockets need a floor of 2.5 mm or more")
+        ix, iy = oL / 2 - 9, oW / 2 - 9
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                lid += Pos(sx * ix, sy * iy, top + spec.lid_thickness) * Cone(3.0, 2.2, 1.5, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                base -= Pos(sx * ix, sy * iy, 0) * Cone(3.0 + spec.fit_clearance, 2.2 + spec.fit_clearance, 1.7,
+                                                       align=(Align.CENTER, Align.CENTER, Align.MIN))
+        notes.append(f"stacking: four pins on the lid and sockets under the floor, {2 * ix:g} x {2 * iy:g} mm apart, so the same "
+                     "boxes stack in line")
+
     # Weight and print time, roughly.
-    vol = base.volume + (lid.volume if lid is not None else 0.0)
+    vol = base.volume + (lid.volume if lid is not None else 0.0) + sum(e.volume for _, e in extras)
     grams = vol / 1000 * DENSITY[spec.material]
     hours = vol / 8.0 / 3600  # about 8 mm3/s, a typical 0.4 mm nozzle at moderate speed
     estimate = {"material": spec.material, "grams": round(grams, 1), "hours": round(hours, 1),
                 "volume_cm3": round(vol / 1000, 1)}
     notes.append(f"about {grams:.0f} g of {spec.material} and {hours:.1f} h to print (solid; rough, a slicer knows better)")
 
-    return {"base": base, "lid": lid, "notes": notes, "checks": checks, "estimate": estimate,
+    screws = screw_plan(spec)
+    checks += screws.pop("checks")
+    for role, row in screws.items():
+        notes.append(f"{role} screws: {row['screw']}x{row['length']:g} ({'your length' if getattr(spec, role + '_screw_length') else 'stock length'}), "
+                     f"{row['engaged']:g} mm of thread {'in the nut' if row['kind'] == 'clearance' else 'in the ' + ('insert' if row['kind'] == 'insert' else 'plastic')}")
+    return {"base": base, "lid": lid, "extras": extras, "notes": notes, "checks": checks, "estimate": estimate, "screws": screws,
             "supports": placed, "print_plan": print_plan, "thermal": thermal,
             "inner": [round(v, 3) for v in spec.inner], "outer": [round(v, 3) for v in spec.outer]}
 
@@ -966,6 +1192,9 @@ def write(spec: BoxSpec, folder: str | Path, stl: bool = True, formats=("step",)
     if "step" in formats:
         export_step(made["base"], str(folder / "base.step"))
         files["base"] = str(folder / "base.step")
+        for name, part in made.get("extras") or []:
+            export_step(part, str(folder / f"{name}.step"))
+            files[name] = str(folder / f"{name}.step")
         if made["lid"] is not None:
             export_step(made["lid"], str(folder / "lid.step"))
             files["lid"] = str(folder / "lid.step")
@@ -982,6 +1211,9 @@ def write(spec: BoxSpec, folder: str | Path, stl: bool = True, formats=("step",)
                 flipped = Rot(180, 0, 0) * lid
                 export_stl(Pos(0, 0, -flipped.bounding_box().min.Z) * flipped, str(folder / "lid.stl"))
                 files["lid_stl"] = str(folder / "lid.stl")
+            for name, part in made.get("extras") or []:
+                export_stl(part, str(folder / f"{name}.stl"))
+                files[f"{name}_stl"] = str(folder / f"{name}.stl")
             if made.get("supports"):
                 export_stl(Compound(children=made["supports"]), str(folder / "support_enforcers.stl"))
                 files["support_enforcers"] = str(folder / "support_enforcers.stl")

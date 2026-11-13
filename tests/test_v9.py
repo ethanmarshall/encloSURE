@@ -37,7 +37,9 @@ def test_every_part_builds_as_one_valid_solid(kind):
     r = hw.make(kind)
     shape = r["shape"]
     assert shape.is_valid and shape.volume > 0
-    if not (kind in ("screw", "nut") and r.get("info", {}).get("standard")):
+    if kind in ("hinge", "latch", "test_print"):  # several pieces laid out to print together
+        assert len(shape.solids()) >= 2
+    elif not (kind in ("screw", "nut") and r.get("info", {}).get("standard")):
         assert len(shape.solids()) == 1, kind
 
 
