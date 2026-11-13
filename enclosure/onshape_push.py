@@ -21,13 +21,27 @@ def enabled() -> bool:
     return bool(os.environ.get("ONSHAPE_ACCESS_KEY") and os.environ.get("ONSHAPE_SECRET_KEY"))
 
 
-def _call(method: str, path: str, body: dict | None = None) -> dict:
+def _signed_headers(method: str, path: str, query: str = "") -> dict:
+    """Onshape's request signing for API keys: an HMAC-SHA256 of the method, a nonce, the date, the
+    content type, the path and the query, lowercased, keyed with the secret key."""
+    import email.utils
+    import hashlib
+    import hmac
+    import secrets
+    import string
     key, secret = os.environ["ONSHAPE_ACCESS_KEY"], os.environ["ONSHAPE_SECRET_KEY"]
-    auth = base64.b64encode(f"{key}:{secret}".encode()).decode()
+    nonce = "".join(secrets.choice(string.ascii_letters + string.digits) for _ in range(25))
+    date = email.utils.formatdate(usegmt=True)
+    ctype = "application/json"
+    text = f"{method}\n{nonce}\n{date}\n{ctype}\n{path}\n{query}\n".lower()
+    sig = base64.b64encode(hmac.new(secret.encode(), text.encode(), hashlib.sha256).digest()).decode()
+    return {"Date": date, "On-Nonce": nonce, "Content-Type": ctype, "Accept": "application/json",
+            "Authorization": f"On {key}:HmacSHA256:{sig}"}
+
+
+def _call(method: str, path: str, body: dict | None = None) -> dict:
     data = json.dumps(body).encode() if body is not None else None
-    req = urllib.request.Request(BASE + path, data=data, method=method, headers={
-        "Authorization": f"Basic {auth}", "Accept": "application/json;charset=UTF-8; qs=0.09",
-        "Content-Type": "application/json;charset=UTF-8; qs=0.09"})
+    req = urllib.request.Request(BASE + path, data=data, method=method, headers=_signed_headers(method, path))
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             text = r.read().decode()

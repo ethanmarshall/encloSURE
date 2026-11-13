@@ -144,7 +144,13 @@ def test_onshape_push_calls(monkeypatch):
     def fake(req, timeout=60):
         path, body = req.full_url.replace(onshape_push.BASE, ""), json.loads(req.data) if req.data else None
         calls.append((req.get_method(), path, body))
-        assert req.headers["Authorization"].startswith("Basic ")
+        auth = req.headers["Authorization"]
+        assert auth.startswith("On k:HmacSHA256:") and len(req.headers["On-nonce"]) == 25 and req.headers["Date"].endswith("GMT")
+        # The signature is HMAC-SHA256 of the documented string, keyed with the secret.
+        import base64, hashlib, hmac
+        text = (f"{req.get_method()}\n{req.headers['On-nonce']}\n{req.headers['Date']}\napplication/json\n"
+                f"{path}\n\n").lower()
+        assert auth.split(":")[2] == base64.b64encode(hmac.new(b"s", text.encode(), hashlib.sha256).digest()).decode()
         if path == "/api/documents":
             return R({"id": "D1", "defaultWorkspace": {"id": "W1"}})
         if req.get_method() == "POST" and path == "/api/featurestudios/d/D1/w/W1":
