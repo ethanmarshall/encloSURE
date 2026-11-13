@@ -277,26 +277,12 @@ def fetch(part: Part, sources: list, folder: Path | None = None, opener=None) ->
 
 def from_board(kicad_pcb: str | Path) -> dict[str, dict]:
     """Each footprint's reference, value, MPN field, position (KiCad page mm), rotation and side,
-    from a .kicad_pcb, through KiCad's pcbnew."""
-    try:
-        import pcbnew
-    except ImportError as e:
-        raise RuntimeError("reading a .kicad_pcb needs KiCad's Python module (pcbnew)") from e
-    board = pcbnew.LoadBoard(str(kicad_pcb))
+    read from the .kicad_pcb file itself (no KiCad needed)."""
+    from .kicad import footprints
     out = {}
-    for fp in board.GetFootprints():
-        pos = fp.GetPosition()
-        fields = {}
-        for f in fp.GetFields() if hasattr(fp, "GetFields") else []:
-            fields[f.GetName()] = f.GetText()
-        mpn = next((v for k, v in fields.items()
+    for ref, fp in footprints(kicad_pcb).items():
+        mpn = next((v for k, v in fp["fields"].items()
                     if k.lower() in ("mpn", "manufacturer part number", "mfr part number", "part number") and v), None)
-        out[fp.GetReference()] = {
-            "value": fp.GetValue(),
-            "mpn": mpn,
-            "at": [pcbnew.ToMM(pos.x), pcbnew.ToMM(pos.y)],
-            "rotation": fp.GetOrientationDegrees(),
-            "side": "bottom" if fp.IsFlipped() else "top",
-            "has_model": len(fp.Models()) > 0,
-        }
+        out[ref] = {"value": fp["value"], "mpn": mpn, "at": fp["at"], "rotation": fp["rotation"],
+                    "side": fp["side"], "has_model": fp["has_model"]}
     return out

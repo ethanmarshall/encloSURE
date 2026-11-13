@@ -3,73 +3,107 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>EncloSURE Box</title>
+<title>EncloSURE</title>
 <style>
   :root {
-    --bg: #f4f3ef; --panel: #ffffff; --ink: #1d1f21; --muted: #6b6f73; --line: #dcdad3;
-    --accent: #c4501b; --accent-ink: #ffffff; --warn-bg: #fff4e0; --warn: #8a5300; --err: #b3261e;
-    --view: #e9e7e1;
+    --bg: #f4f3ef; --panel: #ffffff; --ink: #1d1f21; --muted: #676b70; --line: #dcdad3; --soft: #f8f7f4;
+    --accent: #c4501b; --accent-ink: #ffffff; --warn-bg: #fff4e0; --warn: #8a5300; --err: #b3261e; --err-bg: #fdecea;
+    --ok: #1f7a3e; --ok-bg: #e7f5ec; --view: #e9e7e1;
   }
   @media (prefers-color-scheme: dark) {
     :root:not([data-theme="light"]) {
-      --bg: #151618; --panel: #1e2023; --ink: #e8e6e1; --muted: #9a9ea3; --line: #33363a;
-      --accent: #e8743f; --accent-ink: #151618; --warn-bg: #3a2c12; --warn: #f2c27a; --err: #ff8a80; --view: #24272b;
+      --bg: #151618; --panel: #1e2023; --ink: #e8e6e1; --muted: #9a9ea3; --line: #33363a; --soft: #24272b;
+      --accent: #e8743f; --accent-ink: #151618; --warn-bg: #3a2c12; --warn: #f2c27a; --err: #ff8a80; --err-bg: #3b1c1a;
+      --ok: #7fd49a; --ok-bg: #173323; --view: #24272b;
     }
   }
   :root[data-theme="dark"] {
-    --bg: #151618; --panel: #1e2023; --ink: #e8e6e1; --muted: #9a9ea3; --line: #33363a;
-    --accent: #e8743f; --accent-ink: #151618; --warn-bg: #3a2c12; --warn: #f2c27a; --err: #ff8a80; --view: #24272b;
+    --bg: #151618; --panel: #1e2023; --ink: #e8e6e1; --muted: #9a9ea3; --line: #33363a; --soft: #24272b;
+    --accent: #e8743f; --accent-ink: #151618; --warn-bg: #3a2c12; --warn: #f2c27a; --err: #ff8a80; --err-bg: #3b1c1a;
+    --ok: #7fd49a; --ok-bg: #173323; --view: #24272b;
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
-  header { display: flex; align-items: baseline; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header { display: flex; align-items: center; gap: 16px; padding: 10px 20px; border-bottom: 1px solid var(--line); min-height: 53px; }
   header h1 { margin: 0; font-size: 18px; letter-spacing: .02em; }
   header h1 b { color: var(--accent); }
-  .tabs { display: flex; gap: 4px; margin-left: auto; }
-  .tabs button { border: 1px solid var(--line); background: none; color: var(--ink); padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+  .tabs { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; }
+  .tabs button { border: 1px solid var(--line); background: none; color: var(--ink); padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
   .tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-  main { display: grid; grid-template-columns: 380px 1fr; grid-template-rows: minmax(0, 1fr); height: calc(100vh - 53px); }
+  main { display: grid; grid-template-columns: 420px 1fr; grid-template-rows: minmax(0, 1fr); height: calc(100vh - 53px); }
   main > * { min-height: 0; }
-  form { overflow-y: auto; padding: 12px 20px 40px; border-right: 1px solid var(--line); background: var(--panel); }
-  fieldset { border: none; border-top: 1px solid var(--line); margin: 10px 0 0; padding: 10px 0 0; }
-  legend { font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 0 6px 0 0; }
-  .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 6px 0; }
-  .row.two { grid-template-columns: 1fr 1fr; }
-  .row.one { grid-template-columns: 1fr; }
-  label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
-  label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); font-size: 13px; }
-  input, select, textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; width: 100%; }
+  form { overflow-y: auto; padding: 8px 20px 0; border-right: 1px solid var(--line); background: var(--panel); }
+  .intro { font-size: 12.5px; color: var(--muted); margin: 6px 0 4px; }
+  fieldset { border: none; border-top: 1px solid var(--line); margin: 12px 0 0; padding: 10px 0 0; min-width: 0; }
+  fieldset.first { border-top: none; margin-top: 0; }
+  legend { font-weight: 650; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 0 6px 0 0; }
+  .grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin: 6px 0; }
+  .grid.g2 { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .grid.g1 { grid-template-columns: minmax(0, 1fr); }
+  label.f { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); min-width: 0; }
+  label.check { display: flex; align-items: center; gap: 7px; color: var(--ink); font-size: 13px; margin: 6px 0; }
+  .unit { position: relative; }
+  .unit input { padding-right: 34px; }
+  .unit::after { content: attr(data-unit); position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-size: 11px; color: var(--muted); pointer-events: none; }
+  input, select { font: inherit; font-size: 13px; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; width: 100%; min-width: 0; }
+  input[type=file] { padding: 4px; font-size: 12px; }
+  input:focus, select:focus { outline: 2px solid var(--accent); outline-offset: -1px; }
   label.check input { width: auto; }
-  textarea { font-family: ui-monospace, Consolas, monospace; font-size: 12px; min-height: 60px; resize: vertical; }
-  .hint { font-size: 11px; color: var(--muted); margin: 2px 0 0; }
-  .hint code { font-size: 11px; }
-  .actions { position: sticky; bottom: -40px; background: var(--panel); padding: 12px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .hint { font-size: 11.5px; color: var(--muted); margin: 2px 0 6px; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; flex-wrap: wrap; }
   .seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
-  .seg input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: -2px; }
-  .seg label { padding: 6px 10px; cursor: pointer; color: var(--ink); font-size: 13px; flex-direction: row; }
+  .seg label { padding: 6px 10px; cursor: pointer; color: var(--ink); font-size: 13px; }
   .seg input:checked + label { background: var(--ink); color: var(--bg); }
-  button.go { background: var(--accent); color: var(--accent-ink); border: none; padding: 8px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; }
-  button.go:disabled { opacity: .5; cursor: wait; }
+  .seg input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .seg.full { display: flex; }
+  .seg.full label { flex: 1; text-align: center; }
+  .rows { display: flex; flex-direction: column; gap: 8px; margin: 6px 0; }
+  .item { border: 1px solid var(--line); border-radius: 7px; padding: 8px; background: var(--soft); position: relative; }
+  .item .grid { margin: 4px 0 0; }
+  .item .del { position: absolute; top: 4px; right: 4px; border: none; background: none; color: var(--muted); cursor: pointer; font-size: 18px; line-height: 1; padding: 2px 6px; border-radius: 4px; }
+  .item .del:hover { color: var(--err); background: var(--err-bg); }
+  .item .src { font-size: 11px; color: var(--muted); margin-top: 4px; }
+  .item .head { padding-right: 24px; }
+  button.add { border: 1px dashed var(--line); background: none; color: var(--ink); border-radius: 6px; padding: 6px; cursor: pointer; font: inherit; font-size: 13px; width: 100%; }
+  button.add:hover { border-color: var(--accent); color: var(--accent); }
+  .actions { position: sticky; bottom: 0; background: var(--panel); padding: 12px 0 14px; margin-top: 14px; border-top: 1px solid var(--line); display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  button.go { background: var(--accent); color: var(--accent-ink); border: none; padding: 8px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; font: inherit; font-weight: 600; }
+  button.go:disabled { opacity: .5; cursor: default; }
+  button.plain { background: none; border: 1px solid var(--line); color: var(--ink); padding: 7px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
+  button.plain:disabled { opacity: .5; cursor: default; }
+  .step { display: flex; gap: 8px; align-items: baseline; margin: 2px 0 4px; }
+  .step b { display: inline-grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; background: var(--ink); color: var(--bg); font-size: 11px; flex: none; }
+  .summary { border: 1px solid var(--line); border-radius: 7px; padding: 8px 10px; font-size: 12.5px; background: var(--soft); margin: 8px 0; }
+  .summary table { border-collapse: collapse; width: 100%; font-variant-numeric: tabular-nums; }
+  .summary td { padding: 2px 4px 2px 0; vertical-align: top; }
+  .summary td:first-child { color: var(--muted); white-space: nowrap; width: 1%; padding-right: 10px; }
   .view { position: relative; display: flex; flex-direction: column; min-width: 0; }
-  #canvas { flex: 1; min-height: 300px; background: var(--view); }
+  #canvas { flex: 1; min-height: 300px; background: var(--view); position: relative; }
+  #fitview { flex: 1; border: none; min-height: 300px; background: var(--view); }
   .status { position: absolute; top: 10px; left: 12px; font-size: 12px; color: var(--muted); }
   .viewopts { position: absolute; top: 8px; right: 12px; display: flex; gap: 10px; }
-  .report { padding: 10px 20px 14px; border-top: 1px solid var(--line); background: var(--panel); max-height: 34vh; overflow-y: auto; }
-  .report .dims { font-variant-numeric: tabular-nums; }
-  .check-item { background: var(--warn-bg); color: var(--warn); border-radius: 5px; padding: 5px 8px; margin: 4px 0; font-size: 12.5px; }
+  .viewopts label.check { margin: 0; font-size: 12.5px; }
+  .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; text-align: center; padding: 20px; }
+  .report { padding: 10px 20px 14px; border-top: 1px solid var(--line); background: var(--panel); max-height: 38vh; overflow-y: auto; }
+  .dims { font-variant-numeric: tabular-nums; }
+  .msg { border-radius: 5px; padding: 6px 9px; margin: 5px 0; font-size: 12.5px; }
+  .msg.warn { background: var(--warn-bg); color: var(--warn); }
+  .msg.err { background: var(--err-bg); color: var(--err); }
+  .msg.ok { background: var(--ok-bg); color: var(--ok); }
+  .msg .fix { display: block; margin-top: 2px; color: var(--ink); opacity: .85; }
+  .verdict { font-size: 15px; font-weight: 650; padding: 8px 10px; }
   .error { color: var(--err); font-weight: 600; }
   .notes { color: var(--muted); font-size: 12px; margin: 4px 0 0; padding-left: 16px; }
-  details summary { cursor: pointer; font-size: 12px; color: var(--muted); }
-  table.presets { border-collapse: collapse; font-size: 11.5px; width: 100%; margin-top: 4px; }
-  table.presets td { border-top: 1px solid var(--line); padding: 2px 4px; vertical-align: top; }
-  table.presets td:first-child { font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
+  details summary { cursor: pointer; font-size: 12.5px; color: var(--muted); margin: 4px 0; }
+  .links { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
   [hidden] { display: none !important; }
-  @media (max-width: 800px) {
+  @media (max-width: 860px) {
     main { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; }
-    form { border-right: none; padding: 12px 16px 40px; }
-    #canvas { height: 60vh; }
-    header { padding: 12px 16px; flex-wrap: wrap; }
+    form { border-right: none; padding: 8px 16px 0; }
+    #canvas, #fitview { height: 60vh; flex: none; }
+    header { padding: 10px 16px; flex-wrap: wrap; }
+    .tabs { margin-left: 0; }
+    .report { max-height: none; }
   }
 </style>
 </head>
@@ -78,121 +112,237 @@
   <h1>Enclo<b>SURE</b></h1>
   <div class="tabs" role="tablist">
     <button role="tab" aria-selected="true" data-tab="box">Quick box</button>
+    <button role="tab" aria-selected="false" data-tab="fit">Fit a board</button>
     <button role="tab" aria-selected="false" data-tab="stock">Bought box</button>
   </div>
 </header>
 <main>
-  <form id="boxform" autocomplete="off">
-    <fieldset style="border-top:none;margin-top:0">
-      <legend>Size (mm)</legend>
-      <div class="row">
-        <label>Length X<input name="L" type="number" step="0.5" value="100"></label>
-        <label>Width Y<input name="W" type="number" step="0.5" value="60"></label>
-        <label>Height Z<input name="H" type="number" step="0.5" value="40"></label>
-      </div>
-      <label class="check"><input name="outer" type="checkbox"> These are outside sizes</label>
-      <div class="row">
-        <label>Wall<input name="wall" type="number" step="0.1" value="2"></label>
-        <label>Floor<input name="floor" type="number" step="0.1" value="2"></label>
-        <label>Corner radius<input name="corner_radius" type="number" step="0.5" value="3"></label>
-      </div>
-    </fieldset>
-    <fieldset>
-      <legend>Lid</legend>
-      <div class="row">
-        <label>Type<select name="lid">
-          <option value="screw">Screw</option><option value="friction">Friction</option>
-          <option value="snap">Snap</option><option value="slide">Slide</option><option value="none">None</option>
+<!-- ============ QUICK BOX ============ -->
+<form id="boxform" autocomplete="off" novalidate>
+  <p class="intro">An enclosure from a size and a few choices. Everything is in millimetres, measured from the centre of the inside, with Z up. The preview updates as you type.</p>
+  <fieldset class="first">
+    <legend>Size</legend>
+    <div class="seg full" role="radiogroup" aria-label="Which size">
+      <input type="radio" name="size_is" id="si-in" value="inner" checked><label for="si-in">Inside space</label>
+      <input type="radio" name="size_is" id="si-out" value="outer"><label for="si-out">Outside size</label>
+    </div>
+    <div class="grid">
+      <label class="f">Length (X)<span class="unit" data-unit="mm"><input name="L" type="number" min="5" step="0.5" value="100"></span></label>
+      <label class="f">Width (Y)<span class="unit" data-unit="mm"><input name="W" type="number" min="5" step="0.5" value="60"></span></label>
+      <label class="f">Height (Z)<span class="unit" data-unit="mm"><input name="H" type="number" min="5" step="0.5" value="40"></span></label>
+    </div>
+    <div class="grid">
+      <label class="f">Wall<span class="unit" data-unit="mm"><input name="wall" type="number" min="0.8" step="0.1" value="2"></span></label>
+      <label class="f">Floor<span class="unit" data-unit="mm"><input name="floor" type="number" min="0.8" step="0.1" value="2"></span></label>
+      <label class="f">Corner radius<span class="unit" data-unit="mm"><input name="corner_radius" type="number" min="0" step="0.5" value="3"></span></label>
+    </div>
+    <p class="hint">2 mm walls suit most printed boxes. Corner radius is on the outside; 0 for square corners.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Lid</legend>
+    <div class="grid g2">
+      <label class="f">Type<select name="lid">
+        <option value="screw">Screw-down</option>
+        <option value="friction">Press-fit</option>
+        <option value="snap">Snap-fit</option>
+        <option value="slide">Slide-in panel</option>
+        <option value="none">No lid</option>
+      </select></label>
+      <label class="f" data-show="lid">Thickness<span class="unit" data-unit="mm"><input name="lid_thickness" type="number" min="0.8" step="0.1" value="2"></span></label>
+    </div>
+    <p class="hint" id="lidhint"></p>
+    <div class="grid" data-show="lip">
+      <label class="f">Lip depth<span class="unit" data-unit="mm"><input name="lip" type="number" min="0" step="0.5" value="3"></span></label>
+      <label class="f">Fit gap per side<span class="unit" data-unit="mm"><input name="fit_clearance" type="number" min="0" step="0.05" value="0.2"></span></label>
+    </div>
+    <div data-show="screw">
+      <div class="grid g2">
+        <label class="f">Lid screws<select name="lid_screw"></select></label>
+        <label class="f">Post holes for<select name="lid_screw_hole">
+          <option value="insert">Heat-set inserts</option>
+          <option value="tap">Screw straight in (tapped)</option>
+          <option value="clearance">Through, with a nut</option>
         </select></label>
-        <label>Thickness<input name="lid_thickness" type="number" step="0.1" value="2"></label>
-        <label>Lip depth<input name="lip" type="number" step="0.5" value="3"></label>
       </div>
-      <div class="row" data-for="screw">
-        <label>Screw<select name="lid_screw"></select></label>
-        <label>Post hole<select name="lid_screw_hole"><option>insert</option><option>tap</option><option>clearance</option></select></label>
-        <label>Fit gap<input name="fit_clearance" type="number" step="0.05" value="0.2"></label>
+      <label class="check"><input type="checkbox" id="gasket_on"> Seal with an O-ring gasket</label>
+      <div class="grid g2" id="gasket_row" hidden>
+        <label class="f">Cord diameter<span class="unit" data-unit="mm"><input name="gasket" type="number" min="1" max="5" step="0.1" value="2"></span></label>
       </div>
-      <div class="row two" data-for="screw">
-        <label>Gasket cord (0 none)<input name="gasket" type="number" step="0.1" value="0"></label>
-      </div>
-    </fieldset>
-    <fieldset>
-      <legend>Board standoffs</legend>
-      <div class="row one">
-        <label>Positions from the inside centre<input name="standoffs" placeholder="rect:80x40  or  x,y;x,y" value="rect:80x40"></label>
-      </div>
-      <div class="row">
-        <label>Height<input name="standoff_height" type="number" step="0.5" value="5"></label>
-        <label>Screw<select name="standoff_screw"></select></label>
-        <label>Hole<select name="standoff_hole"><option>insert</option><option>tap</option><option>clearance</option></select></label>
-      </div>
-      <label class="check"><input name="standoff_ribs" type="checkbox" checked> Gussets at their feet</label>
-    </fieldset>
-    <fieldset>
-      <legend>Cutouts</legend>
-      <textarea name="cutouts" spellcheck="false">left:usb-c@0,8
-back:pg9@20,20
-lid:round:6@20,0</textarea>
-      <p class="hint">One per line: <code>FACE:PRESET@a,b</code>, <code>FACE:round:D@a,b</code> or <code>FACE:rect:WxH[rR]@a,b</code>. Faces: left right front back lid floor. On a wall, a is along it from the middle and b is up from the inside floor.</p>
-      <details><summary>Presets</summary><table class="presets" id="presets"></table></details>
-    </fieldset>
-    <fieldset>
-      <legend>Mounting and extras</legend>
-      <div class="row">
-        <label>Ears (mm out)<input name="flange" type="number" step="1" value="0"></label>
-        <label>Feet dia.<input name="feet" type="number" step="0.5" value="0"></label>
-        <label>Keyholes<select name="keyholes"><option value="">none</option></select></label>
-      </div>
-      <label class="check"><input name="din_rail" type="checkbox"> DIN rail clip (TS35) under the floor</label>
-      <label style="margin-top:8px">Vents<textarea name="vents" spellcheck="false" placeholder="right:30x20@0,15"></textarea></label>
-      <p class="hint"><code>FACE:WxH@a,b[:slot[:pitch]]</code></p>
-      <label style="margin-top:8px">Labels<textarea name="labels" spellcheck="false" placeholder="lid:POWER@0,-15"></textarea></label>
-      <p class="hint"><code>FACE:TEXT@a,b[:size[:depth]]</code>, negative depth is recessed</p>
-    </fieldset>
-    <fieldset>
-      <legend>Printing</legend>
-      <div class="row two">
-        <label>Bottom chamfer<input name="bottom_chamfer" type="number" step="0.1" value="0.4"></label>
-      </div>
-      <label class="check"><input name="teardrop" type="checkbox" checked> Teardrop holes in walls</label>
-    </fieldset>
-    <div class="actions">
-      <div class="seg" role="radiogroup" aria-label="Download">
-        <input type="radio" name="format" id="f-step" value="step" checked><label for="f-step">STEP</label>
-        <input type="radio" name="format" id="f-onshape" value="onshape"><label for="f-onshape">Onshape</label>
-        <input type="radio" name="format" id="f-both" value="both"><label for="f-both">Both</label>
-      </div>
-      <label class="check"><input name="stl" type="checkbox" checked> STL</label>
-      <button class="go" type="submit">Download</button>
+      <p class="hint" id="gaskethint" hidden>A groove in the lid's underside presses the cord onto a ledge inside the walls, about 25% squeeze. Use solid O-ring cord.</p>
     </div>
-  </form>
+  </fieldset>
 
-  <form id="stockform" hidden>
-    <fieldset style="border-top:none;margin-top:0">
-      <legend>Your box</legend>
-      <p class="hint" style="font-size:12.5px">Download the maker's STEP for the box you bought (Hammond has one on each 1590 product page). It must stand with its opening up.</p>
-      <div class="row one"><label>Box STEP (may hold the lid too)<input name="step" type="file" accept=".step,.stp" required></label></div>
-      <div class="row one"><label>Lid STEP, if separate<input name="lid" type="file" accept=".step,.stp"></label></div>
-    </fieldset>
-    <fieldset>
-      <legend>Cutouts</legend>
-      <textarea name="cutouts" spellcheck="false" required>front:pg9@0,12
-lid:pushbutton-22@0,0</textarea>
-      <p class="hint">Same lines as the quick box. You get the drilled box as STEP and a PDF with a 1:1 drilling template per face.</p>
-      <label class="check"><input name="teardrop" type="checkbox" value="true"> Teardrop wall holes (printed box)</label>
-    </fieldset>
-    <div class="actions"><button class="go" type="submit">Make templates</button></div>
-  </form>
-
-  <section class="view">
-    <div id="canvas"></div>
-    <div class="status" id="status">Loading...</div>
-    <div class="viewopts">
-      <label class="check"><input id="explode" type="checkbox" checked> Lift lid</label>
-      <label class="check"><input id="showlid" type="checkbox" checked> Show lid</label>
+  <fieldset>
+    <legend>Board standoffs</legend>
+    <div class="grid g2">
+      <label class="f">Layout<select name="so_mode">
+        <option value="rect">Rectangle of 4</option>
+        <option value="custom">Custom positions</option>
+        <option value="none">None</option>
+      </select></label>
     </div>
-    <div class="report" id="report"></div>
-  </section>
+    <div class="grid g2" data-so="rect">
+      <label class="f">Hole spacing X<span class="unit" data-unit="mm"><input name="so_x" type="number" min="1" step="0.5" value="80"></span></label>
+      <label class="f">Hole spacing Y<span class="unit" data-unit="mm"><input name="so_y" type="number" min="1" step="0.5" value="40"></span></label>
+    </div>
+    <p class="hint" data-so="rect">The distance between your board's mounting hole centres, centred in the box.</p>
+    <div data-so="custom">
+      <div class="rows" id="so_rows"></div>
+      <button type="button" class="add" data-add="so">+ Add a standoff</button>
+    </div>
+    <div class="grid" data-so="any">
+      <label class="f">Height<span class="unit" data-unit="mm"><input name="standoff_height" type="number" min="1" step="0.5" value="5"></span></label>
+      <label class="f">Screw<select name="standoff_screw"></select></label>
+      <label class="f">Hole for<select name="standoff_hole">
+        <option value="insert">Insert</option><option value="tap">Tapped</option><option value="clearance">Through</option>
+      </select></label>
+    </div>
+    <label class="check" data-so="any"><input type="checkbox" name="standoff_ribs" checked> Support ribs at their feet</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Holes and cutouts</legend>
+    <p class="hint">Pick a part to cut its maker's recommended hole, or give your own size. On a wall, position is along the wall from its centre and up from the inside floor.</p>
+    <div class="rows" id="cut_rows"></div>
+    <button type="button" class="add" data-add="cut">+ Add a hole</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Vents</legend>
+    <div class="rows" id="vent_rows"></div>
+    <button type="button" class="add" data-add="vent">+ Add a vent</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Text</legend>
+    <div class="rows" id="label_rows"></div>
+    <button type="button" class="add" data-add="label">+ Add text</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Mounting</legend>
+    <div class="grid g2">
+      <label class="f">Screw ears out from the walls<span class="unit" data-unit="mm"><input name="flange" type="number" min="0" step="1" value="0"></span></label>
+      <label class="f">Wall keyholes<select name="keyholes"><option value="">None</option></select></label>
+    </div>
+    <div class="grid g2">
+      <label class="f">Rubber feet diameter<span class="unit" data-unit="mm"><input name="feet" type="number" min="0" step="0.5" value="0"></span></label>
+      <label class="f">Feet recess depth<span class="unit" data-unit="mm"><input name="feet_depth" type="number" min="0.2" step="0.1" value="0.6"></span></label>
+    </div>
+    <p class="hint">0 means none. Keyholes go in the floor so the box hangs on two screws.</p>
+    <label class="check"><input type="checkbox" name="din_rail"> DIN rail clip (35 mm rail) under the floor</label>
+  </fieldset>
+
+  <fieldset>
+    <legend>3D printing</legend>
+    <label class="check"><input type="checkbox" name="teardrop" checked> Pointed tops on wall holes (print without supports)</label>
+    <div class="grid g2">
+      <label class="f">Bottom edge chamfer<span class="unit" data-unit="mm"><input name="bottom_chamfer" type="number" min="0" step="0.1" value="0.4"></span></label>
+    </div>
+  </fieldset>
+
+  <div class="actions">
+    <div class="seg" role="radiogroup" aria-label="Download as">
+      <input type="radio" name="format" id="f-step" value="step" checked><label for="f-step">STEP</label>
+      <input type="radio" name="format" id="f-onshape" value="onshape"><label for="f-onshape">Onshape</label>
+      <input type="radio" name="format" id="f-both" value="both"><label for="f-both">Both</label>
+    </div>
+    <label class="check" style="margin:0"><input name="stl" type="checkbox" checked> STL</label>
+    <button class="go" type="submit">Download</button>
+    <button class="plain" type="button" id="tofit">Fit a board in it</button>
+  </div>
+</form>
+
+<!-- ============ FIT A BOARD ============ -->
+<form id="fitform" autocomplete="off" novalidate hidden>
+  <p class="intro">Start a KiCad board that fits your enclosure, then check the finished board: standoffs, connectors lined up with their openings, parts clear of the lid and walls.</p>
+  <fieldset class="first">
+    <div class="step"><b>1</b><legend style="padding:0">The enclosure</legend></div>
+    <div class="seg full" role="radiogroup" aria-label="Enclosure">
+      <input type="radio" name="src" id="src-box" value="box" checked><label for="src-box">My quick box</label>
+      <input type="radio" name="src" id="src-up" value="upload"><label for="src-up">Upload STEP</label>
+      <input type="radio" name="src" id="src-sample" value="sample"><label for="src-sample">Try the sample</label>
+    </div>
+    <div data-src="upload">
+      <div class="grid g1">
+        <label class="f">Base STEP (open top, Z up)<input type="file" name="base" accept=".step,.stp"></label>
+        <label class="f">Lid STEP, in the same position (optional)<input type="file" name="lid" accept=".step,.stp"></label>
+      </div>
+      <p class="hint">Export both from the same assembly in Onshape or SolidWorks so they line up. Without the lid, part heights are checked to the top of the walls.</p>
+    </div>
+    <p class="hint" data-src="box">Uses the box on the Quick box tab, as it is now.</p>
+    <p class="hint" data-src="sample">A sample enclosure with a board that has four planted problems.</p>
+    <div class="grid g2">
+      <label class="f">Board edge to walls<span class="unit" data-unit="mm"><input name="board_clearance" type="number" min="0" step="0.1" value="0.5"></span></label>
+      <label class="f">Board thickness<span class="unit" data-unit="mm"><input name="thickness" type="number" min="0.4" step="0.1" value="1.6"></span></label>
+    </div>
+    <div class="links">
+      <button class="go" type="button" id="readbtn">Read enclosure</button>
+      <button class="plain" type="button" id="pcbbtn" disabled>Download KiCad board</button>
+    </div>
+    <div id="encsum"></div>
+  </fieldset>
+  <fieldset>
+    <div class="step"><b>2</b><legend style="padding:0">Design the board</legend></div>
+    <p class="hint">Open the KiCad board. It has the outline, a mounting hole on each standoff with a copper keepout for the screw head, the tallest part allowed (notes on User.1) and where each opening lands (User.2). Place connectors on those markers.</p>
+  </fieldset>
+  <fieldset>
+    <div class="step"><b>3</b><legend style="padding:0">Check the finished board</legend></div>
+    <div data-needboard>
+      <div class="grid g1">
+        <label class="f">Board STEP from KiCad (File &gt; Export &gt; STEP)<input type="file" name="board" accept=".step,.stp"></label>
+        <label class="f">The .kicad_pcb (optional: checks parts that have no 3D model)<input type="file" name="pcb" accept=".kicad_pcb"></label>
+        <label class="f">parts.json (optional: datasheet sizes and panel cutouts)<input type="file" name="parts" accept=".json"></label>
+      </div>
+    </div>
+    <p class="hint" data-src="sample">The sample board is used.</p>
+    <details>
+      <summary>Tolerances</summary>
+      <div class="grid">
+        <label class="f">Part clearance<span class="unit" data-unit="mm"><input name="clearance" type="number" min="0" step="0.1" value="0.5"></span></label>
+        <label class="f">Opening margin<span class="unit" data-unit="mm"><input name="opening_margin" type="number" min="0" step="0.05" value="0.25"></span></label>
+        <label class="f">Max connector setback<span class="unit" data-unit="mm"><input name="max_setback" type="number" min="0" step="0.1" value="2"></span></label>
+      </div>
+      <p class="hint">Clearance: the gap every part and the board edge keep from the enclosure. Opening margin: room around a connector's face in its opening. Setback: how far a connector's face may sit behind the outside of the wall before a plug can't reach it; check your plug's datasheet.</p>
+    </details>
+  </fieldset>
+  <div class="actions">
+    <button class="go" type="submit">Check fit</button>
+    <span class="hint" id="fitstate" style="margin:0"></span>
+  </div>
+</form>
+
+<!-- ============ BOUGHT BOX ============ -->
+<form id="stockform" autocomplete="off" novalidate hidden>
+  <p class="intro">Holes in an off-the-shelf box. You get the box with its holes as STEP, and a PDF with a full-size drilling template for each face.</p>
+  <fieldset class="first">
+    <legend>Your box</legend>
+    <p class="hint">Download the maker's 3D model (STEP) of the box you bought; Hammond has one on each 1590 product page. It must stand with its opening up.</p>
+    <div class="grid g1">
+      <label class="f">Box STEP (may include the lid)<input name="step" type="file" accept=".step,.stp"></label>
+      <label class="f">Lid STEP, if it is a separate file<input name="lid" type="file" accept=".step,.stp"></label>
+    </div>
+  </fieldset>
+  <fieldset>
+    <legend>Holes</legend>
+    <div class="rows" id="stock_rows"></div>
+    <button type="button" class="add" data-add="stock">+ Add a hole</button>
+    <label class="check"><input name="teardrop" type="checkbox"> Pointed tops on wall holes (for a printed box)</label>
+  </fieldset>
+  <div class="actions"><button class="go" type="submit">Make templates</button></div>
+</form>
+
+<section class="view">
+  <div id="canvas"><div class="empty" id="empty" hidden></div></div>
+  <iframe id="fitview" title="Fit check 3D view" hidden></iframe>
+  <div class="status" id="status"></div>
+  <div class="viewopts" id="viewopts">
+    <label class="check"><input id="explode" type="checkbox" checked> Lift lid</label>
+    <label class="check"><input id="showlid" type="checkbox" checked> Show lid</label>
+  </div>
+  <div class="report" id="report"></div>
+</section>
 </main>
 
 <script type="importmap">
@@ -206,19 +356,175 @@ import * as THREE from "three";
 import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 import { STLLoader } from "three/addons/loaders/STLLoader.js";
 
-const SCREWS = ["M2", "M2.5", "M3", "M4"];
 const $ = (s, el = document) => el.querySelector(s);
-const boxform = $("#boxform"), stockform = $("#stockform");
-for (const name of ["lid_screw", "standoff_screw", "keyholes"]) {
-  const sel = boxform.elements[name];
-  for (const s of SCREWS) sel.add(new Option(s, s, false, s === "M3" && name !== "keyholes"));
-}
+const $$ = (s, el = document) => [...el.querySelectorAll(s)];
+const h = (tag, attrs = {}, ...kids) => {
+  const e = document.createElement(tag);
+  for (const [k, v] of Object.entries(attrs)) {
+    if (k === "class") e.className = v; else if (k.startsWith("on")) e.addEventListener(k.slice(2), v);
+    else if (v !== false && v != null) e.setAttribute(k, v === true ? "" : v);
+  }
+  for (const k of kids.flat()) if (k != null) e.append(k);
+  return e;
+};
+const boxform = $("#boxform"), fitform = $("#fitform"), stockform = $("#stockform");
+const SCREWS = ["M2", "M2.5", "M3", "M4"];
+const FACES = [["left", "Left wall (-X)"], ["right", "Right wall (+X)"], ["front", "Front wall (-Y)"], ["back", "Back wall (+Y)"], ["lid", "Lid"], ["floor", "Floor"]];
+const WALL = new Set(["left", "right", "front", "back"]);
+const GROUPS = [
+  ["Connectors", ["usb-c", "keystone", "m8-panel", "m12-panel"]],
+  ["Buttons and switches", ["pushbutton-22", "toggle-1/4", "toggle-15/32"]],
+  ["Cable glands", ["pg7", "pg9", "pg11", "pg13.5", "pg16", "pg21", "m12", "m16", "m20", "m25"]],
+  ["Other", ["drain"]],
+];
+const NAMES = {
+  "usb-c": "USB-C receptacle", "keystone": "Keystone jack (RJ45, HDMI...)", "m8-panel": "M8 panel connector", "m12-panel": "M12 panel connector",
+  "pushbutton-22": "22 mm pushbutton or pilot light", "toggle-1/4": "Toggle switch, 1/4\" bushing", "toggle-15/32": "Toggle switch, 15/32\" bushing",
+  "pg7": "PG7 gland", "pg9": "PG9 gland", "pg11": "PG11 gland", "pg13.5": "PG13.5 gland", "pg16": "PG16 gland", "pg21": "PG21 gland",
+  "m12": "M12 gland or vent plug", "m16": "M16 gland", "m20": "M20 gland", "m25": "M25 gland", "drain": "Drain or breather hole",
+};
+let PRESETS = {};
 
-// The viewer. Our frame is Z up; three.js is Y up.
+for (const [name, first] of [["lid_screw", "M3"], ["standoff_screw", "M3"]])
+  for (const s of SCREWS) boxform.elements[name].add(new Option(s, s, false, s === first));
+for (const s of ["M3", "M4"]) boxform.elements.keyholes.add(new Option(`${s} screws`, s));
+
+const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+const field = (label, input, unit) => h("label", { class: "f" }, label, unit ? h("span", { class: "unit", "data-unit": unit }, input) : input);
+const numIn = (name, value, step = "0.5", min) => h("input", { type: "number", name, value, step, min });
+const faceSel = (value) => h("select", { name: "face" }, FACES.map(([v, t]) => h("option", { value: v, selected: v === value }, t)));
+
+// ---------- Row editors ----------
+function posLabels(item) {
+  const face = item.querySelector("[name=face]").value;
+  const [a, b] = WALL.has(face) ? ["Along wall", "Up from floor"] : ["X", "Y"];
+  item.querySelector("[data-pos=a]").firstChild.textContent = a;
+  item.querySelector("[data-pos=b]").firstChild.textContent = b;
+}
+function holeRow(opts = {}) {
+  const type = h("select", { name: "type" },
+    GROUPS.map(([g, list]) => h("optgroup", { label: g }, list.map(p => h("option", { value: p, selected: p === opts.preset }, NAMES[p] || p)))),
+    h("optgroup", { label: "Your own size" },
+      h("option", { value: "round", selected: opts.shape === "round" && !opts.preset }, "Round hole"),
+      h("option", { value: "rect", selected: opts.shape === "rect" && !opts.preset }, "Rectangle")));
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid g2 head" }, field("Face", faceSel(opts.face || "left")), field("Part", type)),
+    h("div", { class: "grid", "data-own": "" },
+      field("Diameter", numIn("d", opts.d ?? 6, "0.1", "0.5"), "mm"),
+      field("Width", numIn("w", opts.w ?? 10, "0.1", "0.5"), "mm"),
+      field("Height", numIn("hh", opts.hh ?? 5, "0.1", "0.5"), "mm"),
+      field("Corner radius", numIn("r", opts.r ?? 0, "0.1", "0"), "mm")),
+    h("div", { class: "grid g2" },
+      h("label", { class: "f", "data-pos": "a" }, "Along wall", h("span", { class: "unit", "data-unit": "mm" }, numIn("a", opts.a ?? 0))),
+      h("label", { class: "f", "data-pos": "b" }, "Up from floor", h("span", { class: "unit", "data-unit": "mm" }, numIn("b", opts.b ?? 10)))),
+    h("div", { class: "src" }));
+  const sync = () => {
+    const t = type.value, own = t === "round" || t === "rect";
+    const fields = item.querySelector("[data-own]");
+    fields.hidden = !own;
+    const [d, w, hh, r] = fields.children;
+    d.hidden = t !== "round"; w.hidden = hh.hidden = r.hidden = t !== "rect";
+    const p = PRESETS[t];
+    item.querySelector(".src").textContent = p ? `${p.shape === "round" ? "Ø" + p.size[0] : p.size.join(" × ")} mm: ${p.source}` : "";
+    posLabels(item);
+  };
+  item.addEventListener("change", sync);
+  item._sync = sync;
+  return item;
+}
+function readHole(item) {
+  const e = n => item.querySelector(`[name=${n}]`);
+  const face = e("face").value, t = e("type").value, at = [num(e("a").value), num(e("b").value)];
+  if (t === "round") return { face, shape: "round", size: [num(e("d").value)], at };
+  if (t === "rect") return { face, shape: "rect", size: [num(e("w").value), num(e("hh").value)], radius: num(e("r").value), at };
+  return { face, preset: t, at };
+}
+function ventRow(o = {}) {
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid g2 head" }, field("Face", faceSel(o.face || "right"))),
+    h("div", { class: "grid" },
+      field("Area width", numIn("w", o.w ?? 30, "1", "2"), "mm"), field("Area height", numIn("hh", o.hh ?? 20, "1", "2"), "mm"),
+      field("Slot width", numIn("slot", o.slot ?? 2, "0.1", "0.5"), "mm")),
+    h("div", { class: "grid" },
+      h("label", { class: "f", "data-pos": "a" }, "Along wall", h("span", { class: "unit", "data-unit": "mm" }, numIn("a", o.a ?? 0))),
+      h("label", { class: "f", "data-pos": "b" }, "Up from floor", h("span", { class: "unit", "data-unit": "mm" }, numIn("b", o.b ?? 15))),
+      field("Slot pitch", numIn("pitch", o.pitch ?? 4, "0.1", "1"), "mm")));
+  item.addEventListener("change", () => posLabels(item));
+  item._sync = () => posLabels(item);
+  return item;
+}
+const readVent = item => {
+  const e = n => num(item.querySelector(`[name=${n}]`).value);
+  return { face: item.querySelector("[name=face]").value, size: [e("w"), e("hh")], at: [e("a"), e("b")], slot: e("slot"), pitch: e("pitch") };
+};
+function labelRow(o = {}) {
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid g2 head" }, field("Face", faceSel(o.face || "lid")),
+      field("Text", h("input", { name: "text", value: o.text ?? "POWER", maxlength: "40" }))),
+    h("div", { class: "grid" },
+      h("label", { class: "f", "data-pos": "a" }, "X", h("span", { class: "unit", "data-unit": "mm" }, numIn("a", o.a ?? 0))),
+      h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": "mm" }, numIn("b", o.b ?? -15))),
+      field("Letter height", numIn("size", o.size ?? 6, "0.5", "2"), "mm")),
+    h("div", { class: "grid g2" },
+      field("Style", h("select", { name: "style" }, h("option", { value: "-1" }, "Recessed"), h("option", { value: "1" }, "Raised"))),
+      field("Depth", numIn("depth", o.depth ?? 0.6, "0.1", "0.2"), "mm")));
+  item.addEventListener("change", () => posLabels(item));
+  item._sync = () => posLabels(item);
+  return item;
+}
+const readLabel = item => {
+  const e = n => item.querySelector(`[name=${n}]`).value;
+  return { face: e("face"), text: e("text"), at: [num(e("a")), num(e("b"))], size: num(e("size")), depth: num(e("style")) * num(e("depth")) };
+};
+function soRow(o = {}) {
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid g2 head" }, field("X", numIn("x", o.x ?? 0), "mm"), field("Y", numIn("y", o.y ?? 0), "mm")));
+  item._sync = () => {};
+  return item;
+}
+const ROWS = { cut: ["#cut_rows", holeRow], vent: ["#vent_rows", ventRow], label: ["#label_rows", labelRow], so: ["#so_rows", soRow], stock: ["#stock_rows", holeRow] };
+function addRow(kind, opts) {
+  const [sel, make] = ROWS[kind];
+  const item = make(opts);
+  $(sel).append(item);
+  item._sync();
+  return item;
+}
+for (const b of $$("[data-add]")) b.onclick = () => { const it = addRow(b.dataset.add); changed(it); it.querySelector("select, input")?.focus(); };
+function changed(el) { if (boxform.contains(el) || el.closest?.("#boxform") || !el.isConnected) later(); }
+
+// ---------- Show and hide by choice ----------
+const LIDHINT = {
+  screw: "Four corner posts; the lid screws down, with the screw heads sunk in counterbores.",
+  friction: "A lip on the lid presses into the walls. Set the fit gap for your printer.",
+  snap: "A lip with a rib that clicks into a groove inside the walls.",
+  slide: "A panel slides in grooves from one open end.",
+  none: "An open box.",
+};
+function sync() {
+  const e = boxform.elements, lid = e.lid.value;
+  for (const el of $$("[data-show=lid]", boxform)) el.hidden = lid === "none";
+  for (const el of $$("[data-show=lip]", boxform)) el.hidden = !["screw", "friction", "snap"].includes(lid);
+  for (const el of $$("[data-show=screw]", boxform)) el.hidden = lid !== "screw";
+  $("#lidhint").textContent = LIDHINT[lid];
+  const g = $("#gasket_on").checked; $("#gasket_row").hidden = $("#gaskethint").hidden = !g;
+  const so = e.so_mode.value;
+  for (const el of $$("[data-so]", boxform)) el.hidden = !(el.dataset.so === so || (el.dataset.so === "any" && so !== "none"));
+  const src = fitform.elements.src.value;
+  for (const el of $$("[data-src]", fitform)) el.hidden = el.dataset.src !== src;
+  for (const el of $$("[data-needboard]", fitform)) el.hidden = src === "sample";
+}
+boxform.addEventListener("change", sync); fitform.addEventListener("change", sync);
+
+// ---------- The viewer (Z up in our frame; three.js is Y up) ----------
 const host = $("#canvas");
 const renderer = new THREE.WebGLRenderer({ antialias: true });
 renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
-host.appendChild(renderer.domElement);
+host.prepend(renderer.domElement);
 const scene = new THREE.Scene();
 const camera = new THREE.PerspectiveCamera(35, 1, 1, 10000);
 const controls = new OrbitControls(camera, renderer.domElement);
@@ -227,138 +533,240 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 2.2));
 const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(1, 2, 1.5); scene.add(sun);
 const world = new THREE.Group(); world.rotation.x = -Math.PI / 2; scene.add(world);
 const loader = new STLLoader();
-let baseMesh = null, lidMesh = null, framed = false, lastTop = 0;
-
-function themeColors() {
-  const cs = getComputedStyle(document.documentElement);
-  scene.background = new THREE.Color(cs.getPropertyValue("--view").trim());
-}
-themeColors();
-matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeColors);
-
-function resize() {
-  const w = host.clientWidth, h = host.clientHeight;
-  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
-}
+const views = { box: null, fit: null, stock: null };
+let current = null, tab = "box";
+function themeColors() { scene.background = new THREE.Color(getComputedStyle(document.documentElement).getPropertyValue("--view").trim()); }
+themeColors(); matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeColors);
+function resize() { const w = host.clientWidth, hh = host.clientHeight; if (!w || !hh) return; renderer.setSize(w, hh, false); camera.aspect = w / hh; camera.updateProjectionMatrix(); }
 new ResizeObserver(resize).observe(host);
 (function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
-
-function meshFrom(b64, color) {
+function mesh(b64, color, opacity = 1) {
   const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
-  const geo = loader.parse(bytes.buffer);
-  geo.computeVertexNormals();
-  return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: .65, metalness: .05, flatShading: false }));
+  const geo = loader.parse(bytes.buffer); geo.computeVertexNormals();
+  return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: .65, metalness: .05, transparent: opacity < 1, opacity }));
 }
-function placeLid() {
-  if (!lidMesh) return;
-  lidMesh.position.z = $("#explode").checked ? Math.max(15, lastTop * 0.5) : 0;
-  lidMesh.visible = $("#showlid").checked;
+function makeView(data) {
+  const g = new THREE.Group();
+  g.add(mesh(data.base, 0x8d9aa6));
+  const lid = data.lid ? mesh(data.lid, 0xd9a066) : null;
+  if (lid) g.add(lid);
+  const bb = new THREE.Box3().setFromObject(g);
+  return { group: g, lid, top: bb.max.z - bb.min.z, size: bb.getSize(new THREE.Vector3()), framed: false };
 }
+function showView(v) {
+  if (current) world.remove(current.group);
+  current = v;
+  $("#viewopts").hidden = !v || !v.lid;
+  if (!v) return;
+  world.add(v.group); placeLid();
+  if (!v.framed) {
+    const r = v.size.length();
+    camera.position.set(r * 1.2, r * 1.0, r * 1.4); controls.target.set(0, v.size.z / 2, 0); v.framed = true;
+  }
+}
+function placeLid() { if (!current?.lid) return; current.lid.position.z = $("#explode").checked ? Math.max(15, current.top * 0.5) : 0; current.lid.visible = $("#showlid").checked; }
 $("#explode").onchange = placeLid; $("#showlid").onchange = placeLid;
+function empty(text) { $("#empty").hidden = !text; $("#empty").textContent = text || ""; }
 
-function show(data) {
-  for (const m of [baseMesh, lidMesh]) if (m) { world.remove(m); m.geometry.dispose(); }
-  baseMesh = meshFrom(data.base, 0x8d9aa6); world.add(baseMesh);
-  lidMesh = data.lid ? meshFrom(data.lid, 0xd9a066) : null;
-  if (lidMesh) world.add(lidMesh);
-  lastTop = data.outer[2];
-  placeLid();
-  if (!framed) {
-    const r = Math.hypot(...data.outer);
-    camera.position.set(r * 1.3, r * 1.1, r * 1.5);
-    controls.target.set(0, data.outer[2] / 2, 0);
-    framed = true;
-  }
+// ---------- Report panel ----------
+const report = $("#report");
+const msg = (cls, text, fix) => h("div", { class: "msg " + cls }, text, fix ? h("span", { class: "fix" }, fix) : null);
+function boxReport(data, error) {
+  report.replaceChildren();
+  if (error) return report.append(msg("err", error));
+  const f = v => v.map(x => +x.toFixed(2)).join(" × ");
+  report.append(h("div", { class: "dims" }, "Inside ", h("b", {}, f(data.inner)), " mm, outside ", h("b", {}, f(data.outer)), " mm"));
+  for (const c of data.checks) report.append(msg("warn", c));
+  if (data.notes.length) report.append(h("ul", { class: "notes" }, data.notes.map(n => h("li", {}, n))));
 }
 
-function report(data, error) {
-  const el = $("#report");
-  if (error) { el.innerHTML = `<div class="error"></div>`; el.firstChild.textContent = error; return; }
-  const f = v => v.map(x => +x.toFixed(2)).join(" x ");
-  el.innerHTML = `<div class="dims">Inside <b>${f(data.inner)}</b> mm, outside <b>${f(data.outer)}</b> mm</div>`;
-  for (const c of data.checks) { const d = document.createElement("div"); d.className = "check-item"; d.textContent = c; el.appendChild(d); }
-  if (data.notes.length) {
-    const ul = document.createElement("ul"); ul.className = "notes";
-    for (const n of data.notes) { const li = document.createElement("li"); li.textContent = n; ul.appendChild(li); }
-    el.appendChild(ul);
-  }
-}
-
-function body() {
-  const e = boxform.elements, num = n => parseFloat(e[n].value || "0");
+// ---------- Quick box ----------
+function boxBody() {
+  const e = boxform.elements;
+  const so = e.so_mode.value;
   return {
-    size: [num("L"), num("W"), num("H")], size_is: e.outer.checked ? "outer" : "inner",
-    wall: num("wall"), floor: num("floor"), corner_radius: num("corner_radius"),
-    lid: e.lid.value, lid_thickness: num("lid_thickness"), lip: num("lip"),
-    lid_screw: e.lid_screw.value, lid_screw_hole: e.lid_screw_hole.value, fit_clearance: num("fit_clearance"),
-    gasket: e.lid.value === "screw" ? num("gasket") : 0,
-    standoffs: e.standoffs.value.trim(), standoff_height: num("standoff_height"),
-    standoff_screw: e.standoff_screw.value, standoff_hole: e.standoff_hole.value, standoff_ribs: e.standoff_ribs.checked,
-    cutouts: e.cutouts.value, vents: e.vents.value, labels: e.labels.value,
-    flange: num("flange"), feet: num("feet"), keyholes: e.keyholes.value || null, din_rail: e.din_rail.checked,
-    bottom_chamfer: num("bottom_chamfer"), teardrop: e.teardrop.checked,
+    size: [num(e.L.value), num(e.W.value), num(e.H.value)], size_is: e.size_is.value,
+    wall: num(e.wall.value), floor: num(e.floor.value), corner_radius: num(e.corner_radius.value),
+    lid: e.lid.value, lid_thickness: num(e.lid_thickness.value), lip: num(e.lip.value), fit_clearance: num(e.fit_clearance.value),
+    lid_screw: e.lid_screw.value, lid_screw_hole: e.lid_screw_hole.value,
+    gasket: e.lid.value === "screw" && $("#gasket_on").checked ? num(e.gasket.value) : 0,
+    standoffs: so === "rect" ? `rect:${num(e.so_x.value)}x${num(e.so_y.value)}` : so === "custom"
+      ? $$("#so_rows .item").map(it => [num($("[name=x]", it).value), num($("[name=y]", it).value)]) : "",
+    standoff_height: num(e.standoff_height.value), standoff_screw: e.standoff_screw.value, standoff_hole: e.standoff_hole.value,
+    standoff_ribs: e.standoff_ribs.checked,
+    cutouts: $$("#cut_rows .item").map(readHole), vents: $$("#vent_rows .item").map(readVent), labels: $$("#label_rows .item").map(readLabel),
+    flange: num(e.flange.value), feet: num(e.feet.value), feet_depth: num(e.feet_depth.value), keyholes: e.keyholes.value || null,
+    din_rail: e.din_rail.checked, bottom_chamfer: num(e.bottom_chamfer.value), teardrop: e.teardrop.checked,
     format: e.format.value, stl: e.stl.checked,
   };
 }
-
-async function errorOf(res) {
-  try { const j = await res.json(); return j.error || j.detail || res.statusText; } catch { return res.statusText; }
-}
-
-let timer = null, seq = 0;
+async function errorOf(res) { try { const j = await res.json(); return j.error || j.detail || res.statusText; } catch { return res.statusText; } }
+let timer = null, seq = 0, boxData = null;
 async function refresh() {
   const mine = ++seq;
-  $("#status").textContent = "Building...";
+  if (tab === "box") $("#status").textContent = "Building...";
   try {
-    const res = await fetch("api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body()) });
+    const res = await fetch("api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(boxBody()) });
     if (mine !== seq) return;
-    if (!res.ok) { report(null, await errorOf(res)); $("#status").textContent = "Not built"; return; }
+    if (!res.ok) { const err = await errorOf(res); boxData = { error: err }; if (tab === "box") { boxReport(null, err); $("#status").textContent = "Not built"; } return; }
     const data = await res.json();
-    show(data); report(data);
-    $("#status").textContent = "";
-  } catch (err) { if (mine === seq) { report(null, String(err)); $("#status").textContent = ""; } }
+    const old = views.box; views.box = makeView(data);
+    if (old) { views.box.framed = true; }
+    boxData = data;
+    if (tab === "box") { showView(views.box); boxReport(data); $("#status").textContent = ""; }
+  } catch (err) { if (mine === seq && tab === "box") { boxReport(null, String(err)); $("#status").textContent = ""; } }
 }
-function later() { clearTimeout(timer); timer = setTimeout(refresh, 500); }
-boxform.addEventListener("input", later);
-boxform.addEventListener("change", later);
-function lidRows() { for (const r of boxform.querySelectorAll('[data-for="screw"]')) r.hidden = boxform.elements.lid.value !== "screw"; }
-boxform.elements.lid.addEventListener("change", lidRows); lidRows();
+function later() { clearTimeout(timer); timer = setTimeout(refresh, 450); }
+boxform.addEventListener("input", later); boxform.addEventListener("change", later);
 
 async function download(res, fallback) {
-  if (!res.ok) { report(null, await errorOf(res)); return; }
+  if (!res.ok) return { error: await errorOf(res) };
   const blob = await res.blob();
   const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1] || fallback;
-  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
-  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+  saveBlob(blob, name);
+  return {};
+}
+function saveBlob(blob, name) {
+  const a = h("a", { href: URL.createObjectURL(blob), download: name });
+  document.body.append(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+async function busy(btn, label, work) {
+  const old = btn.textContent; btn.disabled = true; btn.textContent = label;
+  try { return await work(); } finally { btn.disabled = false; btn.textContent = old; }
 }
 boxform.addEventListener("submit", async ev => {
   ev.preventDefault();
-  const b = ev.submitter; b.disabled = true; b.textContent = "Making...";
-  try { await download(await fetch("api/box", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body()) }), "enclosure_box.zip"); }
-  finally { b.disabled = false; b.textContent = "Download"; }
+  await busy(ev.submitter, "Making...", async () => {
+    const r = await download(await fetch("api/box", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(boxBody()) }), "enclosure_box.zip");
+    if (r.error) boxReport(null, r.error);
+  });
 });
+$("#tofit").onclick = () => { fitform.elements.src.value = "box"; sync(); selectTab("fit"); readEnclosure(); };
+
+// ---------- Fit a board ----------
+let pcbText = null, pcbName = "board";
+function fitData(withBoard) {
+  const e = fitform.elements, fd = new FormData(), src = e.src.value;
+  if (src === "sample") fd.set("sample", "true");
+  else if (src === "box") fd.set("box", JSON.stringify(boxBody()));
+  else {
+    if (!e.base.files.length) throw new Error("Choose the enclosure's base STEP first.");
+    fd.set("base", e.base.files[0]); if (e.lid.files.length) fd.set("lid", e.lid.files[0]);
+  }
+  if (withBoard) {
+    if (src !== "sample") {
+      if (!e.board.files.length) throw new Error("Choose the board's STEP (KiCad: File > Export > STEP).");
+      fd.set("board", e.board.files[0]);
+      if (e.pcb.files.length) fd.set("pcb", e.pcb.files[0]);
+      if (e.parts.files.length) fd.set("parts", e.parts.files[0]);
+    }
+    for (const k of ["clearance", "opening_margin", "max_setback"]) fd.set(k, num(e[k].value));
+  } else {
+    fd.set("clearance", num(e.board_clearance.value)); fd.set("thickness", num(e.thickness.value));
+  }
+  return fd;
+}
+const fmt = v => (+v).toFixed(2);
+function encSummary(d) {
+  const enc = d.enclosure, [[x0, y0, z0], [x1, y1, z1]] = enc.cavity_bounds;
+  const rows = [
+    ["Inside", `${fmt(x1 - x0)} × ${fmt(y1 - y0)} mm, floor at ${fmt(enc.floor)} mm`],
+    ["Ceiling", `${fmt(enc.ceiling)} mm (${enc.lid_underside != null ? "lid underside" : "top of the walls"})`],
+    ["Standoffs", enc.bosses.length ? `${enc.bosses.length}: ${[...new Set(enc.bosses.map(b => b.screw))].join("; ")}, top at ${fmt(Math.max(...enc.bosses.map(b => b.top)))} mm` : "none found"],
+    ["Openings", enc.openings.length ? Object.entries(enc.openings.reduce((m, o) => {
+      const k = `${o.wall} ${fmt(o.width)} × ${fmt(o.height)}`; m[k] = (m[k] || 0) + 1; return m; }, {}))
+      .map(([k, n]) => n > 1 ? `${k} (${n} slots)` : k).join(", ") : "none"],
+  ];
+  if (d.limits) rows.push(["Tallest part", `${fmt(d.limits.max_height_top)} mm on top, ${fmt(d.limits.max_height_bottom)} mm underneath`],
+    ["Board", `${fmt(d.limits.outline[1][0] - d.limits.outline[0][0])} × ${fmt(d.limits.outline[1][1] - d.limits.outline[0][1])} mm, ${d.limits.holes.length} mounting holes`]);
+  return h("div", { class: "summary" }, h("table", {}, rows.map(([k, v]) => h("tr", {}, h("td", {}, k), h("td", {}, v)))),
+    d.limits_error ? msg("warn", "No KiCad board: " + d.limits_error +
+      (enc.bosses.length ? "" : ". Add board standoffs to the box (or check they are not under a gasket ledge).")) : null);
+}
+async function readEnclosure() {
+  const btn = $("#readbtn");
+  let fd; try { fd = fitData(false); } catch (e) { report.replaceChildren(msg("err", e.message)); return; }
+  await busy(btn, "Reading...", async () => {
+    $("#status").textContent = "Reading the enclosure...";
+    showFitView(false);
+    const res = await fetch("api/enclosure", { method: "POST", body: fd });
+    $("#status").textContent = "";
+    if (!res.ok) { report.replaceChildren(msg("err", await errorOf(res))); return; }
+    const d = await res.json();
+    pcbText = d.kicad_pcb || null; pcbName = d.name;
+    $("#pcbbtn").disabled = !pcbText;
+    $("#encsum").replaceChildren(encSummary(d));
+    views.fit = makeView(d); empty(""); showView(views.fit);
+    report.replaceChildren(pcbText ? msg("ok", "Read. Download the KiCad board to start your design, or check a finished board below.")
+      : msg("warn", d.limits_error || "Read, but no board could be made."));
+  });
+}
+$("#readbtn").onclick = readEnclosure;
+$("#pcbbtn").onclick = () => pcbText && saveBlob(new Blob([pcbText], { type: "text/plain" }), `${pcbName}_board.kicad_pcb`);
+function showFitView(on) { $("#fitview").hidden = !on; host.hidden = on; $("#viewopts").hidden = on || !current?.lid; }
+fitform.addEventListener("submit", async ev => {
+  ev.preventDefault();
+  let fd; try { fd = fitData(true); } catch (e) { report.replaceChildren(msg("err", e.message)); return; }
+  await busy(ev.submitter, "Checking...", async () => {
+    $("#fitstate").textContent = "This takes a few seconds.";
+    const res = await fetch("api/fit", { method: "POST", body: fd });
+    $("#fitstate").textContent = "";
+    if (!res.ok) { report.replaceChildren(msg("err", await errorOf(res))); return; }
+    const d = await res.json();
+    $("#fitview").srcdoc = d.view; showFitView(true);
+    const verdict = d.fits ? msg("ok verdict", d.warnings ? `It fits, with ${d.warnings} thing${d.warnings > 1 ? "s" : ""} to look at.` : "It fits.")
+      : msg("err verdict", `It does not fit: ${d.errors} problem${d.errors > 1 ? "s" : ""}${d.warnings ? `, ${d.warnings} warning${d.warnings > 1 ? "s" : ""}` : ""}.`);
+    const items = d.findings.map(f => msg(f.severity === "error" ? "err" : "warn", h("span", {}, h("b", {}, f.subject + ": "), f.message),
+      [f.fix ? f.fix[0].toUpperCase() + f.fix.slice(1) + "." : "", f.kicad_move ? `In KiCad, move it X ${f.kicad_move[0] >= 0 ? "+" : ""}${fmt(f.kicad_move[0])}, Y ${f.kicad_move[1] >= 0 ? "+" : ""}${fmt(f.kicad_move[1])} mm.` : ""].filter(Boolean).join(" ")));
+    const place = d.placement ? h("div", { class: "hint" }, `Board placed: ${d.placement.how}.`) : null;
+    report.replaceChildren(verdict, place, ...items, h("div", { class: "links" },
+      h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([d.punch_list], { type: "text/markdown" }), "punch_list.md") }, "Punch list"),
+      h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([JSON.stringify(d.report, null, 2)], { type: "application/json" }), "report.json") }, "report.json"),
+      h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([d.view], { type: "text/html" }), "fit_view.html") }, "3D view")));
+  });
+});
+
+// ---------- Bought box ----------
 stockform.addEventListener("submit", async ev => {
   ev.preventDefault();
-  const b = ev.submitter; b.disabled = true; b.textContent = "Working...";
-  const fd = new FormData(stockform);
-  if (!stockform.elements.lid.files.length) fd.delete("lid");
-  if (!stockform.elements.teardrop.checked) fd.set("teardrop", "false");
-  try { await download(await fetch("api/stock", { method: "POST", body: fd }), "drilled.zip"); }
-  finally { b.disabled = false; b.textContent = "Make templates"; }
+  const e = stockform.elements;
+  if (!e.step.files.length) { report.replaceChildren(msg("err", "Choose the box's STEP first.")); return; }
+  const rows = $$("#stock_rows .item").map(readHole);
+  if (!rows.length) { report.replaceChildren(msg("err", "Add at least one hole.")); return; }
+  const fd = new FormData();
+  fd.set("step", e.step.files[0]); if (e.lid.files.length) fd.set("lid", e.lid.files[0]);
+  fd.set("cutouts", JSON.stringify(rows)); fd.set("teardrop", e.teardrop.checked ? "true" : "false");
+  await busy(ev.submitter, "Working...", async () => {
+    const r = await download(await fetch("api/stock", { method: "POST", body: fd }), "drilled.zip");
+    report.replaceChildren(r.error ? msg("err", r.error) : msg("ok", "Downloaded: the drilled box as STEP, drill_templates.pdf and holes.json. Print the PDF at 100% and check the 50 mm bar."));
+  });
 });
 
-for (const t of document.querySelectorAll("[data-tab]")) t.onclick = () => {
-  for (const u of document.querySelectorAll("[data-tab]")) u.setAttribute("aria-selected", u === t);
-  boxform.hidden = t.dataset.tab !== "box"; stockform.hidden = t.dataset.tab !== "stock";
-};
+// ---------- Tabs ----------
+function selectTab(name) {
+  tab = name;
+  for (const b of $$("[data-tab]")) b.setAttribute("aria-selected", b.dataset.tab === name);
+  boxform.hidden = name !== "box"; fitform.hidden = name !== "fit"; stockform.hidden = name !== "stock";
+  $("#status").textContent = "";
+  if (name !== "fit") showFitView(false);
+  if (name === "box") { empty(""); showView(views.box); boxData?.error ? boxReport(null, boxData.error) : boxData && boxReport(boxData); }
+  else if (name === "fit") {
+    if (!$("#fitview").srcdoc) { showView(views.fit); empty(views.fit ? "" : "Read an enclosure to see it here."); }
+    else showFitView(true);
+    if (!views.fit && !$("#fitview").srcdoc) report.replaceChildren(h("div", { class: "hint" }, "Step 1: pick the enclosure and read it."));
+  } else { showView(null); empty("Your bought box's holes come back as STEP and a drilling template PDF."); report.replaceChildren(); }
+}
+for (const b of $$("[data-tab]")) b.onclick = () => selectTab(b.dataset.tab);
 
+// ---------- Start ----------
 fetch("api/presets").then(r => r.json()).then(p => {
-  const tbl = $("#presets");
-  for (const [name, v] of Object.entries(p)) {
-    const tr = tbl.insertRow(); tr.insertCell().textContent = name; tr.insertCell().textContent = v.source;
-  }
+  PRESETS = p;
+  addRow("cut", { face: "left", preset: "usb-c", a: 0, b: 8 });
+  addRow("cut", { face: "back", preset: "pg9", a: 20, b: 20 });
+  addRow("stock", { face: "front", preset: "pg9", a: 0, b: 12 });
+  sync(); refresh();
 });
-refresh();
+sync();
 </script>
 </body>
 </html>

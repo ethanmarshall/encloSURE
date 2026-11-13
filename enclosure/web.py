@@ -20,7 +20,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.responses import HTMLResponse, JSONResponse, Response
 
 from . import box as boxmod
-from .presets import PRESETS
+from .presets import GLANDS, PRESETS, resolve
 
 STATIC = Path(__file__).parent / "static"
 FIELDS = {f.name for f in fields(boxmod.BoxSpec)}
@@ -30,18 +30,72 @@ MAX_SIDE = 1000.0  # mm: keeps one request from tying up the server
 app = FastAPI(title="EncloSURE")
 
 
+def _num(v, name):
+    try:
+        return float(v)
+    except (TypeError, ValueError):
+        raise ValueError(f"{name}: a number") from None
+
+
+def _cutout(c) -> dict:
+    if isinstance(c, str):
+        return {k: v for k, v in asdict(boxmod.Cutout.parse(c)).items() if v is not None}
+    d = {"face": boxmod.face_name(str(c.get("face", ""))), "at": [_num(x, "cutout position") for x in c.get("at", [0, 0])]}
+    if c.get("preset"):
+        d["preset"] = str(c["preset"])
+    else:
+        d["shape"] = c.get("shape", "round")
+        d["size"] = [_num(x, "cutout size") for x in c.get("size", [])]
+        if c.get("radius"):
+            d["radius"] = _num(c["radius"], "corner radius")
+    boxmod.Cutout(**resolve(d)).check()
+    return d
+
+
+def _vent(v) -> dict:
+    if isinstance(v, str):
+        return boxmod.parse_vent(v)
+    d = {"face": boxmod.face_name(str(v.get("face", ""))), "size": [_num(x, "vent size") for x in v.get("size", [])],
+         "at": [_num(x, "vent position") for x in v.get("at", [0, 0])]}
+    for k in ("slot", "pitch"):
+        if v.get(k) not in (None, ""):
+            d[k] = _num(v[k], f"vent {k}")
+    return d
+
+
+def _label(t) -> dict:
+    if isinstance(t, str):
+        return boxmod.parse_label(t)
+    d = {"face": boxmod.face_name(str(t.get("face", ""))), "text": str(t.get("text", "")).strip(),
+         "at": [_num(x, "label position") for x in t.get("at", [0, 0])]}
+    if not d["text"]:
+        raise ValueError("a label needs its text")
+    for k in ("size", "depth"):
+        if t.get(k) not in (None, ""):
+            d[k] = _num(t[k], f"label {k}")
+    return d
+
+
+def _items(value) -> list:
+    """Rows from the form (a list), or lines in the command line's syntax (a string)."""
+    if isinstance(value, list):
+        return value
+    return [s.strip() for s in (value or "").splitlines() if s.strip()]
+
+
 def spec_from(body: dict) -> boxmod.BoxSpec:
-    """A BoxSpec from the page's form: plain settings, plus cutouts, vents and labels as lines in
-    the same syntax as the command line (left:usb-c@0,9)."""
+    """A BoxSpec from the page's form. Cutouts, vents and labels come as rows (dicts) or as lines in
+    the command line's syntax (left:usb-c@0,9)."""
     settings = {k: v for k, v in body.items() if k in FIELDS and k not in LISTS and k != "standoffs"}
     spec = boxmod.BoxSpec(**settings)
-    if body.get("standoffs"):
-        spec.standoffs = boxmod.standoff_pattern(body["standoffs"])
-    lines = lambda k: [s.strip() for s in (body.get(k) or "").splitlines() if s.strip()]  # noqa: E731
-    spec.cutouts = [{k: v for k, v in asdict(boxmod.Cutout.parse(c)).items() if v is not None}
-                    for c in lines("cutouts")]
-    spec.vents = [boxmod.parse_vent(v) for v in lines("vents")]
-    spec.labels = [boxmod.parse_label(t) for t in lines("labels")]
+    so = body.get("standoffs")
+    if isinstance(so, list):
+        spec.standoffs = [[_num(x, "standoff x"), _num(y, "standoff y")] for x, y in so]
+    elif so:
+        spec.standoffs = boxmod.standoff_pattern(so)
+    spec.cutouts = [_cutout(c) for c in _items(body.get("cutouts"))]
+    spec.vents = [_vent(v) for v in _items(body.get("vents"))]
+    spec.labels = [_label(t) for t in _items(body.get("labels"))]
     if max(spec.size) > MAX_SIDE:
         raise ValueError(f"each side at most {MAX_SIDE:g} mm here")
     spec.check()
@@ -66,7 +120,8 @@ def page():
 
 @app.get("/api/presets")
 def presets():
-    return {name: {"shape": s, "size": size, "source": src} for name, (s, size, _, src) in PRESETS.items()}
+    return {name: {"shape": s, "size": size, "radius": r, "source": src, "gland": name in GLANDS}
+            for name, (s, size, r, src) in PRESETS.items()}
 
 
 @app.post("/api/preview")
@@ -118,9 +173,9 @@ def make_box(body: dict):
 async def make_stock(step: UploadFile = File(...), lid: UploadFile | None = File(None),
                      cutouts: str = Form(...), teardrop: bool = Form(False)):
     from . import stock
-    lines = [c.strip() for c in cutouts.splitlines() if c.strip()]
     try:
-        parsed = [{k: v for k, v in asdict(boxmod.Cutout.parse(c)).items() if v is not None} for c in lines]
+        rows = json.loads(cutouts) if cutouts.lstrip().startswith("[") else cutouts
+        parsed = [_cutout(c) for c in _items(rows)]
         if not parsed:
             raise ValueError("give at least one cutout")
         with tempfile.TemporaryDirectory() as d:
@@ -138,6 +193,102 @@ async def make_stock(step: UploadFile = File(...), lid: UploadFile | None = File
                 {"inside": result["inside"], "checks": result["checks"]}, indent=2) + "\n")
             return _zip(out, base_path.stem + "_drilled")
     except (ValueError, RuntimeError) as e:
+        _bad(e)
+
+
+MAX_UPLOAD = 60 * 1024 * 1024
+
+
+async def _save(upload: UploadFile | None, path: Path) -> Path | None:
+    if upload is None or not upload.filename:
+        return None
+    data = await upload.read()
+    if len(data) > MAX_UPLOAD:
+        raise ValueError(f"{upload.filename}: over {MAX_UPLOAD // 2**20} MB")
+    path.write_bytes(data)
+    return path
+
+
+async def _enclosure_from(d: Path, base: UploadFile | None, lid: UploadFile | None, box: str | None,
+                          sample: bool = False):
+    """The enclosure: uploaded STEPs, a quick box from the page's settings, or the sample."""
+    from . import geom, samples, shell
+    if sample:
+        paths = samples.write(d / "sample")
+        b, l = geom.load(paths["base"]), geom.load(paths["lid"])
+        name = "sample"
+    elif base is not None and base.filename:
+        b = geom.load(await _save(base, d / "base.step"))
+        lp = await _save(lid, d / "lid.step")
+        l = geom.load(lp) if lp else None
+        name = Path(base.filename).stem
+    elif box:
+        made = boxmod.build(spec_from(json.loads(box)))
+        b, l, name = made["base"], made["lid"], "enclosure_box"
+    else:
+        raise ValueError("give an enclosure: upload its STEP, or use the quick box")
+    enc, _ = shell.read(b, l)
+    return b, l, enc, name
+
+
+@app.post("/api/enclosure")
+async def enclosure_read(base: UploadFile | None = File(None), lid: UploadFile | None = File(None),
+                         box: str | None = Form(None), sample: bool = Form(False),
+                         clearance: float = Form(0.5), thickness: float = Form(1.6)):
+    """What EncloSURE reads from the enclosure, and a KiCad board to start the design in."""
+    from . import kicad
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            b, l, enc, name = await _enclosure_from(d, base, lid, box, sample)
+            out = {"name": name, "enclosure": enc.to_json(),
+                   "base": base64.b64encode(_stl(b)).decode(),
+                   "lid": base64.b64encode(_stl(l)).decode() if l is not None else None}
+            try:
+                lim = kicad.limits(enc, d / "board.kicad_pcb", clearance=clearance, pcb_thickness=thickness)
+                lim.pop("file")
+                out["limits"] = lim
+                out["kicad_pcb"] = (d / "board.kicad_pcb").read_text()
+            except ValueError as e:
+                out["limits_error"] = str(e)
+            return out
+    except (ValueError, RuntimeError, json.JSONDecodeError) as e:
+        _bad(e)
+
+
+@app.post("/api/fit")
+async def fit_check(board: UploadFile | None = File(None), base: UploadFile | None = File(None),
+                    lid: UploadFile | None = File(None), box: str | None = Form(None),
+                    pcb: UploadFile | None = File(None), parts: UploadFile | None = File(None),
+                    sample: bool = Form(False), clearance: float = Form(0.5),
+                    opening_margin: float = Form(0.25), max_setback: float = Form(2.0)):
+    """Check a finished board (KiCad's STEP export) in its enclosure."""
+    from . import fit as fitmod, geom, parts as partsmod, report
+    try:
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            b, l, enc, name = await _enclosure_from(d, base, lid, box, sample)
+            if sample:
+                board_path = d / "sample" / "sample_board.step"
+            else:
+                board_path = await _save(board, d / "board.step")
+                if board_path is None:
+                    raise ValueError("upload the board's STEP (KiCad: File > Export > STEP)")
+            pcb_path = await _save(pcb, d / "board.kicad_pcb")
+            parts_path = await _save(parts, d / "parts.json")
+            settings = fitmod.Settings(clearance=clearance, opening_margin=opening_margin, max_setback=max_setback)
+            specs = partsmod.load(parts_path) if parts_path else {}
+            footprints = partsmod.from_board(pcb_path) if pcb_path else None
+            result = fitmod.check(enc, b, l, geom.step_names(board_path), settings, None, specs, footprints)
+            title = f"EncloSURE: {Path(board.filename).stem if board is not None and board.filename else name}"
+            files = report.write(d / "fit", enc, result, b, l, title=title)
+            j = result.to_json()
+            return {"fits": j["fits"], "errors": j["errors"], "warnings": j["warnings"],
+                    "placement": j["placement"], "headroom": j["headroom"], "findings": j["findings"],
+                    "punch_list": Path(files["punch_list"]).read_text(),
+                    "report": json.loads(Path(files["report"]).read_text()),
+                    "view": Path(files["view"]).read_text()}
+    except (ValueError, RuntimeError, json.JSONDecodeError) as e:
         _bad(e)
 
 

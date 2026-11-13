@@ -93,22 +93,18 @@ def test_parts_file_round_trip_and_refusals(tmp_path):
 @pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="KiCad is not installed")
 def test_datasheet_data_in_the_fit(tmp_path):
     from enclosure import kicad
-    if kicad.pcbnew is None:
-        pytest.skip("KiCad's Python module is not available")
-    import pcbnew
     paths = samples.write(tmp_path)
     base, lid = geom.load(paths["base"]), geom.load(paths["lid"])
     enc, _ = shell.read(base, lid)
     pcb_path = tmp_path / "b.kicad_pcb"
     kicad.limits(enc, pcb_path)
-    board = pcbnew.LoadBoard(str(pcb_path))
     # J1: a USB-C receptacle with no 3D model, at the -X edge, centred on the opening.
-    fp = pcbnew.FOOTPRINT(board)
-    fp.SetReference("J1")
     x = kicad.ORIGIN[0] - 47.5 + 8.94 / 2 - 0.6
-    fp.SetPosition(pcbnew.VECTOR2I(pcbnew.FromMM(x), pcbnew.FromMM(kicad.ORIGIN[1])))
-    board.Add(fp)
-    pcbnew.SaveBoard(str(pcb_path), board)
+    text = pcb_path.read_text().rstrip().rstrip(")")
+    text += (f'  (footprint "J1_nomodel" (layer "F.Cu") (at {x:.4f} {kicad.ORIGIN[1]})\n'
+             '    (fp_text reference "J1" (at 0 0) (layer "F.SilkS") (effects (font (size 1 1) (thickness 0.15))))\n'
+             '    (fp_text value "USB4105" (at 0 2) (layer "F.Fab") (effects (font (size 1 1) (thickness 0.15)))))\n)\n')
+    pcb_path.write_text(text)
     step = tmp_path / "b.step"
     subprocess.run(["kicad-cli", "pcb", "export", "step", "-o", str(step), str(pcb_path)],
                    check=True, capture_output=True)

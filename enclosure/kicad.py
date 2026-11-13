@@ -1,4 +1,4 @@
-"""Writing the enclosure's limits into a KiCad board, through KiCad's own `pcbnew` module.
+"""Writing the enclosure's limits into a KiCad board (a .kicad_pcb written as text; no KiCad needed).
 
 The board gets:
 - an Edge.Cuts outline: the cavity at board height, inset by the clearance;
@@ -15,126 +15,114 @@ KiCad's Y axis points down, so the enclosure's (x, y) is KiCad's (x0 + x, y0 - y
 from __future__ import annotations
 
 import math
+import uuid
 from pathlib import Path
 
 from .shell import Enclosure, board_hole_for
 
-try:
-    import pcbnew
-except ImportError:  # KiCad's Python module comes with KiCad itself
-    pcbnew = None
-
 ORIGIN = (150.0, 100.0)  # where the enclosure's origin lands on KiCad's page, mm
 
-
-def _mm(v: float) -> int:
-    return pcbnew.FromMM(v)
-
-
-def _pt(x: float, y: float, origin=ORIGIN):
-    return pcbnew.VECTOR2I(_mm(origin[0] + x), _mm(origin[1] - y))
-
-
-def _line(board, layer, a, b, width=0.1):
-    s = pcbnew.PCB_SHAPE(board)
-    s.SetShape(pcbnew.SHAPE_T_SEGMENT)
-    s.SetStart(a)
-    s.SetEnd(b)
-    s.SetLayer(layer)
-    s.SetWidth(_mm(width))
-    board.Add(s)
+# KiCad 7's board format. KiCad 8, 9 and 10 (and Backplane's KiCad) open it and upgrade it on save.
+VERSION = 20221018
+LAYERS = [(0, "F.Cu", "signal"), (31, "B.Cu", "signal"), (32, "B.Adhes", "user", "B.Adhesive"),
+          (33, "F.Adhes", "user", "F.Adhesive"), (34, "B.Paste", "user"), (35, "F.Paste", "user"),
+          (36, "B.SilkS", "user", "B.Silkscreen"), (37, "F.SilkS", "user", "F.Silkscreen"),
+          (38, "B.Mask", "user"), (39, "F.Mask", "user"), (40, "Dwgs.User", "user", "User.Drawings"),
+          (41, "Cmts.User", "user", "User.Comments"), (42, "Eco1.User", "user", "User.Eco1"),
+          (43, "Eco2.User", "user", "User.Eco2"), (44, "Edge.Cuts", "user"), (45, "Margin", "user"),
+          (46, "B.CrtYd", "user", "B.Courtyard"), (47, "F.CrtYd", "user", "F.Courtyard"),
+          (48, "B.Fab", "user"), (49, "F.Fab", "user")] + [(49 + i, f"User.{i}", "user") for i in range(1, 10)]
 
 
-def _text(board, layer, at, text, size=1.0):
-    t = pcbnew.PCB_TEXT(board)
-    t.SetText(text)
-    t.SetPosition(at)
-    t.SetLayer(layer)
-    t.SetTextSize(pcbnew.VECTOR2I(_mm(size), _mm(size)))
-    t.SetTextThickness(_mm(size * 0.15))
-    t.SetHorizJustify(pcbnew.GR_TEXT_H_ALIGN_LEFT)
-    board.Add(t)
+def _q(text: str) -> str:
+    return '"' + str(text).replace("\\", "\\\\").replace('"', '\\"') + '"'
 
 
-def _circle(board, layer, center, r, width=0.1):
-    s = pcbnew.PCB_SHAPE(board)
-    s.SetShape(pcbnew.SHAPE_T_CIRCLE)
-    s.SetCenter(center)
-    s.SetEnd(pcbnew.VECTOR2I(center.x + _mm(r), center.y))
-    s.SetLayer(layer)
-    s.SetWidth(_mm(width))
-    board.Add(s)
+def _n(v: float) -> str:
+    t = f"{v:.6f}".rstrip("0").rstrip(".")
+    return "0" if t in ("-0", "") else t
 
 
-def _keepout(board, center, r, name):
-    z = pcbnew.ZONE(board)
-    z.SetIsRuleArea(True)
-    z.SetDoNotAllowTracks(True)
-    z.SetDoNotAllowVias(True)
-    z.SetDoNotAllowPads(True)
-    z.SetDoNotAllowFootprints(True)
-    z.SetDoNotAllowCopperPour(False)
-    z.SetZoneName(name)
-    ls = pcbnew.LSET()
-    ls.AddLayer(pcbnew.F_Cu)
-    ls.AddLayer(pcbnew.B_Cu)
-    z.SetLayerSet(ls)
-    poly = z.Outline()
-    poly.NewOutline()
-    for i in range(24):
-        a = 2 * math.pi * i / 24
-        poly.Append(center.x + _mm(r * math.cos(a)), center.y + _mm(r * math.sin(a)))
-    board.Add(z)
+class _Board:
+    """A .kicad_pcb written as text, so no KiCad is needed to make one."""
 
+    def __init__(self, origin, thickness):
+        self.origin, self.thickness, self.items = origin, thickness, []
 
-def _hole(board, center, d, ref):
-    fp = pcbnew.FOOTPRINT(board)
-    fp.SetReference(ref)
-    fp.SetValue(f"MountingHole_{d:.1f}mm")
-    fp.SetPosition(center)
-    fp.SetAttributes(pcbnew.FP_EXCLUDE_FROM_BOM | pcbnew.FP_EXCLUDE_FROM_POS_FILES)
-    pad = pcbnew.PAD(fp)
-    pad.SetAttribute(pcbnew.PAD_ATTRIB_NPTH)
-    pad.SetShape(pcbnew.PAD_SHAPE_CIRCLE)
-    pad.SetSize(pcbnew.VECTOR2I(_mm(d), _mm(d)))
-    pad.SetDrillSize(pcbnew.VECTOR2I(_mm(d), _mm(d)))
-    pad.SetPosition(center)
-    ls = pcbnew.LSET()
-    ls.AddLayer(pcbnew.F_Cu)
-    ls.AddLayer(pcbnew.B_Cu)
-    ls.AddLayer(pcbnew.F_Mask)
-    ls.AddLayer(pcbnew.B_Mask)
-    pad.SetLayerSet(ls)
-    fp.Add(pad)
-    board.Add(fp)
-    return fp
+    def pt(self, x, y):
+        return self.origin[0] + x, self.origin[1] - y
+
+    def line(self, layer, a, b, width=0.1):
+        (ax, ay), (bx, by) = self.pt(*a), self.pt(*b)
+        self.items.append(f"  (gr_line (start {_n(ax)} {_n(ay)}) (end {_n(bx)} {_n(by)})\n"
+                          f"    (stroke (width {_n(width)}) (type default)) (layer {_q(layer)}) (tstamp {uuid.uuid4()}))")
+
+    def text(self, layer, at, text, size=1.0):
+        x, y = self.pt(*at)
+        self.items.append(f"  (gr_text {_q(text)} (at {_n(x)} {_n(y)}) (layer {_q(layer)}) (tstamp {uuid.uuid4()})\n"
+                          f"    (effects (font (size {_n(size)} {_n(size)}) (thickness {_n(size * 0.15)})) (justify left))\n  )")
+
+    def circle(self, layer, c, r, width=0.1):
+        x, y = self.pt(*c)
+        self.items.append(f"  (gr_circle (center {_n(x)} {_n(y)}) (end {_n(x + r)} {_n(y)})\n"
+                          f"    (stroke (width {_n(width)}) (type default)) (fill none) (layer {_q(layer)}) (tstamp {uuid.uuid4()}))")
+
+    def keepout(self, c, r, name):
+        x, y = self.pt(*c)
+        pts = " ".join(f"(xy {_n(x + r * math.cos(2 * math.pi * i / 24))} {_n(y + r * math.sin(2 * math.pi * i / 24))})"
+                       for i in range(24))
+        self.items.append(
+            f'  (zone (net 0) (net_name "") (layers "F&B.Cu") (tstamp {uuid.uuid4()}) (name {_q(name)}) (hatch edge 0.5)\n'
+            "    (connect_pads (clearance 0))\n    (min_thickness 0.25) (filled_areas_thickness no)\n"
+            "    (keepout (tracks not_allowed) (vias not_allowed) (pads not_allowed) (copperpour allowed) (footprints not_allowed))\n"
+            "    (fill (thermal_gap 0.5) (thermal_bridge_width 0.5))\n"
+            f"    (polygon (pts {pts}))\n  )")
+
+    def hole(self, c, d, ref):
+        x, y = self.pt(*c)
+        name = f"MountingHole_{d:.1f}mm"
+        text = lambda kind, val: (f'    (fp_text {kind} {_q(val)} (at 0 {_n(-d / 2 - 1.5 if kind == "reference" else d / 2 + 1.5)}) '  # noqa: E731
+                                  f'(layer {_q("F.SilkS" if kind == "reference" else "F.Fab")})\n'
+                                  f"      (effects (font (size 1 1) (thickness 0.15))) (tstamp {uuid.uuid4()})\n    )")
+        self.items.append(
+            f'  (footprint {_q("EncloSURE:" + name)} (layer "F.Cu")\n    (tstamp {uuid.uuid4()})\n'
+            f"    (at {_n(x)} {_n(y)})\n    (attr exclude_from_pos_files exclude_from_bom)\n"
+            f'{text("reference", ref)}\n{text("value", name)}\n'
+            f'    (pad "" np_thru_hole circle (at 0 0) (size {_n(d)} {_n(d)}) (drill {_n(d)}) '
+            f'(layers "F&B.Cu" "*.Mask") (tstamp {uuid.uuid4()}))\n  )')
+
+    def text_out(self) -> str:
+        layers = "\n".join("    (" + " ".join([str(n)] + [_q(x) if i != 1 else x for i, x in enumerate(rest)]) + ")"
+                           for n, *rest in LAYERS)
+        return (f'(kicad_pcb (version {VERSION}) (generator "enclosure")\n\n'
+                f"  (general\n    (thickness {_n(self.thickness)})\n  )\n\n"
+                f'  (paper "A4")\n  (layers\n{layers}\n  )\n\n'
+                "  (setup\n    (pad_to_mask_clearance 0)\n  )\n\n"
+                '  (net 0 "")\n\n' + "\n\n".join(self.items) + "\n)\n")
 
 
 def limits(enc: Enclosure, out: str | Path, clearance: float = 0.5, pcb_thickness: float = 1.6,
            origin=ORIGIN) -> dict:
     """Write a .kicad_pcb holding the enclosure's limits. Returns what was written."""
-    if pcbnew is None:
-        raise RuntimeError("writing KiCad boards needs KiCad's Python module (pcbnew): install KiCad")
     if not enc.bosses:
         raise ValueError("the enclosure has no standoffs to mount a board on")
-    board = pcbnew.BOARD()
-    board.GetDesignSettings().SetBoardThickness(_mm(pcb_thickness))
+    board = _Board(origin, pcb_thickness)
     seat = max(b.top for b in enc.bosses)
     top = seat + pcb_thickness
     (x0, y0, _), (x1, y1, _) = enc.cavity_bounds
     x0, y0, x1, y1 = x0 + clearance, y0 + clearance, x1 - clearance, y1 - clearance
     corners = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
     for a, b in zip(corners, corners[1:] + corners[:1]):
-        _line(board, pcbnew.Edge_Cuts, _pt(*a, origin=origin), _pt(*b, origin=origin), 0.1)
+        board.line("Edge.Cuts", a, b, 0.1)
 
     holes = []
     for i, boss in enumerate(enc.bosses, 1):
         d = board_hole_for(boss.hole)
-        c = _pt(boss.center[0], boss.center[1], origin=origin)
-        _hole(board, c, d, f"H{i}")
+        c = boss.center[:2]
+        board.hole(c, d, f"H{i}")
         # A screw head (pan head, about 2 x the thread) plus the clearance, kept free of copper.
         head = max(boss.diameter / 2, d) + clearance
-        _keepout(board, c, head, f"H{i} screw head")
+        board.keepout(c, head, f"H{i} screw head")
         holes.append({"ref": f"H{i}", "at": boss.center[:2], "diameter": d, "screw": boss.screw,
                       "keepout_radius": round(head, 2)})
 
@@ -148,7 +136,7 @@ def limits(enc: Enclosure, out: str | Path, clearance: float = 0.5, pcb_thicknes
         f"Board edge {clearance:.2f} mm in from the walls",
     ]
     for k, n in enumerate(notes):
-        _text(board, pcbnew.User_1, _pt(x0, y1 + 6 + 2.2 * (len(notes) - k), origin=origin), n, 1.2)
+        board.text("User.1", (x0, y1 + 6 + 2.2 * (len(notes) - k)), n, 1.2)
 
     marks = []
     for o in enc.openings:
@@ -164,20 +152,92 @@ def limits(enc: Enclosure, out: str | Path, clearance: float = 0.5, pcb_thicknes
                 y = y0 if o.wall == "-Y" else y1
                 a, b = (o.center[0] - o.width / 2, y), (o.center[0] + o.width / 2, y)
                 at = (o.center[0] - o.width / 2, y + (2 if o.wall == "-Y" else -1.5))
-            _line(board, pcbnew.User_2, _pt(*a, origin=origin), _pt(*b, origin=origin), 0.4)
-            _text(board, pcbnew.User_2, _pt(*at, origin=origin), label, 0.8)
+            board.line("User.2", a, b, 0.4)
+            board.text("User.2", at, label, 0.8)
             marks.append({"wall": o.wall, "from": a, "to": b, "centre_above_board_top": above,
                           "width": o.width, "height": o.height})
         elif o.wall == "lid":
-            c = _pt(o.center[0], o.center[1], origin=origin)
-            _circle(board, pcbnew.User_2, c, max(o.width, o.height) / 2, 0.3)
+            board.circle("User.2", o.center[:2], max(o.width, o.height) / 2, 0.3)
             gap = round(o.center[2] - top, 2)
-            _text(board, pcbnew.User_2, _pt(o.center[0] + max(o.width, o.height) / 2 + 1, o.center[1], origin=origin),
-                  f"lid opening {o.width:.2f} x {o.height:.2f}: lid {gap:.2f} mm above board top", 0.8)
+            board.text("User.2", (o.center[0] + max(o.width, o.height) / 2 + 1, o.center[1]),
+                       f"lid opening {o.width:.2f} x {o.height:.2f}: lid {gap:.2f} mm above board top", 0.8)
             marks.append({"wall": "lid", "at": o.center[:2], "width": o.width, "height": o.height,
                           "lid_above_board_top": gap})
     out = Path(out)
     out.parent.mkdir(parents=True, exist_ok=True)
-    pcbnew.SaveBoard(str(out), board)
+    out.write_text(board.text_out())
     return {"file": str(out), "outline": [[x0, y0], [x1, y1]], "holes": holes, "openings": marks,
             "max_height_top": up, "max_height_bottom": down, "seat": seat, "origin": list(origin)}
+
+
+# Reading a .kicad_pcb: a small s-expression reader, enough for footprints. Handles KiCad 6 and 7
+# (fp_text reference/value) and KiCad 8 and later (property "Reference"/"Value").
+
+def _tokens(text: str):
+    i, n = 0, len(text)
+    while i < n:
+        c = text[i]
+        if c in " \t\r\n":
+            i += 1
+        elif c in "()":
+            yield c
+            i += 1
+        elif c == '"':
+            j, buf = i + 1, []
+            while text[j] != '"':
+                if text[j] == "\\":
+                    j += 1
+                buf.append(text[j])
+                j += 1
+            yield ("s", "".join(buf))
+            i = j + 1
+        else:
+            j = i
+            while j < n and text[j] not in ' \t\r\n()"':
+                j += 1
+            yield text[i:j]
+            i = j
+
+
+def parse(text: str):
+    """The s-expression as nested lists; quoted strings and bare atoms both come back as str."""
+    stack = [[]]
+    for t in _tokens(text):
+        if t == "(":
+            stack.append([])
+        elif t == ")":
+            done = stack.pop()
+            stack[-1].append(done)
+        else:
+            stack[-1].append(t[1] if isinstance(t, tuple) else t)
+    return stack[0][0]
+
+
+def _kids(node, name):
+    return [k for k in node[1:] if isinstance(k, list) and k and k[0] == name]
+
+
+def footprints(kicad_pcb: str | Path) -> dict[str, dict]:
+    """Each footprint's reference, value, fields, page position (mm), rotation, side and whether it
+    has a 3D model."""
+    board = parse(Path(kicad_pcb).read_text(encoding="utf-8"))
+    if not board or board[0] != "kicad_pcb":
+        raise ValueError(f"{kicad_pcb}: not a KiCad board")
+    out = {}
+    for fp in _kids(board, "footprint") + _kids(board, "module"):
+        fields = {}
+        for p in _kids(fp, "property"):
+            if len(p) >= 3:
+                fields[p[1]] = p[2]
+        for t in _kids(fp, "fp_text"):
+            if len(t) >= 3 and t[1] in ("reference", "value"):
+                fields.setdefault(t[1].capitalize(), t[2])
+        at = (_kids(fp, "at") or [["at", "0", "0"]])[0]
+        layer = (_kids(fp, "layer") or [["layer", "F.Cu"]])[0][1]
+        ref = fields.get("Reference")
+        if not ref:
+            continue
+        out[ref] = {"value": fields.get("Value", ""), "fields": fields,
+                    "at": [float(at[1]), float(at[2])], "rotation": float(at[3]) if len(at) > 3 else 0.0,
+                    "side": "bottom" if layer.startswith("B.") else "top", "has_model": bool(_kids(fp, "model"))}
+    return out

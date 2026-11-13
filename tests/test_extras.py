@@ -147,3 +147,35 @@ def test_web(die_cast):
     assert res.status_code == 200
     names = zipfile.ZipFile(io.BytesIO(res.content)).namelist()
     assert {"base.step", "lid.step", "drill_templates.pdf", "holes.json"} <= set(names)
+
+
+def test_gasket_ledge_over_standoffs_is_flagged():
+    made = box.build(box.BoxSpec(size=[100, 60, 40], lid="screw", gasket=2.0, standoffs=box.standoff_pattern("rect:80x40")))
+    assert any("under the gasket ledge" in c for c in made["checks"])
+    ok = box.build(box.BoxSpec(size=[100, 60, 40], lid="screw", gasket=2.0, standoffs=box.standoff_pattern("rect:60x20")))
+    assert not any("under the gasket ledge" in c for c in ok["checks"])
+
+
+def test_web_rows_and_board_workflow():
+    pytest.importorskip("fastapi")
+    from fastapi.testclient import TestClient
+    from enclosure.web import app
+    c = TestClient(app)
+    body = {"size": [100, 60, 40], "lid": "screw", "standoffs": [[-30, 0], [30, 0]],
+            "cutouts": [{"face": "left", "preset": "usb-c", "at": [0, 8]},
+                        {"face": "lid", "shape": "rect", "size": [30, 20], "radius": 2, "at": [0, 10]}],
+            "vents": [{"face": "right", "size": [30, 20], "at": [0, 15], "slot": 2, "pitch": 4}],
+            "labels": [{"face": "lid", "text": "POWER", "at": [0, -15], "size": 6, "depth": -0.6}]}
+    p = c.post("/api/preview", json=body).json()
+    assert p["outer"] == [104.0, 64.0, 44.0], p
+    assert any("rect 30x20" in n for n in p["notes"]) and any("POWER" in n for n in p["notes"])
+    bad = c.post("/api/preview", json={**body, "labels": [{"face": "lid", "text": " ", "at": [0, 0]}]})
+    assert bad.status_code == 400
+    # The board side: read the quick box, get a KiCad board, check the sample.
+    r = c.post("/api/enclosure", data={"box": json.dumps(body)}).json()
+    assert len(r["enclosure"]["bosses"]) == 2 and r["kicad_pcb"].startswith("(kicad_pcb")
+    assert r["limits"]["max_height_top"] > 0
+    f = c.post("/api/fit", data={"sample": "true"}).json()
+    assert f["fits"] is False and f["errors"] == 4 and "<html" in f["view"].lower()
+    assert any(x.get("kicad_move") for x in f["findings"])
+    assert c.post("/api/fit", data={"box": json.dumps(body)}).status_code == 400  # no board given

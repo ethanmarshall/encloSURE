@@ -54,8 +54,6 @@ def test_board_misfits_are_found(sample):
 @pytest.mark.skipif(shutil.which("kicad-cli") is None, reason="KiCad is not installed")
 def test_limits_board_fits_its_enclosure(sample, tmp_path):
     from enclosure import kicad
-    if kicad.pcbnew is None:
-        pytest.skip("KiCad's Python module is not available")
     folder, _, base, lid, enc = sample
     written = kicad.limits(enc, tmp_path / "limits.kicad_pcb")
     assert [h["diameter"] for h in written["holes"]] == [2.7] * 4
@@ -66,6 +64,26 @@ def test_limits_board_fits_its_enclosure(sample, tmp_path):
     j = fit.check(enc, base, lid, geom.step_names(step)).to_json()
     assert j["fits"], j["findings"]
     assert j["placement"]["how"] == "4 of 4 mounting holes on standoffs"
+
+
+def test_board_text_reads_back(sample, tmp_path):
+    """The board is written as text, without KiCad; it reads back, and KiCad 8+ fields read too."""
+    from enclosure import kicad, parts
+    *_, enc = sample
+    kicad.limits(enc, tmp_path / "b.kicad_pcb")
+    fps = kicad.footprints(tmp_path / "b.kicad_pcb")
+    assert sorted(fps) == ["H1", "H2", "H3", "H4"]
+    assert {tuple(f["at"]) for f in fps.values()} == {(110.0, 120.0), (190.0, 120.0), (110.0, 80.0), (190.0, 80.0)}
+    k8 = tmp_path / "k8.kicad_pcb"
+    k8.write_text('''(kicad_pcb (version 20240108) (generator "pcbnew")
+  (footprint "Connector_USB:USB_C" (layer "B.Cu") (uuid "x") (at 105.1 100.25 90)
+    (property "Reference" "J1" (at 0 0 0) (layer "B.SilkS"))
+    (property "Value" "USB_C \\"Receptacle\\"" (at 0 0 0) (layer "B.Fab"))
+    (property "MPN" "USB4105-GF-A" (at 0 0 0) (layer "B.Fab") (hide yes))
+    (model "${KICAD8_3DMODEL_DIR}/Connector_USB.3dshapes/USB_C.wrl" (offset (xyz 0 0 0)))))''')
+    j1 = parts.from_board(k8)["J1"]
+    assert j1 == {"value": 'USB_C "Receptacle"', "mpn": "USB4105-GF-A", "at": [105.1, 100.25], "rotation": 90.0,
+                  "side": "bottom", "has_model": True}
 
 
 def test_report_files(sample, tmp_path):

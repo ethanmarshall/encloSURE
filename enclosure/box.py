@@ -357,6 +357,15 @@ def build(spec: BoxSpec) -> dict:
                   - _rounded_box(gL - gw, gW - gw, gd, max(cr - gw / 2, 0.1), z0=top))
         notes.append(f"gasket: Ø{cd:g} mm cord in a {gw:g} x {gd:g} mm groove in the lid, pressing on a "
                      f"{ledge:.1f} mm ledge inside the walls; the lid screws sit outside the seal")
+        # The ledge narrows the way in: a board has to pass it.
+        gap_x, gap_y = L - 2 * ledge, W - 2 * ledge
+        checks.append(f"gasket ledge: the opening past it is {gap_x:.1f} x {gap_y:.1f} mm, so a board and parts "
+                      f"must fit through that")
+        under = [f"({x:g}, {y:g})" for x, y in spec.standoffs if abs(x) > gap_x / 2 or abs(y) > gap_y / 2]
+        if under:
+            checks.append(f"standoffs at {', '.join(under)} are under the gasket ledge, which reaches {ledge:.1f} mm in "
+                          f"from the walls: a board on them could not go in. Keep standoffs within "
+                          f"±{gap_x / 2:.1f} x ±{gap_y / 2:.1f} mm, or make the box bigger")
 
     for hole in post_holes:  # after the gasket ledge, which covers the posts' tops
         base -= hole

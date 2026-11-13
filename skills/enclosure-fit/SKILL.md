@@ -9,9 +9,8 @@ EncloSURE (`enclosure` on the command line) reads an enclosure STEP (an open-top
 optionally its lid, in one frame with Z up), and works in millimetres.
 
 Use the KiCad that Backplane has selected: call plain `kicad-cli` (or `$BACKPLANE_KICAD_CLI`),
-never another install's path. `enclosure limits` and `enclosure parts --pcb` load KiCad's
-`pcbnew` Python module, so they must run in that KiCad's Python; if `import pcbnew` fails, say
-so and which command needs it rather than pointing at a different KiCad install.
+never another install's path. EncloSURE writes and reads `.kicad_pcb` files itself, so it does not
+need KiCad's Python; only exporting the board to STEP needs `kicad-cli`.
 
 ## Start a board from the enclosure
 

@@ -130,8 +130,15 @@ extent: measure from the bottom edge and the centre line.
 
 ## In a browser
 
-`enclosure web` serves the quick box and the bought-box tool as a page with a live 3D preview,
-every option as a form field, and a choice of STEP, Onshape feature or both to download.
+`enclosure web` serves everything as a page, live at https://enclosure-jdxs.onrender.com:
+
+- **Quick box**: every option as a form field (holes picked from the presets or your own size,
+  vents, text, standoffs as a rectangle or your own positions), a live 3D preview, and a choice of
+  STEP, Onshape feature or both to download.
+- **Fit a board**: read your quick box, an uploaded enclosure STEP or the sample; download the
+  KiCad board to design in; then upload KiCad's STEP export (plus the .kicad_pcb and parts.json
+  if you have them) to check the fit, with each problem's fix, the KiCad move, and a 3D view.
+- **Bought box**: holes in a maker's STEP and the drilling templates.
 
 ```
 pip install -e ".[web]"
@@ -145,8 +152,9 @@ a box takes a second or two to build.
 
 ## Install
 
-Python 3.10 or later, and KiCad 7 or later for writing boards (it uses KiCad's own `pcbnew`
-module) and exporting them to STEP.
+Python 3.10 or later. EncloSURE writes and reads KiCad boards itself (KiCad 7 format, which
+KiCad 7 through 10 and Backplane's KiCad open), so KiCad is only needed to design the board and
+export it to STEP.
 
 ```
 pip install -e .            # installs build123d (OpenCascade) and the `enclosure` command
