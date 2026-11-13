@@ -378,6 +378,8 @@ def moves_from_fit(findings: list[dict]) -> dict:
         m = re.match(r"hole at \(([-\d.]+), ([-\d.]+)\)", subject)
         # A hole is named by where it is in the board's STEP, which is KiCad's page with Y flipped.
         key = (float(m.group(1)), -float(m.group(2))) if m else subject.split(" ")[0]
+        if isinstance(key, str) and "/" in key:
+            continue  # a part on a stacked board: not in this .kicad_pcb
         if key in moves:
             continue  # one move per footprint: the first finding's
         moves[key] = (km[0], km[1])

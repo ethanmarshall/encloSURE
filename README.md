@@ -108,7 +108,31 @@ check the datasheet of the exact part you buy.
 | `m25` | ⌀25.5 | M25x1.5 gland: 25 mm thread + 0.5 mm |
 | `m8-panel` | ⌀8.5 | M8 panel connector: 8 mm thread + 0.5 mm |
 | `m12-panel` | ⌀12.5 | M12 panel connector: 12 mm thread + 0.5 mm |
+| `iec-c14` | 27.5 x 20 | IEC C14 snap-in inlet, for 1 to 3 mm panels (Interpower) |
+| `fuse-5x20` | ⌀13 | Schurter FEF fuse holder (its 12 mm flat is left out: tighten the nut well) |
+| `fan-40` | ⌀37 + 4 x ⌀3.5 on 32 | San Ace 109P0412H3013, Noctua NF-A4x10 |
+| `fan-60` | ⌀57 + 4 x ⌀4.5 on 50 | San Ace 60GT25 mounting reference |
+| `fan-80` | ⌀76 + 4 x ⌀4.5 on 71.5 | San Ace 9G0824G102 |
 | `drain` | ⌀3 | 3 mm drain hole |
+
+A fan preset adds its four screw holes as plain round cutouts, so every output (STEP, Onshape,
+SolidWorks, drawings) gets them. The fan openings are the frame less about 3 mm, a choice rather
+than a maker's figure.
+
+### Hinged lid
+
+`--lid hinge` puts five knuckles along the +Y edge (three on the base on 45 degree wedges, so the
+base prints upright without support; two on the lid, flush with its top so it prints top down) and a
+snap rib on -Y to hold it shut. The pin is a piece of 1.75 mm filament through a 2.1 mm hole; melt
+its ends. The lid was checked to swing all the way over without touching the base. Onshape and the
+SolidWorks macro make it as a press-fit lid without the knuckles, and say so.
+
+### In SolidWorks: a macro
+
+`--format solidworks` writes `enclosure_box.swb` next to the STEP. In SolidWorks: Tools > Macro >
+Run, pick the file. It builds the box as features (extrude, fillet, shell, posts, standoffs, lid,
+cutouts) so it stays editable, and the command lists what it leaves out. It has not been run in
+every SolidWorks version yet: send any error it gives.
 
 ### In Onshape: the custom feature
 
@@ -161,7 +185,11 @@ the box (`my_box/fit/`), and `my_box/box.json` holds every setting to change wit
 The board can also be just the `.kicad_pcb` (`enclosure frompcb board.kicad_pcb`): its Edge.Cuts
 outline (lines, arcs, rectangles, circles, polygons, any shape), its mounting holes and each
 footprint's courtyard become the board, with heights from parts.json or typical ones for each kind of
-part (listed in the notes), so openings land where the connectors really are. `enclosure describe
+part (listed in the notes), so openings land where the connectors really are.
+
+A second board stacked on the first (a Raspberry Pi HAT, an Arduino shield) comes in with
+`board2`/`pcb2` on the page or the API and a gap between the boards (11 mm by default): its plate is
+PCB2 and its parts are named like `J1/top`, so they count for room and get openings like any other. `enclosure describe
 "... wall-mounted" --pcb board.kicad_pcb` does the same and adds what the words say.
 
 ## Fixing the board
@@ -176,6 +204,9 @@ onto its standoff) and writes a new file; the original is left alone. Re-export 
 and check again. Problems a move can't fix (a part too tall, an opening too small) are listed.
 
 ## Fixing it automatically
+
+A connector sitting beside an empty opening on the same wall is paired with it: the finding says how
+far to move it, and the fixed `.kicad_pcb` has it moved there.
 
 ```
 enclosure autofit base.step board.kicad_pcb --lid lid.step -o autofit
@@ -275,6 +306,20 @@ enclosure web            # then open http://localhost:8000
 It runs anywhere Docker does (`docker build -t enclosure .`), including a host such as Render;
 a box takes a second or two to build.
 
+More on the page:
+
+- **mm or inches**: every length field, and the report's notes, in either.
+- **Onshape**: "Send to Onshape" makes a document with the box built in it; "Update in Onshape"
+  changes that same document when you change the box (your own features after it stay). The Fit tab
+  can read an enclosure straight from a Part Studio link. Needs `ONSHAPE_ACCESS_KEY` and
+  `ONSHAPE_SECRET_KEY` on the server.
+- **Cost and summary**: the parts list with DigiKey parts and prices (with `DIGIKEY_CLIENT_ID` and
+  `DIGIKEY_CLIENT_SECRET` on the server) plus the plastic at your price per kg, and a one-page PDF
+  of the box.
+- **Compare**: each saved version can be compared with the box on the page, setting by setting.
+- **Install as an app**: in Edge or Chrome, the install icon in the address bar (or Settings >
+  Apps > Install this site as an app) gives EncloSURE its own window and icon.
+
 ## Install
 
 Python 3.10 or later. EncloSURE writes and reads KiCad boards itself (KiCad 7 format, which
@@ -366,7 +411,8 @@ Symbols, footprints and 3D models still come from KiCad's libraries or a model s
 ## What is not done yet
 
 - Describing a board in words and having EncloSURE propose the layout, and writing `fit`'s
-  enclosure changes back to your own model (the Onshape feature makes new boxes only).
+  enclosure changes back to your own model (Onshape updates only documents EncloSURE made).
+- D-sub cutouts: not added until sourced from a maker's drawing.
 - Drilling templates bigger than a Letter page are one large page, not tiled.
 - Keepouts from datasheets (an antenna's clear zone) are not used yet.
 - Reading the datasheet PDF itself is left to you or an agent: distributor listings give heights

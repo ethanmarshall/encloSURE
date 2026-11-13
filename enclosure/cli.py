@@ -24,6 +24,10 @@ from . import fit as fitmod
 from . import box as boxmod, geom, parts as partsmod, report, samples, shell
 
 
+FORMATS = {"step": ("step",), "onshape": ("onshape",), "solidworks": ("step", "solidworks"),
+           "both": ("step", "onshape"), "all": ("step", "onshape", "solidworks")}
+
+
 def _enclosure(args):
     base = geom.load(args.base)
     lid = geom.load(args.lid) if args.lid else None
@@ -134,7 +138,7 @@ def cmd_box(args):
             setattr(spec, name, False)
     if args.din_rail:
         spec.din_rail = True
-    formats = {"step": ("step",), "onshape": ("onshape",), "both": ("step", "onshape")}[args.format]
+    formats = FORMATS[args.format]
     return boxmod.write(spec, args.out, stl=not args.no_stl, formats=formats)
 
 
@@ -217,7 +221,7 @@ def cmd_frompcb(args):
     else:
         r = frompcb.make(args.board, st, specs, footprints)
     out = Path(args.out)
-    files = boxmod.write(r["spec"], out, stl=not args.no_stl, formats=tuple(args.format.replace("both", "step,onshape").split(",")))
+    files = boxmod.write(r["spec"], out, stl=not args.no_stl, formats=FORMATS[args.format])
     rep = report.write(out / "fit", r["enclosure"], r["fit"], r["made"]["base"], r["made"]["lid"],
                        title=f"EncloSURE: box for {Path(args.board).stem}")
     j = r["fit"].to_json()
@@ -310,7 +314,7 @@ def main(argv=None) -> int:
                         "is along the wall from its centre and height above the inside floor (repeatable)")
     p.add_argument("--flange", type=float, help="mounting ears this far out from the ends, mm")
     p.add_argument("--flange-screw", choices=list(boxmod.SCREWS))
-    p.add_argument("--format", choices=["step", "onshape", "both"], default="step",
+    p.add_argument("--format", choices=["step", "onshape", "solidworks", "both", "all"], default="step",
                    help="STEP files (and STL), an Onshape custom feature (enclosure_box.fs), or both")
     p.add_argument("--no-stl", action="store_true")
     p.add_argument("--no-teardrop", action="store_true", help="plain round holes in walls")
@@ -402,7 +406,7 @@ def main(argv=None) -> int:
     p.add_argument("--edge-gap", type=float, default=1.0, help="board edge to the walls where nothing pokes out (mm)")
     p.add_argument("--standoff-height", type=float, default=5.0)
     p.add_argument("--headroom", type=float, default=2.0, help="above the tallest part (mm)")
-    p.add_argument("--format", default="step", choices=("step", "onshape", "both"))
+    p.add_argument("--format", default="step", choices=("step", "onshape", "solidworks", "both", "all"))
     p.add_argument("--no-stl", action="store_true")
     p.add_argument("-o", "--out", default="box", help="folder for the box files and fit/ report")
     p.set_defaults(fn=cmd_frompcb)

@@ -190,6 +190,23 @@ class DigiKey:
         }
 
 
+    def search(self, keywords: str, limit: int = 8) -> list[dict]:
+        """Products matching the words, in DigiKey's order, with their single-unit price and stock."""
+        body = json.dumps({"Keywords": keywords, "Limit": limit, "Offset": 0}).encode()
+        req = urllib.request.Request(f"{DIGIKEY}/products/v4/search/keyword", data=body, method="POST")
+        req.add_header("X-DIGIKEY-Client-Id", self.id)
+        req.add_header("Authorization", f"Bearer {self._token()}")
+        req.add_header("Content-Type", "application/json")
+        req.add_header("Accept", "application/json")
+        d = json.loads(_request(req, self.opener))
+        out = []
+        for p in d.get("Products") or []:
+            out.append({"mpn": p.get("ManufacturerProductNumber"), "manufacturer": (p.get("Manufacturer") or {}).get("Name"),
+                        "description": (p.get("Description") or {}).get("ProductDescription"),
+                        "price": p.get("UnitPrice"), "stock": p.get("QuantityAvailable"), "url": p.get("ProductUrl")})
+        return out
+
+
 class Mouser:
     def __init__(self, key: str, opener=None):
         self.key, self.opener = key, opener

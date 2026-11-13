@@ -104,7 +104,7 @@ def design(board_step, settings: Settings | None = None, specs: dict | None = No
         pbb = bbox(p.shape)
         face = max(("-X", "+X", "-Y", "+Y"), key=lambda f: _reach(f, pbb, edges))
         r = _reach(face, pbb, edges)
-        if r < -s.reach or not (name.upper().startswith(s.connector_prefixes) or r > 0):
+        if name.upper().startswith("PCB") or r < -s.reach or not (name.upper().startswith(s.connector_prefixes) or r > 0):
             continue
         openings.append((name, face, pbb, r))
         reach[face] = max(reach.get(face, r), r)
@@ -142,7 +142,7 @@ def design(board_step, settings: Settings | None = None, specs: dict | None = No
     ix0, ix1 = bx0 - gap["-X"], bx1 + gap["+X"]
     iy0, iy1 = by0 - gap["-Y"], by1 + gap["+Y"]
     cx, cy = (ix0 + ix1) / 2, (iy0 + iy1) / 2
-    lip = 3.0 if s.lid in ("screw", "friction", "snap") else 0.0
+    lip = 3.0 if s.lid in ("screw", "friction", "snap", "hinge") else 0.0
     height = so_h + thick + tallest + s.headroom + lip
     L, W, H = round(ix1 - ix0, 2), round(iy1 - iy0, 2), round(height, 1)
     notes.insert(0, f"inside {L:g} x {W:g} x {H:g} mm: the board {bx1 - bx0:.1f} x {by1 - by0:.1f} mm, the tallest part "
@@ -193,6 +193,45 @@ def design(board_step, settings: Settings | None = None, specs: dict | None = No
         notes.append(f"clamshell parts at {spec.split * H:.1f} mm, above the wall openings")
     frame = {"board_to_box": [-cx, -cy, z_shift], "board_bounds": [list(pb[0]), list(pb[1])]}
     return spec, notes, frame
+
+
+def board_solids(step=None, kicad_pcb=None, specs: dict | None = None):
+    """A board's named solids from its STEP, or from its .kicad_pcb alone; and notes."""
+    if step is not None:
+        return step_names(step), []
+    if kicad_pcb is not None:
+        from . import kicad
+        return kicad.board_solids(kicad_pcb, specs)
+    raise ValueError("upload the board's STEP, or its .kicad_pcb")
+
+
+def stack(main: list, top: list, gap: float = 11.0, offset=(0.0, 0.0)) -> tuple[list, list[str]]:
+    """A second board (a HAT, a shield) *gap* mm above the first one's top, shifted by *offset*.
+    The first board stays the one the box is fitted to; the second one's plate becomes PCB2 and its
+    parts get "/top" after their names, so they count for room and openings like any other part."""
+    from build123d import Pos
+    from .geom import Named
+    mp, tp = fitmod.pcb_of(main), fitmod.pcb_of(top)
+    m_top = bbox(mp.shape)[1][2]
+    dz = m_top + gap - bbox(tp.shape)[0][2]
+    shift = Pos(offset[0], offset[1], dz)
+    out = [Named("PCB", mp.shape) if s is mp else s for s in main]
+    out += [Named("PCB2" if s is tp else f"{s.name.split(' ')[0]}/top", shift * s.shape) for s in top]
+    notes = [f"second board {gap:g} mm above the first"
+             + (f", shifted {offset[0]:g}, {offset[1]:g} mm" if any(offset) else "")]
+    low = bbox(shift * tp.shape)[0][2]
+    hit = [s.name.split(" ")[0] for s in main if s is not mp and bbox(s.shape)[1][2] > low + 0.01
+           and bbox(s.shape)[0][2] > m_top - 0.01 and _overlaps_xy(s.shape, shift * tp.shape)]
+    if hit:
+        notes.append(f"taller than the {gap:g} mm gap, so they reach the second board: {', '.join(hit[:8])} "
+                     "(a header between the boards is expected to)")
+    return out, notes
+
+
+def _overlaps_xy(a, b) -> bool:
+    (ax0, ay0, _), (ax1, ay1, _) = bbox(a)
+    (bx0, by0, _), (bx1, by1, _) = bbox(b)
+    return ax0 < bx1 and bx0 < ax1 and ay0 < by1 and by0 < ay1
 
 
 def from_kicad(kicad_pcb, settings: Settings | None = None, specs: dict | None = None):

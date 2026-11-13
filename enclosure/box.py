@@ -29,10 +29,10 @@ import math
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-from build123d import (Shape, Align, Axis, Box, Compound, Cone, Cylinder, Location, Polygon, Pos, Rot, Text,
+from build123d import (Plane, Shape, Align, Axis, Box, Compound, Cone, Cylinder, Location, Polygon, Pos, Rot, Text,
                        chamfer, export_step, export_stl, extrude, fillet)
 
-from .presets import GLANDS, PRESETS, resolve
+from .presets import FANS, GLANDS, PRESETS, expand, resolve
 
 # Per metric screw: (clearance hole, pilot for thread-forming in plastic, heat-set insert hole,
 # insert depth, head diameter). Clearance is ISO 273 medium; pilot and insert holes are common
@@ -43,8 +43,9 @@ SCREWS = {
     "M3": (3.4, 2.5, 4.0, 5.7, 5.5),
     "M4": (4.5, 3.4, 5.6, 8.1, 7.0),
 }
-LIDS = ("screw", "friction", "snap", "slide", "none", "clamshell")
-TOP_LIDS = ("screw", "friction", "snap", "clamshell")  # a lid across the top
+LIDS = ("screw", "friction", "snap", "hinge", "slide", "none", "clamshell")
+TOP_LIDS = ("screw", "friction", "snap", "hinge", "clamshell")  # a lid across the top
+PLATE_LIDS = ("screw", "friction", "snap", "hinge")  # a plate on top of the walls, maybe with a lip
 PIN_HOLE = {"M2": 2.2, "M2.5": 2.7, "M3": 3.2, "M4": 4.3}  # the board hole a pin goes through
 # Cells: (diameter, length) with a little room; AA and AAA are IEC 60086-2 maximums, 18650 and 21700
 # their names (18 x 65, 21 x 70 mm) plus room for protected cells. Check your cells.
@@ -198,6 +199,7 @@ class BoxSpec:
         return self.lid_thickness + 1.0 if self.lid == "slide" else self.lid_thickness
 
     def check(self):
+        self.cutouts = expand(self.cutouts)
         if len(self.size) != 3 or min(self.size) <= 0:
             raise ValueError("size: three numbers above 0, L x W x H")
         if self.size_is not in ("inner", "outer"):
@@ -326,6 +328,56 @@ def _on_wall(tool, face: str, along: float, z: float, oL: float, oW: float):
     return Pos(along, sign * oW / 2, z) * (Rot(90, 0, 0) * tool)
 
 
+PIN_D = 1.75  # a length of 3D printer filament is the hinge pin
+
+
+def hinge_axis(spec: "BoxSpec") -> tuple[float, float, float]:
+    """(y, z, knuckle radius) of a hinge lid's pin, which runs along X outside the +Y wall."""
+    L, W, H = spec.inner
+    oW = W + 2 * spec.wall
+    top = spec.floor + H
+    rk = max(2.6, PIN_D / 2 + 0.35 + 1.4, spec.lid_thickness / 2 + 0.6)
+    return oW / 2 + spec.fit_clearance + rk, top + spec.lid_thickness - rk, rk
+
+
+def _hinge(spec, lid, base, top, oL, oW, notes, checks):
+    """Knuckles along the +Y edge: three on the base (on 45 degree wedges, so the base prints
+    upright without support), two on the lid, flush with its top so it prints top down; a
+    1.75 mm filament pin through them all. The lid's snap rib on -Y is the latch."""
+    c = spec.fit_clearance
+    ay, az, rk = hinge_axis(spec)
+    t = spec.lid_thickness
+    span = 0.8 * oL - 2 * spec.corner_radius
+    if span < 20:
+        raise ValueError("a hinge lid needs the box at least about 35 mm long")
+    n = 5
+    seg = (span - (n - 1) * c) / n
+    hole = PIN_D + 0.35
+    for i in range(n):
+        x0 = -span / 2 + i * (seg + c)
+        xc = x0 + seg / 2
+        knuckle = Cylinder(rk, seg, rotation=(0, 90, 0)).locate(Location((xc, ay, az)))
+        if i % 2 == 0:  # base: knuckle on a wedge sloping back into the wall
+            reach = ay - oW / 2 + 0.01
+            wedge = extrude(Plane.YZ * Polygon((oW / 2 - 0.01, top - reach), (oW / 2 - 0.01, top), (ay, top), (ay, az), align=None),
+                            amount=seg)
+            base += Pos(x0 + seg, 0, 0) * wedge + knuckle  # Plane.YZ extrudes toward -X
+        else:  # lid: a bridge from the lid's edge to the knuckle
+            lid += Box(seg, ay - oW / 2 + 0.01, t).locate(Location((xc, (oW / 2 - 0.01 + ay) / 2, top + t / 2))) + knuckle
+    pin = Cylinder(hole / 2, span + 2, rotation=(0, 90, 0)).locate(Location((0, ay, az)))
+    base -= pin
+    lid -= pin
+    notes.append(f"hinge lid: 5 knuckles along the +Y edge, Ø{2 * rk:.1f} mm; push a {span + 6:.0f} mm piece of {PIN_D:g} mm "
+                 f"filament through the Ø{hole:.2f} hole and melt the ends; the snap rib on -Y holds it shut")
+    if spec.lip <= 0:
+        checks.append("hinge lid with no lip: there is nothing to latch it shut; give it a lip")
+    for raw in spec.cutouts:
+        if face_name(raw.get("face", "")) == "+Y":
+            checks.append("a cutout on +Y sits under the hinge: check it clears the knuckles and wedges")
+            break
+    return lid, base
+
+
 def build(spec: BoxSpec) -> dict:
     """The base and lid as solids, notes on what was made, and checks worth a look."""
     spec.check()
@@ -414,7 +466,7 @@ def build(spec: BoxSpec) -> dict:
     if spec.card_slots:
         gap = spec.board_thickness + 2 * spec.fit_clearance
         rail_t, rail_d = 1.6, 2.5
-        stop = top - (spec.lip + spec.fit_clearance + 0.5 if spec.lid in ("screw", "friction", "snap") else 0.0)
+        stop = top - (spec.lip + spec.fit_clearance + 0.5 if spec.lid in PLATE_LIDS else 0.0)
         rh = stop - spec.floor
         for x in spec.card_slots:
             for sy in (-1, 1):
@@ -480,7 +532,7 @@ def build(spec: BoxSpec) -> dict:
 
     lid = None
     lip_c = spec.fit_clearance
-    if spec.lid in ("screw", "friction", "snap"):
+    if spec.lid in PLATE_LIDS:
         lid = _rounded_box(oL, oW, spec.lid_thickness, r_out, z0=top)
         if spec.lip > 0 and not spec.gasket:
             lip = _rounded_box(L - 2 * lip_c, W - 2 * lip_c, spec.lip, max(r_in - lip_c, 0), z0=top - spec.lip)
@@ -499,12 +551,15 @@ def build(spec: BoxSpec) -> dict:
                 lid -= Cylinder(c / 2, spec.lid_thickness * 3).locate(Location((x, y, top + spec.lid_thickness / 2)))
                 cb = spec.lid_thickness / 2  # counterbore the heads half the lid's thickness
                 lid -= Cylinder(head / 2 + 0.3, cb).locate(Location((x, y, top + spec.lid_thickness - cb / 2)))
-        if spec.lid == "snap" and spec.lip > 0:
+        if spec.lid in ("snap", "hinge") and spec.lip > 0:
             rib, z_rib = 0.5, top - spec.lip + 1.0
-            for sy in (-1, 1):
+            for sy in ((-1, 1) if spec.lid == "snap" else (-1,)):
                 lid += Box(L * 0.6, rib * 2, 1.0).locate(Location((0, sy * (W / 2 - lip_c), z_rib)))
                 base -= Box(L * 0.6 + 2, (rib + lip_c) * 2, 1.0 + 2 * lip_c).locate(Location((0, sy * W / 2, z_rib)))
-            notes.append("snap lid: a 0.5 mm rib on each long side clicks into a groove in the wall")
+            if spec.lid == "snap":
+                notes.append("snap lid: a 0.5 mm rib on each long side clicks into a groove in the wall")
+        if spec.lid == "hinge":
+            lid, base = _hinge(spec, lid, base, top, oL, oW, notes, checks)
         notes.append(f"{spec.lid} lid, {spec.lid_thickness:g} mm"
                      + (f", {spec.lip:g} mm lip" if spec.lip and not spec.gasket else ""))
     elif spec.lid == "slide":
@@ -518,7 +573,7 @@ def build(spec: BoxSpec) -> dict:
         lid = Box(L + spec.wall - lip_c, W + 2 * g - 2 * lip_c, t).locate(Location((spec.wall / 2 - lip_c / 2, 0, z0 + t / 2)))
         notes.append(f"slide lid: {t:g} mm panel in {g:g} mm grooves, slides in from the +X end")
 
-    lid_top = (top + spec.lid_thickness) if spec.lid in ("screw", "friction", "snap") else None
+    lid_top = (top + spec.lid_thickness) if spec.lid in PLATE_LIDS else None
 
     def cut(target, tool):
         nonlocal base, lid
@@ -551,6 +606,12 @@ def build(spec: BoxSpec) -> dict:
                         checks.append(f"{c.preset} on {c.face}: its locknut (about Ø{2 * nut_r:.0f}) may hit the post or standoff at ({kx:g}, {ky:g})")
                 if height - nut_r < 0 or height + nut_r > H:
                     checks.append(f"{c.preset} on {c.face}: its locknut (about Ø{2 * nut_r:.0f}) runs into the floor or lid")
+        if c.preset == "iec-c14" and not 1.0 <= spec.wall <= 3.0 and c.face not in ("lid", "floor"):
+            checks.append(f"iec-c14 on {c.face}: snap-in inlets are made for 1 to 3 mm panels; this wall is {spec.wall:g} mm "
+                          f"(use a screw-mount inlet, or thin the wall there)")
+        if c.preset in FANS:
+            notes.append(f"{c.preset} on {c.face}: fan the right way round (air direction is moulded on its frame); "
+                         f"screw holes Ø{FANS[c.preset][1]:g} for the fan's screws")
         label = c.preset or f"{c.shape} {'x'.join(f'{v:g}' for v in c.size)}"
         notes.append(f"cutout {c.face} {label} at {c.at}" + (f" ({c.source})" if c.source else ""))
 
@@ -913,6 +974,13 @@ def write(spec: BoxSpec, folder: str | Path, stl: bool = True, formats=("step",)
             if made.get("supports"):
                 export_stl(Compound(children=made["supports"]), str(folder / "support_enforcers.stl"))
                 files["support_enforcers"] = str(folder / "support_enforcers.stl")
+    if "solidworks" in formats:
+        from .solidworks import macro
+        text, sw_skipped = macro(spec)
+        (folder / "enclosure_box.swb").write_text(text)
+        files["solidworks"] = str(folder / "enclosure_box.swb")
+        if sw_skipped:
+            made["checks"].append("not in the SolidWorks macro (STEP has them): " + ", ".join(sw_skipped))
     if "onshape" in formats:
         from .onshape import feature_studio
         text, skipped = feature_studio(spec)

@@ -1,0 +1,14 @@
+{
+  "name": "EncloSURE",
+  "short_name": "EncloSURE",
+  "description": "Enclosures for your boards, checked against the board before you print.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#f4f3ef",
+  "theme_color": "#c4501b",
+  "icons": [
+    {"src": "/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable"},
+    {"src": "/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any maskable"}
+  ]
+}

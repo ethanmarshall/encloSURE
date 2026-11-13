@@ -126,10 +126,11 @@ def test_describe_endpoint_and_cli(tmp_path):
 
 
 def test_onshape_push_calls(monkeypatch):
-    """The calls the Onshape push makes, against a stand-in for Onshape's API."""
+    """The calls the Onshape push and update make, against a stand-in for Onshape's API."""
     import urllib.request
     from enclosure import onshape_push
     calls = []
+    feats = []
 
     class R:
         def __init__(self, body):
@@ -143,19 +144,29 @@ def test_onshape_push_calls(monkeypatch):
 
     def fake(req, timeout=60):
         path, body = req.full_url.replace(onshape_push.BASE, ""), json.loads(req.data) if req.data else None
-        calls.append((req.get_method(), path, body))
+        m = req.get_method()
+        calls.append((m, path, body))
         auth = req.headers["Authorization"]
         assert auth.startswith("On k:HmacSHA256:") and len(req.headers["On-nonce"]) == 25 and req.headers["Date"].endswith("GMT")
         # The signature is HMAC-SHA256 of the documented string, keyed with the secret.
         import base64, hashlib, hmac
-        text = (f"{req.get_method()}\n{req.headers['On-nonce']}\n{req.headers['Date']}\napplication/json\n"
+        text = (f"{m}\n{req.headers['On-nonce']}\n{req.headers['Date']}\napplication/json\n"
                 f"{path}\n\n").lower()
         assert auth.split(":")[2] == base64.b64encode(hmac.new(b"s", text.encode(), hashlib.sha256).digest()).decode()
         if path == "/api/documents":
             return R({"id": "D1", "defaultWorkspace": {"id": "W1"}})
-        if req.get_method() == "POST" and path == "/api/featurestudios/d/D1/w/W1":
+        if m == "POST" and path == "/api/featurestudios/d/D1/w/W1":
             return R({"id": "E1"})
-        if req.get_method() == "GET":
+        if path == "/api/documents/d/D1/w/W1/elements":
+            return R([{"id": "E1", "elementType": "FEATURESTUDIO", "microversionId": "M2"},
+                      {"id": "P1", "elementType": "PARTSTUDIO", "microversionId": "M3"}])
+        if "/partstudios/" in path and path.endswith("/features") and m == "GET":
+            return R({"features": feats})
+        if "/partstudios/" in path and m == "POST":
+            fid = body["feature"].get("featureId", "F1")
+            feats[:] = [{"featureType": "enclosureBox", "featureId": fid}]
+            return R({"feature": {"featureId": fid}, "featureState": {"featureStatus": "OK"}})
+        if m == "GET":
             return R({"sourceMicroversion": "MV", "serializationVersion": "1.2.3"})
         return R({})
 
@@ -167,7 +178,21 @@ def test_onshape_push_calls(monkeypatch):
     monkeypatch.setenv("ONSHAPE_SECRET_KEY", "s")
     out = onshape_push.push("FeatureScript 3112;", "Box")
     assert out["feature_studio"].endswith("/documents/D1/w/W1/e/E1")
-    assert [c[:2] for c in calls] == [("POST", "/api/documents"), ("POST", "/api/featurestudios/d/D1/w/W1"),
-                                      ("GET", "/api/featurestudios/d/D1/w/W1/e/E1"), ("POST", "/api/featurestudios/d/D1/w/W1/e/E1")]
-    assert calls[-1][2] == {"contents": "FeatureScript 3112;", "serializationVersion": "1.2.3",
-                            "sourceMicroversion": "MV", "rejectMicroversionSkew": False}
+    assert out["document"].endswith("/documents/D1/w/W1/e/P1")
+    assert out["ids"] == {"did": "D1", "wid": "W1", "studio": "E1", "partstudio": "P1", "feature": "F1"}
+    assert ("POST", "/api/featurestudios/d/D1/w/W1/e/E1", {"contents": "FeatureScript 3112;", "serializationVersion": "1.2.3",
+            "sourceMicroversion": "MV", "rejectMicroversionSkew": False}) in calls
+    insert = [c for c in calls if c[1] == "/api/v9/partstudios/d/D1/w/W1/e/P1/features"][0]
+    assert insert[2]["feature"]["featureType"] == "enclosureBox" and insert[2]["feature"]["namespace"] == "eE1::mM2"
+    # Update: the same feature is changed in place, not added again.
+    calls.clear()
+    up = onshape_push.update(out["ids"], "FeatureScript 3112; // v2")
+    assert up["ids"]["feature"] == "F1"
+    assert ("POST", "/api/v9/partstudios/d/D1/w/W1/e/P1/features/featureid/F1") in [c[:2] for c in calls]
+    with pytest.raises(ValueError):
+        onshape_push.update({**out["ids"], "did": "../x"}, "x")
+    # Links to a Part Studio.
+    assert onshape_push.parse_link("https://cad.onshape.com/documents/" + "a" * 24 + "/w/" + "b" * 24 + "/e/" + "c" * 24) == \
+        ("a" * 24, "w", "b" * 24, "c" * 24)
+    with pytest.raises(ValueError):
+        onshape_push.parse_link("https://example.com/not-onshape")

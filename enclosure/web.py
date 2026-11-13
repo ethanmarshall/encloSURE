@@ -145,6 +145,19 @@ def page():
     return (STATIC / "index.html").read_text()
 
 
+# Installing the site as an app (Edge or Chrome: the install icon in the address bar).
+_APP_FILES = {"manifest.webmanifest": "application/manifest+json", "sw.js": "text/javascript",
+              "icon-192.png": "image/png", "icon-512.png": "image/png"}
+
+
+@app.get("/{name}", include_in_schema=False)
+def app_file(name: str):
+    if name not in _APP_FILES:
+        raise HTTPException(status_code=404, detail="not found")
+    return Response((STATIC / name).read_bytes(), media_type=_APP_FILES[name],
+                    headers={"Cache-Control": "no-cache"} if name == "sw.js" else {})
+
+
 @app.get("/api/presets")
 def presets():
     return {name: {"shape": s, "size": size, "radius": r, "source": src, "gland": name in GLANDS}
@@ -183,7 +196,8 @@ def _zip(folder: Path, name: str) -> Response:
 @app.post("/api/box")
 def make_box(body: dict):
     fmt = body.get("format", "step")
-    formats = {"step": ("step",), "onshape": ("onshape",), "both": ("step", "onshape")}.get(fmt)
+    formats = {"step": ("step",), "onshape": ("onshape",), "both": ("step", "onshape"),
+               "solidworks": ("step", "solidworks"), "all": ("step", "onshape", "solidworks")}.get(fmt)
     if formats is None:
         _bad(ValueError("format: step, onshape or both"))
     try:
@@ -248,9 +262,16 @@ async def _save(upload: UploadFile | None, path: Path) -> Path | None:
 
 
 async def _enclosure_from(d: Path, base: UploadFile | None, lid: UploadFile | None, box: str | None,
-                          sample: bool = False):
-    """The enclosure: uploaded STEPs, a quick box from the page's settings, or the sample."""
+                          sample: bool = False, onshape_url: str | None = None):
+    """The enclosure: uploaded STEPs, a quick box from the page's settings, an Onshape Part Studio,
+    or the sample."""
     from . import geom, samples, shell
+    if onshape_url:
+        from . import onshape_push, stock
+        step = onshape_push.export_step(onshape_url, d / "onshape.step")
+        b, l = stock.split(step)
+        enc, _ = shell.read(b, l)
+        return b, l, enc, "onshape"
     if sample:
         paths = samples.write(d / "sample")
         b, l = geom.load(paths["base"]), geom.load(paths["lid"])
@@ -271,14 +292,14 @@ async def _enclosure_from(d: Path, base: UploadFile | None, lid: UploadFile | No
 
 @app.post("/api/enclosure")
 async def enclosure_read(base: UploadFile | None = File(None), lid: UploadFile | None = File(None),
-                         box: str | None = Form(None), sample: bool = Form(False),
+                         box: str | None = Form(None), sample: bool = Form(False), onshape_url: str | None = Form(None),
                          clearance: float = Form(0.5), thickness: float = Form(1.6)):
     """What EncloSURE reads from the enclosure, and a KiCad board to start the design in."""
     from . import kicad
     try:
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
-            b, l, enc, name = await _enclosure_from(d, base, lid, box, sample)
+            b, l, enc, name = await _enclosure_from(d, base, lid, box, sample, onshape_url)
             out = {"name": name, "enclosure": enc.to_json(),
                    "base": base64.b64encode(_stl(b)).decode(),
                    "lid": base64.b64encode(_stl(l)).decode() if l is not None else None}
@@ -298,14 +319,16 @@ async def enclosure_read(base: UploadFile | None = File(None), lid: UploadFile |
 async def fit_check(board: UploadFile | None = File(None), base: UploadFile | None = File(None),
                     lid: UploadFile | None = File(None), box: str | None = Form(None),
                     pcb: UploadFile | None = File(None), parts: UploadFile | None = File(None),
-                    sample: bool = Form(False), clearance: float = Form(0.5),
+                    board2: UploadFile | None = File(None), pcb2: UploadFile | None = File(None),
+                    stack_gap: float = Form(11.0), stack_dx: float = Form(0.0), stack_dy: float = Form(0.0),
+                    sample: bool = Form(False), onshape_url: str | None = Form(None), clearance: float = Form(0.5),
                     opening_margin: float = Form(0.25), max_setback: float = Form(2.0), material: str = Form("PETG")):
     """Check a finished board (KiCad's STEP export) in its enclosure."""
     from . import fit as fitmod, geom, parts as partsmod, report
     try:
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
-            b, l, enc, name = await _enclosure_from(d, base, lid, box, sample)
+            b, l, enc, name = await _enclosure_from(d, base, lid, box, sample, onshape_url)
             if sample:
                 board_path = d / "sample" / "sample_board.step"
             else:
@@ -317,7 +340,8 @@ async def fit_check(board: UploadFile | None = File(None), base: UploadFile | No
             settings = fitmod.Settings(clearance=clearance, opening_margin=opening_margin, max_setback=max_setback)
             specs = partsmod.load(parts_path) if parts_path else {}
             footprints = partsmod.from_board(pcb_path) if pcb_path else None
-            result = fitmod.check(enc, b, l, geom.step_names(board_path), settings, None, specs, footprints)
+            solids, stack_notes = await _stacked(d, geom.step_names(board_path), board2, pcb2, stack_gap, stack_dx, stack_dy, specs)
+            result = fitmod.check(enc, b, l, solids, settings, None, specs, footprints)
             from . import tolerance
             tol = tolerance.stack(enc, result, tolerance.Tolerances(material=material))
             title = f"EncloSURE: {Path(board.filename).stem if board is not None and board.filename else name}"
@@ -331,7 +355,7 @@ async def fit_check(board: UploadFile | None = File(None), base: UploadFile | No
                     done = kicad.move_footprints(pcb_path, moves, d / "fixed.kicad_pcb")
                     fixed = {"kicad_pcb": (d / "fixed.kicad_pcb").read_text(), "moved": done,
                              "name": Path(pcb.filename).stem + "_fixed.kicad_pcb"}
-            return {"tolerances": tol, "fixed": fixed, "fits": j["fits"], "errors": j["errors"], "warnings": j["warnings"],
+            return {"stack_notes": stack_notes, "tolerances": tol, "fixed": fixed, "fits": j["fits"], "errors": j["errors"], "warnings": j["warnings"],
                     "placement": j["placement"], "headroom": j["headroom"], "findings": j["findings"],
                     "punch_list": Path(files["punch_list"]).read_text(),
                     "report": json.loads(Path(files["report"]).read_text()),
@@ -425,6 +449,23 @@ def to_onshape(body: dict):
         _bad(e)
 
 
+@app.post("/api/onshape/update")
+def onshape_update(body: dict):
+    """Change the box in the Onshape document Send made, keeping the user's later features."""
+    from . import onshape, onshape_push
+    ids = body.pop("onshape_ids", None)
+    if not isinstance(ids, dict):
+        _bad(ValueError("no Onshape document to update: send the box first"))
+    try:
+        spec = spec_from(body)
+        text, skipped = onshape.feature_studio(spec)
+        out = onshape_push.update(ids, text)
+        out["skipped"] = skipped
+        return out
+    except (ValueError, RuntimeError, KeyError) as e:
+        _bad(e)
+
+
 @app.get("/api/health")
 def health():
     from . import drawing
@@ -492,6 +533,42 @@ def make_assembly(body: dict):
         _bad(e)
 
 
+def _costed(spec, body):
+    from . import assembly, costing
+    made = boxmod.build(spec)
+    _, bom = assembly.exploded(spec, made)
+    try:
+        per_kg = float(body.get("filament_per_kg") or costing.FILAMENT_PER_KG)
+    except (TypeError, ValueError):
+        per_kg = costing.FILAMENT_PER_KG
+    return made, costing.price(bom, made.get("estimate"), per_kg)
+
+
+@app.post("/api/bom")
+def costed_bom(body: dict):
+    """The parts list with DigiKey suggestions and prices, and the plastic's cost."""
+    try:
+        _, cost = _costed(spec_from(body), body)
+        return cost
+    except (ValueError, RuntimeError) as e:
+        _bad(e)
+
+
+@app.post("/api/summary")
+def summary_pdf(body: dict):
+    """A one-page PDF of the box: picture, sizes, costed parts, print plan, checks."""
+    from . import summary
+    try:
+        spec = spec_from(body)
+        made, cost = _costed(spec, body)
+        title = str((body.get("title") or {}).get("title") or "EncloSURE box")[:60]
+        pdf = summary.make(spec, made, cost, None, title, "in" if body.get("units") == "in" else "mm")
+        return Response(pdf, media_type="application/pdf",
+                        headers={"Content-Disposition": 'attachment; filename="enclosure_summary.pdf"'})
+    except (ValueError, RuntimeError) as e:
+        _bad(e)
+
+
 @app.get("/api/coupon")
 def fit_coupon():
     from . import coupon
@@ -500,9 +577,25 @@ def fit_coupon():
         return _zip(Path(d), "fit_test_coupon")
 
 
+async def _stacked(d: Path, solids: list, board2, pcb2, gap: float, dx: float, dy: float, specs: dict):
+    """The board with a second one stacked on it, when a second board was uploaded."""
+    from . import frompcb
+    step2 = await _save(board2, d / "board2.step")
+    pcb2_path = await _save(pcb2, d / "board2.kicad_pcb")
+    if step2 is None and pcb2_path is None:
+        return solids, []
+    if not 0 <= gap <= 100:
+        raise ValueError("stack_gap: 0 to 100 mm between the boards")
+    top, notes = frompcb.board_solids(step2, pcb2_path if step2 is None else None, specs)
+    out, more = frompcb.stack(solids, top, gap, (dx, dy))
+    return out, notes + more
+
+
 @app.post("/api/frompcb")
 async def from_board(board: UploadFile | None = File(None), pcb: UploadFile | None = File(None),
                      parts: UploadFile | None = File(None), lid: str = Form("screw"), wall: float = Form(2.0),
+                     board2: UploadFile | None = File(None), pcb2: UploadFile | None = File(None),
+                     stack_gap: float = Form(11.0), stack_dx: float = Form(0.0), stack_dy: float = Form(0.0),
                      edge_gap: float = Form(1.0), standoff_height: float = Form(5.0), headroom: float = Form(2.0)):
     """A quick box designed around a board, checked with the board in it."""
     from . import frompcb, parts as partsmod
@@ -514,12 +607,10 @@ async def from_board(board: UploadFile | None = File(None), pcb: UploadFile | No
             parts_path = await _save(parts, d / "parts.json")
             st = frompcb.Settings(lid=lid, wall=wall, edge_gap=edge_gap, standoff_height=standoff_height, headroom=headroom)
             specs = partsmod.load(parts_path) if parts_path else {}
-            if step is not None:
-                r = frompcb.make(step, st, specs, partsmod.from_board(pcb_path) if pcb_path else None)
-            elif pcb_path is not None:
-                r = frompcb.from_kicad(pcb_path, st, specs)
-            else:
-                raise ValueError("upload the board's STEP, or its .kicad_pcb")
+            solids, first_notes = frompcb.board_solids(step, pcb_path if step is None else None, specs)
+            solids, stack_notes = await _stacked(d, solids, board2, pcb2, stack_gap, stack_dx, stack_dy, specs)
+            r = frompcb.make(solids, st, specs, partsmod.from_board(pcb_path) if step is not None and pcb_path else None)
+            r["notes"] = first_notes + stack_notes + r["notes"]
             j = r["fit"].to_json()
             return {"spec": asdict(r["spec"]), "notes": r["notes"], "fits": j["fits"], "errors": j["errors"],
                     "warnings": j["warnings"], "findings": j["findings"]}

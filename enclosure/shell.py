@@ -226,6 +226,9 @@ def openings_of(base: Shape, cavity: Shape, walls=None) -> list[Opening]:
                 width = wx1 - wx0
             else:
                 continue
+            # Only a hole in a wall round the cavity (not a hinge knuckle's pin hole outside it).
+            if (wall in ("-X", "+X") and not cy0 < mid[1] < cy1) or (wall in ("-Y", "+Y") and not cx0 < mid[0] < cx1):
+                continue
             # Only a hole through the wall: a groove (a snap lid's, a slide lid's) is not one.
             start = Vector(*mid) - n * 0.05
             if solid_at(base, start, start - n * (thick + 1.0)):

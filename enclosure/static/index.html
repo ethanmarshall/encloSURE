@@ -4,6 +4,10 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>EncloSURE</title>
+<link rel="manifest" href="manifest.webmanifest" crossorigin="use-credentials">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<meta name="theme-color" content="#c4501b">
 <style>
   :root {
     --bg: #f4f3ef; --panel: #ffffff; --ink: #1d1f21; --muted: #676b70; --line: #dcdad3; --soft: #f8f7f4;
@@ -143,8 +147,20 @@
       <label class="f">The .kicad_pcb (optional: parts with no 3D model)<input type="file" name="fp_pcb" accept=".kicad_pcb"></label>
       <label class="f">parts.json (optional: sizes and datasheet panel cutouts)<input type="file" name="fp_parts" accept=".json"></label>
     </div>
+    <details style="margin-top:6px">
+      <summary>A second board stacked on it (a HAT or shield)</summary>
+      <div class="grid g1">
+        <label class="f">Second board's STEP, or its .kicad_pcb<input type="file" name="fp_board2" accept=".step,.stp,.kicad_pcb"></label>
+      </div>
+      <div class="grid">
+        <label class="f">Gap between the boards<span class="unit" data-unit="mm"><input name="fp_stack_gap" type="number" min="0" step="0.5" value="11"></span></label>
+        <label class="f">Shifted in X<span class="unit" data-unit="mm"><input name="fp_stack_dx" type="number" step="0.5" value="0"></span></label>
+        <label class="f">Shifted in Y<span class="unit" data-unit="mm"><input name="fp_stack_dy" type="number" step="0.5" value="0"></span></label>
+      </div>
+      <p class="hint">The gap is from the first board's top to the second's bottom (11 mm for a Raspberry Pi HAT on its usual spacers; check yours). The second board sits on the first; its parts count for room and openings, named like J1/top.</p>
+    </details>
     <div class="grid">
-      <label class="f">Lid<select name="fp_lid"><option value="screw">Screw-down</option><option value="friction">Press-fit</option><option value="snap">Snap-fit</option><option value="none">No lid</option></select></label>
+      <label class="f">Lid<select name="fp_lid"><option value="screw">Screw-down</option><option value="friction">Press-fit</option><option value="snap">Snap-fit</option><option value="hinge">Hinged, snap latch</option><option value="none">No lid</option></select></label>
       <label class="f">Edge gap<span class="unit" data-unit="mm"><input name="fp_gap" type="number" min="0.3" step="0.1" value="1"></span></label>
       <label class="f">Headroom<span class="unit" data-unit="mm"><input name="fp_head" type="number" min="0" step="0.5" value="2"></span></label>
     </div>
@@ -176,6 +192,7 @@
         <option value="screw">Screw-down</option>
         <option value="friction">Press-fit</option>
         <option value="snap">Snap-fit</option>
+        <option value="hinge">Hinged, snap latch</option>
         <option value="slide">Slide-in panel</option>
         <option value="clamshell">Clamshell (two shells)</option>
         <option value="none">No lid</option>
@@ -356,17 +373,30 @@
       <button class="plain" type="button" id="asmbtn">Exploded assembly + parts list</button></div>
   </fieldset>
 
+  <fieldset>
+    <legend>Cost and summary</legend>
+    <p class="hint">Prices each piece of hardware from DigiKey (its first in-stock match: check before ordering) and the plastic from the weight estimate.</p>
+    <div class="grid g2">
+      <label class="f">Filament price<span class="unit" data-unit="$/kg"><input name="filament_per_kg" type="number" min="1" step="1" value="25"></span></label>
+    </div>
+    <div class="links"><button class="plain" type="button" id="bombtn">Price the parts</button>
+      <button class="plain" type="button" id="sumbtn">One-page summary PDF</button></div>
+    <div id="bomout"></div>
+  </fieldset>
+
   <div class="actions">
     <div class="seg" role="radiogroup" aria-label="Download as">
       <input type="radio" name="format" id="f-step" value="step" checked><label for="f-step">STEP</label>
       <input type="radio" name="format" id="f-onshape" value="onshape"><label for="f-onshape">Onshape</label>
       <input type="radio" name="format" id="f-both" value="both"><label for="f-both">Both</label>
+      <input type="radio" name="format" id="f-sw" value="solidworks"><label for="f-sw" title="STEP plus a SolidWorks macro that builds the box as editable features">+ SolidWorks</label>
     </div>
     <label class="check" style="margin:0"><input name="stl" type="checkbox" checked> STL</label>
     <button class="go" type="submit">Download</button>
     <div class="links small" style="width:100%;margin:0">
       <button class="plain" type="button" id="tofit">Fit a board in it</button>
       <button class="plain" type="button" id="toonshape" hidden>Send to Onshape</button>
+      <button class="plain" type="button" id="updonshape" hidden>Update in Onshape</button>
       <button class="plain" type="button" id="sharebtn">Copy share link</button>
       <button class="plain" type="button" id="openbtn">Open box.json</button>
       <button class="plain" type="button" id="savebtn">Save version</button>
@@ -385,6 +415,7 @@
     <details id="versions" style="width:100%" hidden>
       <summary>Saved versions (in this browser)</summary>
       <div id="verlist"></div>
+      <div id="verdiff" class="hint" style="margin-top:6px"></div>
     </details>
   </div>
 </form>
@@ -397,6 +428,7 @@
     <div class="seg full" role="radiogroup" aria-label="Enclosure">
       <input type="radio" name="src" id="src-box" value="box" checked><label for="src-box">My quick box</label>
       <input type="radio" name="src" id="src-up" value="upload"><label for="src-up">Upload STEP</label>
+      <span id="src-os-wrap" hidden style="display:contents"><input type="radio" name="src" id="src-os" value="onshape"><label for="src-os">Onshape link</label></span>
       <input type="radio" name="src" id="src-sample" value="sample"><label for="src-sample">Try the sample</label>
     </div>
     <div data-src="upload">
@@ -407,6 +439,10 @@
       <p class="hint">Export both from the same assembly in Onshape or SolidWorks so they line up. Without the lid, part heights are checked to the top of the walls.</p>
     </div>
     <p class="hint" data-src="box">Uses the box on the Quick box tab, as it is now.</p>
+    <div data-src="onshape">
+      <div class="grid g1"><label class="f">Link to the Part Studio holding the base and lid<input name="os_url" placeholder="https://cad.onshape.com/documents/.../w/.../e/..."></label></div>
+      <p class="hint">Copy the link from the browser while the Part Studio is open. The base should stand opening up; a lid in the same studio is found by its shape.</p>
+    </div>
     <p class="hint" data-src="sample">A sample enclosure with a board that has four planted problems.</p>
     <div class="grid g2">
       <label class="f">Board edge to walls<span class="unit" data-unit="mm"><input name="board_clearance" type="number" min="0" step="0.1" value="0.5"></span></label>
@@ -430,6 +466,18 @@
         <label class="f">The .kicad_pcb (optional: checks parts that have no 3D model)<input type="file" name="pcb" accept=".kicad_pcb"></label>
         <label class="f">parts.json (optional: datasheet sizes and panel cutouts)<input type="file" name="parts" accept=".json"></label>
       </div>
+      <details style="margin-top:6px">
+        <summary>A second board stacked on it (a HAT or shield)</summary>
+        <div class="grid g1">
+          <label class="f">Second board's STEP, or its .kicad_pcb<input type="file" name="board2" accept=".step,.stp,.kicad_pcb"></label>
+        </div>
+        <div class="grid">
+          <label class="f">Gap between the boards<span class="unit" data-unit="mm"><input name="stack_gap" type="number" min="0" step="0.5" value="11"></span></label>
+          <label class="f">Shifted in X<span class="unit" data-unit="mm"><input name="stack_dx" type="number" step="0.5" value="0"></span></label>
+          <label class="f">Shifted in Y<span class="unit" data-unit="mm"><input name="stack_dy" type="number" step="0.5" value="0"></span></label>
+        </div>
+        <p class="hint">The gap is from the first board's top to the second's bottom (11 mm for a Raspberry Pi HAT on its usual spacers; check yours). The second board sits on the first; its parts count for room and openings, named like J1/top.</p>
+      </details>
     </div>
     <p class="hint" data-src="sample">The sample board is used.</p>
     <details>
@@ -518,6 +566,8 @@ const GROUPS = [
   ["Connectors", ["usb-c", "keystone", "m8-panel", "m12-panel", "dc-barrel-snap", "sma-bulkhead", "bnc-bulkhead"]],
   ["Buttons and switches", ["pushbutton-22", "toggle-1/4", "toggle-15/32"]],
   ["Cable glands", ["pg7", "pg9", "pg11", "pg13.5", "pg16", "pg21", "m12", "m16", "m20", "m25"]],
+  ["Power", ["iec-c14", "fuse-5x20"]],
+  ["Fans (opening and 4 screw holes)", ["fan-40", "fan-60", "fan-80"]],
   ["Other", ["drain"]],
 ];
 const NAMES = {
@@ -525,6 +575,7 @@ const NAMES = {
   "pushbutton-22": "22 mm pushbutton or pilot light", "toggle-1/4": "Toggle switch, 1/4\" bushing", "toggle-15/32": "Toggle switch, 15/32\" bushing",
   "pg7": "PG7 gland", "pg9": "PG9 gland", "pg11": "PG11 gland", "pg13.5": "PG13.5 gland", "pg16": "PG16 gland", "pg21": "PG21 gland",
   "m12": "M12 gland or vent plug", "m16": "M16 gland", "m20": "M20 gland", "m25": "M25 gland", "drain": "Drain or breather hole",
+  "iec-c14": "IEC C14 mains inlet (snap-in)", "fuse-5x20": "Panel fuse holder, 5 x 20 mm", "fan-40": "40 mm fan", "fan-60": "60 mm fan", "fan-80": "80 mm fan",
 };
 let PRESETS = {};
 
@@ -819,6 +870,15 @@ function empty(text) { $("#empty").hidden = !text; $("#empty").textContent = tex
 // ---------- Report panel ----------
 const report = $("#report");
 const msg = (cls, text, fix) => h("div", { class: "msg " + cls }, text, fix ? h("span", { class: "fix" }, fix) : null);
+// Report text from the server is in mm: in inch mode, "12 x 4.5 mm" reads "0.472 x 0.177 in", and Ø/mm3 too.
+function inUnits(text) {
+  if (U === 1 || typeof text !== "string") return text;
+  const n = x => +(parseFloat(x) / 25.4).toFixed(3);
+  return text
+    .replace(/(-?\d+(?:\.\d+)?)\s?mm(?:\u00b3|3\b)/g, (_, v) => `${+(parseFloat(v) / 16387.064).toFixed(4)} in³`)
+    .replace(/((?:[Ø±]?-?\d+(?:\.\d+)?\s*(?:x|×|to|-)\s*)*[Ø±]?-?\d+(?:\.\d+)?)\s?mm\b/g,
+      (_, run) => run.replace(/-?\d+(?:\.\d+)?/g, m => String(n(m))) + " in");
+}
 function boxReport(data, error) {
   report.replaceChildren();
   if (error) return report.append(msg("err", error));
@@ -829,13 +889,13 @@ function boxReport(data, error) {
     const fb = fromBoard;
     report.append(fb.described ? msg("ok", "Here's a first box. What it assumed:") : fb.fits ? msg("ok", "Made around your board, and the board fits." + (fb.warnings ? ` ${fb.warnings} warning(s) below.` : ""))
       : msg("err", `Made around your board, but the check found ${fb.errors} problem(s): ` + fb.findings.filter(f => f.severity === "error").map(f => `${f.subject}: ${f.message}`).join("; ")));
-    report.append(h("ul", { class: "notes" }, fb.notes.map(n => h("li", {}, n))));
+    report.append(h("ul", { class: "notes" }, fb.notes.map(n => h("li", {}, inUnits(n)))));
     fromBoard = null;
   }
-  for (const c of data.checks) report.append(msg("warn", c));
+  for (const c of data.checks) report.append(msg("warn", inUnits(c)));
   if (data.print_plan) report.append(h("div", { class: "hint" }, "Print the base " + data.print_plan.base +
     (data.print_plan.lid ? "; the lid " + data.print_plan.lid : "") + "."));
-  if (data.notes.length) report.append(h("ul", { class: "notes" }, data.notes.map(n => h("li", {}, n))));
+  if (data.notes.length) report.append(h("ul", { class: "notes" }, data.notes.map(n => h("li", {}, inUnits(n)))));
 }
 
 // ---------- Quick box ----------
@@ -887,7 +947,8 @@ async function refresh() {
   } catch (err) { if (mine === seq && tab === "box") { boxReport(null, String(err)); $("#status").textContent = ""; } }
 }
 function later() { clearTimeout(timer); timer = setTimeout(refresh, 450); }
-const outsideBox = ev => ev.target.closest && ev.target.closest("#startboard, #describe, [data-drawing], #library");
+const outsideBox = ev => ev.target.closest && ev.target.closest("#startboard, #describe, [data-drawing], #library, #bomout") ||
+  (ev.target.name === "filament_per_kg");
 boxform.addEventListener("input", ev => outsideBox(ev) || later()); boxform.addEventListener("change", ev => outsideBox(ev) || later());
 
 async function download(res, fallback) {
@@ -970,12 +1031,18 @@ function applySpec(sp) {
   sync(); refresh();
 }
 
+function setStack(fd, e, pre) {
+  const f = e[pre + "board2"].files[0]; if (!f) return;
+  fd.set(/\.kicad_pcb$/i.test(f.name) ? "pcb2" : "board2", f);
+  fd.set("stack_gap", len(e[pre + "stack_gap"])); fd.set("stack_dx", len(e[pre + "stack_dx"])); fd.set("stack_dy", len(e[pre + "stack_dy"]));
+}
 $("#fpbtn").onclick = async () => {
   const e = boxform.elements;
   if (!e.fp_board.files.length && !e.fp_pcb.files.length) { boxReport(null, "Choose the board's STEP or its .kicad_pcb first."); return; }
   const fd = new FormData();
   if (e.fp_board.files.length) fd.set("board", e.fp_board.files[0]); if (e.fp_parts.files.length) fd.set("parts", e.fp_parts.files[0]);
   if (e.fp_pcb.files.length) fd.set("pcb", e.fp_pcb.files[0]);
+  setStack(fd, e, "fp_");
   fd.set("lid", e.fp_lid.value); fd.set("edge_gap", len(e.fp_gap)); fd.set("headroom", len(e.fp_head));
   await busy($("#fpbtn"), "Designing...", async () => {
     $("#status").textContent = "Designing the box around your board...";
@@ -1016,6 +1083,29 @@ $("#dwbtn").onclick = async () => {
     if (r.error) boxReport(null, r.error);
   });
 };
+$("#bombtn").onclick = async () => {
+  const body = { ...boxBody(), filament_per_kg: num(boxform.elements.filament_per_kg.value) };
+  await busy($("#bombtn"), "Pricing...", async () => {
+    const res = await fetch("api/bom", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    if (!res.ok) { boxReport(null, await errorOf(res)); return; }
+    const c = await res.json();
+    $("#bomout").replaceChildren(h("div", { class: "summary" }, h("table", {},
+      c.rows.map(r => h("tr", {}, h("td", {}, `${r.qty} ×`), h("td", {}, r.item,
+        r.mpn ? h("div", { class: "hint", style: "margin:0" }, r.url ? h("a", { href: r.url, target: "_blank", rel: "noopener" }, `${r.manufacturer} ${r.mpn}`) : `${r.manufacturer} ${r.mpn}`) : null),
+        h("td", { style: "text-align:right" }, r.line != null ? `$${r.line.toFixed(2)}` : r.make === "make" ? "printed" : ""))),
+      c.plastic != null ? h("tr", {}, h("td", {}), h("td", {}, `Plastic at $${c.filament_per_kg}/kg`), h("td", { style: "text-align:right" }, `$${c.plastic.toFixed(2)}`)) : null,
+      h("tr", {}, h("td", {}), h("td", {}, h("b", {}, "Total")), h("td", { style: "text-align:right" }, h("b", {}, `$${c.total.toFixed(2)}`)))),
+      ...[c.caveat, ...c.notes].filter(Boolean).map(n => h("div", { class: "hint" }, n))));
+  });
+};
+$("#sumbtn").onclick = async () => {
+  const e = boxform.elements;
+  const body = { ...boxBody(), filament_per_kg: num(e.filament_per_kg.value), units: UNIT(), title: { title: e.dw_title.value } };
+  await busy($("#sumbtn"), "Making...", async () => {
+    const r = await download(await fetch("api/summary", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), "enclosure_summary.pdf");
+    if (r.error) boxReport(null, r.error);
+  });
+};
 $("#asmbtn").onclick = async () => {
   const body = { ...boxBody(), standard: boxform.elements.dw_standard.value };
   await busy($("#asmbtn"), "Drawing...", async () => {
@@ -1028,15 +1118,33 @@ $("#asmbtn").onclick = async () => {
 fetch("api/health").then(r => r.json()).then(hh => {
   if (!hh.draftwright) for (const el of $$("[data-drawing]")) el.hidden = true;
   if (hh.library) { $("#library").hidden = false; loadLibrary(); }
-  if (hh.onshape) $("#toonshape").hidden = false;
+  if (hh.onshape) { $("#toonshape").hidden = false; $("#updonshape").hidden = !osDoc(); $("#src-os-wrap").hidden = false; }
 }).catch(() => {});
+// The Onshape document the last Send made, so Update changes the same one.
+const OS_KEY = "enclosure.onshape.v1";
+const osDoc = () => { try { return JSON.parse(localStorage.getItem(OS_KEY) || "null"); } catch { return null; } };
+function showOnshape(d, verb) {
+  $("#sharestate").replaceChildren(`${verb} in Onshape: `, h("a", { href: d.document, target: "_blank", rel: "noopener" }, "open it"),
+    d.status && d.status !== "OK" ? ` (Onshape says the feature is ${d.status})` : "",
+    ". Your own features after EncloSURE Box stay when you update." + (d.skipped.length ? ` Not in the feature: ${d.skipped.join(", ")}.` : ""));
+}
 $("#toonshape").onclick = async () => {
   await busy($("#toonshape"), "Sending...", async () => {
     const res = await fetch("api/onshape", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(boxBody()) });
     if (!res.ok) { boxReport(null, await errorOf(res)); return; }
     const d = await res.json();
-    $("#sharestate").replaceChildren("In Onshape: ", h("a", { href: d.document, target: "_blank", rel: "noopener" }, "open the document"),
-      ". Insert EncloSURE Box in its Part Studio." + (d.skipped.length ? ` Not in the feature: ${d.skipped.join(", ")}.` : ""));
+    try { localStorage.setItem(OS_KEY, JSON.stringify({ ids: d.ids, document: d.document })); } catch {}
+    $("#updonshape").hidden = false;
+    showOnshape(d, "Sent");
+  });
+};
+$("#updonshape").onclick = async () => {
+  const doc = osDoc(); if (!doc) return;
+  await busy($("#updonshape"), "Updating...", async () => {
+    const res = await fetch("api/onshape/update", { method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ ...boxBody(), onshape_ids: doc.ids }) });
+    if (!res.ok) { boxReport(null, await errorOf(res)); return; }
+    showOnshape(await res.json(), "Updated");
   });
 };
 async function loadLibrary() {
@@ -1089,8 +1197,32 @@ function showVersions() {
   $("#verlist").replaceChildren(...list.map((v, i) => h("div", { class: "links", style: "align-items:center;margin:4px 0" },
     h("span", { style: "flex:1;font-size:12.5px" }, h("b", {}, v.name), h("span", { class: "hint" }, ` · ${new Date(v.at).toLocaleString()}`)),
     h("button", { class: "plain", type: "button", onclick: () => { reframe = true; applySpec(v.design); $("#sharestate").textContent = `Opened "${v.name}".`; } }, "Open"),
+    h("button", { class: "plain", type: "button", title: "What changed between this version and the box on the page now", onclick: () => showDiff(v.name, v.design, "now", designOf()) }, "Compare"),
     h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([JSON.stringify(v.design, null, 2)], { type: "application/json" }), `${v.name.replace(/[^\w.-]+/g, "_")}.box.json`) }, "Download"),
     h("button", { class: "plain", type: "button", "aria-label": `Delete ${v.name}`, onclick: () => { const l = versions(); l.splice(i, 1); keepVersions(l); showVersions(); } }, "Delete"))));
+}
+// Comparing two designs: every setting that differs, by name, with lengths in the page's units.
+function flat(o, pre = "", out = {}) {
+  if (Array.isArray(o) && o.every(v => typeof v !== "object" || v === null)) { out[pre] = o; return out; }
+  if (o && typeof o === "object") { for (const [k, v] of Object.entries(o)) flat(v, pre ? `${pre}.${k}` : k, out); return out; }
+  out[pre] = o; return out;
+}
+function shown(v, key = "") {
+  const plain = /power|count|split|material|screw|cell|axis|text|font|shape|face|preset|infill|teardrop|ribs/.test(key);
+  const n = x => typeof x === "number" && U !== 1 && !plain ? +(x / U).toFixed(3) : x;
+  return Array.isArray(v) ? v.map(n).join(" x ") : typeof v === "object" && v !== null ? JSON.stringify(v) : String(n(v));
+}
+function showDiff(nameA, a, nameB, b) {
+  const fa = flat(a), fb = flat(b);
+  const keys = [...new Set([...Object.keys(fa), ...Object.keys(fb)])].sort();
+  const rows = keys.filter(k => JSON.stringify(fa[k]) !== JSON.stringify(fb[k]));
+  const out = $("#verdiff");
+  if (!rows.length) { out.replaceChildren(`"${nameA}" and the box ${nameB === "now" ? "on the page now" : nameB} are the same.`); return; }
+  out.replaceChildren(h("div", {}, h("b", {}, `${rows.length} difference${rows.length > 1 ? "s" : ""}`), ` between "${nameA}" and ${nameB === "now" ? "the box now" : nameB} (lengths in ${U === 1 ? "mm" : "inches"}):`),
+    h("table", { style: "font-size:12px;border-collapse:collapse;margin-top:4px" },
+      h("tr", {}, h("th", { style: "text-align:left;padding:2px 8px 2px 0" }, "Setting"), h("th", { style: "text-align:left;padding:2px 8px" }, "Then"), h("th", { style: "text-align:left;padding:2px 8px" }, "Now")),
+      ...rows.map(k => h("tr", {}, h("td", { style: "padding:2px 8px 2px 0" }, k.replace(/_/g, " ")),
+        h("td", { style: "padding:2px 8px" }, k in fa ? shown(fa[k], k) : "(none)"), h("td", { style: "padding:2px 8px" }, k in fb ? shown(fb[k], k) : "(none)")))));
 }
 $("#savebtn").onclick = () => {
   const name = `${boxform.elements.L.value} x ${boxform.elements.W.value} x ${boxform.elements.H.value} ${boxform.elements.lid.value} lid`;
@@ -1114,6 +1246,10 @@ function fitData(withBoard) {
   const e = fitform.elements, fd = new FormData(), src = e.src.value;
   if (src === "sample") fd.set("sample", "true");
   else if (src === "box") fd.set("box", JSON.stringify(boxBody()));
+  else if (src === "onshape") {
+    if (!e.os_url.value.trim()) throw new Error("Paste the Part Studio's link first.");
+    fd.set("onshape_url", e.os_url.value.trim());
+  }
   else {
     if (!e.base.files.length) throw new Error("Choose the enclosure's base STEP first.");
     fd.set("base", e.base.files[0]); if (e.lid.files.length) fd.set("lid", e.lid.files[0]);
@@ -1124,6 +1260,7 @@ function fitData(withBoard) {
       fd.set("board", e.board.files[0]);
       if (e.pcb.files.length) fd.set("pcb", e.pcb.files[0]);
       if (e.parts.files.length) fd.set("parts", e.parts.files[0]);
+      setStack(fd, e, "");
     }
     for (const k of ["clearance", "opening_margin", "max_setback"]) fd.set(k, len(e[k]));
   } else {
@@ -1182,13 +1319,13 @@ fitform.addEventListener("submit", async ev => {
     $("#fitview").srcdoc = d.view; showFitView(true);
     const verdict = d.fits ? msg("ok verdict", d.warnings ? `It fits, with ${d.warnings} thing${d.warnings > 1 ? "s" : ""} to look at.` : "It fits.")
       : msg("err verdict", `It does not fit: ${d.errors} problem${d.errors > 1 ? "s" : ""}${d.warnings ? `, ${d.warnings} warning${d.warnings > 1 ? "s" : ""}` : ""}.`);
-    const items = d.findings.map(f => msg(f.severity === "error" ? "err" : "warn", h("span", {}, h("b", {}, f.subject + ": "), f.message),
-      [f.fix ? f.fix[0].toUpperCase() + f.fix.slice(1) + "." : "", f.kicad_move ? `In KiCad, move it X ${f.kicad_move[0] >= 0 ? "+" : ""}${fmt(f.kicad_move[0])}, Y ${f.kicad_move[1] >= 0 ? "+" : ""}${fmt(f.kicad_move[1])} mm.` : ""].filter(Boolean).join(" ")));
-    const place = d.placement ? h("div", { class: "hint" }, `Board placed: ${d.placement.how}.`) : null;
+    const items = d.findings.map(f => msg(f.severity === "error" ? "err" : "warn", h("span", {}, h("b", {}, f.subject + ": "), inUnits(f.message)),
+      [f.fix ? inUnits(f.fix[0].toUpperCase() + f.fix.slice(1)) + "." : "", f.kicad_move ? `In KiCad, move it X ${f.kicad_move[0] >= 0 ? "+" : ""}${fmt(f.kicad_move[0])}, Y ${f.kicad_move[1] >= 0 ? "+" : ""}${fmt(f.kicad_move[1])} mm.` : ""].filter(Boolean).join(" ")));
+    const place = d.placement ? h("div", { class: "hint" }, `Board placed: ${inUnits(d.placement.how)}.` + (d.stack_notes && d.stack_notes.length ? " " + d.stack_notes.map(inUnits).join(". ") + "." : "")) : null;
     const tol = d.tolerances ? h("details", {}, h("summary", {}, `Worst-case gaps (${d.tolerances.findings.length ? d.tolerances.findings.length + " tight" : "all fine"})`),
       h("div", { class: "summary" }, h("table", {}, d.tolerances.rows.map(r => h("tr", {}, h("td", {}, r.what),
         h("td", {}, r.nominal !== undefined ? `${fmt(r.nominal)} mm, worst ${fmt(r.worst)} mm` : `hole play ${fmt(r.float)} mm, worst error ${fmt(r.worst_misplacement)} mm`))))),
-      ...d.tolerances.findings.map(f => msg("warn", `${f.subject}: ${f.message}`, f.fix))) : null;
+      ...d.tolerances.findings.map(f => msg("warn", `${f.subject}: ${inUnits(f.message)}`, inUnits(f.fix)))) : null;
     report.replaceChildren(verdict, place, ...items, tol, h("div", { class: "links" },
       h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([d.punch_list], { type: "text/markdown" }), "punch_list.md") }, "Punch list"),
       h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([JSON.stringify(d.report, null, 2)], { type: "application/json" }), "report.json") }, "report.json"),
@@ -1250,6 +1387,9 @@ fetch("api/presets").then(r => r.json()).then(p => {
   }
 });
 sync();
+</script>
+<script>
+if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
 </script>
 </body>
 </html>

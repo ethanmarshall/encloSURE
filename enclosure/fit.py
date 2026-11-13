@@ -328,12 +328,13 @@ def check(enc: Enclosure, base: Shape, lid: Shape | None, board,
             findings.append(_f("warning", "low_headroom", part.name, f"{room:.2f} mm under the "
                                f"{'lid' if enc.lid_underside is not None else 'rim'}"))
         for side, gap in (("-X", x0 - wx0), ("+X", wx1 - x1), ("-Y", y0 - wy0), ("+Y", wy1 - y1)):
-            if gap < settings.wall_reach:
+            if gap < settings.wall_reach and not part.name.upper().startswith("PCB"):  # a stacked board's plate
                 near_wall.setdefault(side, []).append(part)
         rows.append(row)
 
     # 4. Openings: what sits behind each.
     behind = set()
+    empty: dict[str, list] = {}  # wall openings with nothing behind them
     for o in enc.openings:
         if o.wall in ("-X", "+X", "-Y", "+Y"):
             axis = 0 if o.wall in ("-X", "+X") else 1
@@ -348,6 +349,7 @@ def check(enc: Enclosure, base: Shape, lid: Shape | None, board,
                     if best is None or overlap > best[0]:
                         best = (overlap, part, (a0, a1), (z0, z1))
             if best is None:
+                empty.setdefault(o.wall, []).append(o)
                 findings.append(_f("warning", "opening_empty", f"{o.wall} opening at {_xyz(o.center)}",
                                    f"{o.width:.2f} × {o.height:.2f} mm, nothing behind it"))
                 continue
@@ -417,9 +419,25 @@ def check(enc: Enclosure, base: Shape, lid: Shape | None, board,
     # 5. Connectors at a wall with no opening.
     for side, ps in near_wall.items():
         for part in ps:
-            if part.name.upper().startswith(("J", "USB", "P")) and part.name not in behind:
+            if part.name.upper().startswith(("J", "USB", "P")) and not part.name.upper().startswith("PCB") and part.name not in behind:
+                # An empty opening on the same wall: line the connector up with the nearest one.
+                along = 1 if side in ("-X", "+X") else 0
+                (a0, a1), (z0, z1) = _span(part.shape, along), _span(part.shape, 2)
+                spare = sorted(empty.get(side, []), key=lambda o: abs(o.center[along] - (a0 + a1) / 2))
+                o = next((o for o in spare if (a1 - a0) <= o.width + 1e-6 and (z1 - z0) <= o.height + 1e-6), None)
+                if o is None:
+                    findings.append(_f("warning", "connector_no_opening", part.name,
+                                       f"sits at the {side} wall with no opening in front of it"))
+                    continue
+                empty[side].remove(o)
+                move = [0.0, 0.0, 0.0]
+                move[along] = o.center[along] - (a0 + a1) / 2
+                dz = o.center[2] - (z0 + z1) / 2
+                fix = f"move {part.name} {abs(move[along]):.2f} mm along the wall onto the opening at {_xyz(o.center)}"
+                if abs(dz) > 0.3:
+                    fix += f"; the opening is also {dz:+.2f} mm off in height (move it, or change the standoffs)"
                 findings.append(_f("warning", "connector_no_opening", part.name,
-                                   f"sits at the {side} wall with no opening in front of it"))
+                                   f"sits at the {side} wall beside an empty opening, not in it", fix, move, p))
 
     # A connector in its opening sits close to the wall by design: its fit is the opening check.
     findings = [f for f in findings if not (f.code == "tight" and f.subject in behind)]
