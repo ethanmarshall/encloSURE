@@ -21,6 +21,38 @@ is a skill an agent there can follow to run the check, apply the KiCad moves, an
 
 ![3D view of the sample](docs/sample_view.png)
 
+## Just a box
+
+Not every project needs the board side. `enclosure box` makes an enclosure from a size and a
+few choices, as STEP files you open and keep editing in Onshape or SolidWorks (they import as
+solid bodies, ready for direct edits or new features), plus STL files to print:
+
+```
+enclosure box --size 120x80x45 --lid screw --standoffs rect:100x60 --standoff-screw M2.5 \
+    --cutout left:rect:9.5x3.8r1@0,9 --cutout lid:round:12@30,0 --flange 10 -o my_box
+```
+
+![A screw-lid box with standoffs, a USB-C cutout and mounting ears](docs/box_screw_lid.png)
+
+This writes `base.step`, `lid.step`, `assembly.step` (the lid in place), `base.stl`, `lid.stl` (lid
+flipped for printing) and `box.json`, the settings. `enclosure box --from my_box/box.json --lid
+snap -o my_box_v2` rebuilds it with one thing changed.
+
+| Choice | Flags | Default |
+|---|---|---|
+| Size | `--size LxWxH` (the space inside), `--outer` to give the outside instead | 100x60x40 |
+| Walls | `--wall`, `--floor`, `--radius` (outside corners, 0 for square) | 2, 2, 3 mm |
+| Lid | `--lid screw` (corner posts), `friction` (press-in lip), `snap` (lip with a rib that clicks into a groove), `slide` (panel in grooves, open end), `none` | screw |
+| Lid details | `--lid-thickness`, `--lip` (0 for none), `--clearance` (gap between mating parts per side) | 2, 3, 0.2 mm |
+| Lid screws | `--lid-screw M2..M4`, `--lid-screw-hole tap` (thread-forming pilot), `insert` (heat-set), `clearance` (through, for a nut) | M3 insert |
+| Board standoffs | `--standoffs rect:AxB` or `x,y;x,y`, `--standoff-height`, `--standoff-screw`, `--standoff-hole` | none |
+| Inserts | `--insert-hole`, `--insert-depth`: check your insert's datasheet, brands differ | per screw |
+| Cutouts | `--cutout FACE:rect:WxH[rR]@a,b` or `FACE:round:D@a,b`; FACE is `left right front back lid floor` (or -X +X -Y +Y); on a wall, a is along the wall from its centre and b the height above the inside floor | none |
+| Mounting ears | `--flange` (how far out), `--flange-screw` | none |
+
+Positions are from the centre of the inside, Z up. A box made this way reads straight back into
+`enclosure read`, `limits` and `fit`, so a board can be designed into it later.
+
 ## Install
 
 Python 3.10 or later, and KiCad 7 or later for writing boards (it uses KiCad's own `pcbnew`

@@ -4,6 +4,7 @@
   enclosure limits base.step [--lid lid.step] -o board.kicad_pcb   a KiCad board to design inside
   enclosure fit    base.step board.step [--lid lid.step] -o out/   does the board fit? punch list + 3D view
   enclosure parts  --pcb board.kicad_pcb [--set J1=MPN] [-p parts.json]  real parts from DigiKey/Mouser
+  enclosure box    --size 100x60x40 --lid screw [...] -o folder    a quick enclosure, no board needed
   enclosure sample -o folder                                       a sample enclosure, lid and board
 
 Z is up (the way the lid comes off), millimetres. The board STEP is KiCad's export
@@ -18,7 +19,7 @@ import sys
 from pathlib import Path
 
 from . import fit as fitmod
-from . import geom, parts as partsmod, report, samples, shell
+from . import box as boxmod, geom, parts as partsmod, report, samples, shell
 
 
 def _enclosure(args):
@@ -92,6 +93,31 @@ def cmd_parts(args):
             "need_body_from_datasheet": todo, "connectors_without_cutout": cutouts}
 
 
+def cmd_box(args):
+    spec = boxmod.load(args.load) if args.load else boxmod.BoxSpec()
+    if args.size:
+        try:
+            spec.size = [float(v) for v in args.size.lower().split("x")]
+        except ValueError:
+            raise ValueError("--size: L x W x H in mm, e.g. 100x60x40") from None
+    if args.outer:
+        spec.size_is = "outer"
+    for flag, name in (("wall", "wall"), ("floor", "floor"), ("radius", "corner_radius"), ("lid", "lid"),
+                       ("lid_thickness", "lid_thickness"), ("lid_screw", "lid_screw"),
+                       ("lid_screw_hole", "lid_screw_hole"), ("lip", "lip"), ("clearance", "fit_clearance"),
+                       ("standoff_height", "standoff_height"), ("standoff_screw", "standoff_screw"),
+                       ("standoff_hole", "standoff_hole"), ("insert_hole", "insert_hole"),
+                       ("insert_depth", "insert_depth"), ("flange", "flange"), ("flange_screw", "flange_screw")):
+        value = getattr(args, flag)
+        if value is not None:
+            setattr(spec, name, value)
+    if args.standoffs:
+        spec.standoffs = boxmod.standoff_pattern(args.standoffs)
+    if args.cutout:
+        spec.cutouts = [boxmod.asdict(boxmod.Cutout.parse(c)) for c in args.cutout]
+    return boxmod.write(spec, args.out, stl=not args.no_stl)
+
+
 def cmd_sample(args):
     return samples.write(args.out)
 
@@ -136,6 +162,37 @@ def main(argv=None) -> int:
     p.add_argument("--datasheets", help="folder for downloaded datasheets (default: datasheets/ by parts.json)")
     p.add_argument("--no-fetch", action="store_true", help="only merge MPNs into parts.json")
     p.set_defaults(fn=cmd_parts)
+
+    p = sub.add_parser("box", help="make a quick enclosure from a size and a few choices",
+                       description=boxmod.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("-o", "--out", default="box", help="folder for base.step, lid.step, assembly.step, STLs, box.json")
+    p.add_argument("--from", dest="load", help="start from a saved box.json; other flags change it")
+    p.add_argument("--size", help="L x W x H, mm: the space inside (or outside with --outer)")
+    p.add_argument("--outer", action="store_true", help="--size is the outside")
+    p.add_argument("--wall", type=float)
+    p.add_argument("--floor", type=float)
+    p.add_argument("--radius", type=float, help="outside corner radius, 0 for square")
+    p.add_argument("--lid", choices=boxmod.LIDS)
+    p.add_argument("--lid-thickness", type=float)
+    p.add_argument("--lid-screw", choices=list(boxmod.SCREWS))
+    p.add_argument("--lid-screw-hole", choices=["tap", "insert", "clearance"],
+                   help="the corner posts' holes: thread-forming pilot, heat-set insert, or through for a nut")
+    p.add_argument("--lip", type=float, help="the lid's lip depth, 0 for none")
+    p.add_argument("--clearance", type=float, help="gap between mating parts per side (printing: 0.2)")
+    p.add_argument("--standoffs", help="board standoffs from the inside centre: rect:80x50, or x,y;x,y")
+    p.add_argument("--standoff-height", type=float)
+    p.add_argument("--standoff-screw", choices=list(boxmod.SCREWS))
+    p.add_argument("--standoff-hole", choices=["tap", "insert", "clearance"])
+    p.add_argument("--insert-hole", type=float, help="heat-set insert hole diameter (your insert's datasheet)")
+    p.add_argument("--insert-depth", type=float)
+    p.add_argument("--cutout", action="append",
+                   help="FACE:rect:WxH[rR]@a,b or FACE:round:D@a,b; FACE left right front back lid floor "
+                        "(-X +X -Y +Y; write --cutout=-X:... for those); on a wall a,b "
+                        "is along the wall from its centre and height above the inside floor (repeatable)")
+    p.add_argument("--flange", type=float, help="mounting ears this far out from the ends, mm")
+    p.add_argument("--flange-screw", choices=list(boxmod.SCREWS))
+    p.add_argument("--no-stl", action="store_true")
+    p.set_defaults(fn=cmd_box)
 
     p = sub.add_parser("sample", help="write a sample enclosure, lid and board")
     p.add_argument("-o", "--out", default="sample")
