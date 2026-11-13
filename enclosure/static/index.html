@@ -114,7 +114,11 @@
 <body>
 <header>
   <h1>Enclo<b>SURE</b></h1>
-  <div class="tabs" role="tablist">
+  <div class="seg" role="radiogroup" aria-label="Units" style="margin-left:auto">
+    <input type="radio" name="units" id="u-mm" value="mm" checked><label for="u-mm">mm</label>
+    <input type="radio" name="units" id="u-in" value="in"><label for="u-in">inches</label>
+  </div>
+  <div class="tabs" role="tablist" style="margin-left:0">
     <button role="tab" aria-selected="true" data-tab="box">Quick box</button>
     <button role="tab" aria-selected="false" data-tab="fit">Fit a board</button>
     <button role="tab" aria-selected="false" data-tab="stock">Bought box</button>
@@ -123,7 +127,7 @@
 <main>
 <!-- ============ QUICK BOX ============ -->
 <form id="boxform" autocomplete="off" novalidate>
-  <p class="intro">An enclosure from a size and a few choices. Everything is in millimetres, measured from the centre of the inside, with Z up. The preview updates as you type.</p>
+  <p class="intro">An enclosure from a size and a few choices. Sizes are in the units chosen at the top, measured from the centre of the inside, with Z up. Files are always millimetres. The preview updates as you type.</p>
   <details class="startbox" id="describe" open>
     <summary>Describe it in words</summary>
     <p class="hint">Name the board (a Raspberry Pi, an Arduino Uno, or a size like 80x50), the connectors and controls, a display or batteries, and where it lives. It reads keywords, and lists everything it assumed.</p>
@@ -531,6 +535,22 @@ for (const s of ["M3", "M4"]) boxform.elements.keyholes.add(new Option(`${s} scr
 const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
 const field = (label, input, unit) => h("label", { class: "f" }, label, unit ? h("span", { class: "unit", "data-unit": unit }, input) : input);
 const numIn = (name, value, step = "0.5", min) => h("input", { type: "number", name, value, step, min });
+// Units: everything is millimetres inside; the form shows and takes mm or inches.
+let U = 1;
+const UNIT = () => (U === 1 ? "mm" : "in");
+// A length field keeps its exact millimetres (data-mm) until someone edits it, so switching units
+// back and forth never rounds a value.
+const len = x => {
+  if (x && x.dataset) return x.dataset.mm !== undefined && x.dataset.mm !== "" ? +x.dataset.mm : num(x.value) * U;
+  return num(x) * U;
+};
+document.addEventListener("input", ev => { if (ev.target.dataset && "mm" in ev.target.dataset) delete ev.target.dataset.mm; }, true);
+const show = mm => +(mm / U).toFixed(U === 1 ? 3 : 4);
+const lenIn = (name, mm, step = "0.5", min) => {
+  const el = h("input", { type: "number", name, value: show(mm), step: U === 1 ? step : "0.01", min: min === undefined ? undefined : show(+min) });
+  el.dataset.mm = String(mm); el.dataset.mmstep = step;
+  return el;
+};
 const faceSel = (value) => h("select", { name: "face" }, FACES.map(([v, t]) => h("option", { value: v, selected: v === value }, t)));
 
 // ---------- Row editors ----------
@@ -550,13 +570,13 @@ function holeRow(opts = {}) {
     h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
     h("div", { class: "grid g2 head" }, field("Face", faceSel(opts.face || "left")), field("Part", type)),
     h("div", { class: "grid", "data-own": "" },
-      field("Diameter", numIn("d", opts.d ?? 6, "0.1", "0.5"), "mm"),
-      field("Width", numIn("w", opts.w ?? 10, "0.1", "0.5"), "mm"),
-      field("Height", numIn("hh", opts.hh ?? 5, "0.1", "0.5"), "mm"),
-      field("Corner radius", numIn("r", opts.r ?? 0, "0.1", "0"), "mm")),
+      field("Diameter", lenIn("d", opts.d ?? 6, "0.1", "0.5"), "mm"),
+      field("Width", lenIn("w", opts.w ?? 10, "0.1", "0.5"), "mm"),
+      field("Height", lenIn("hh", opts.hh ?? 5, "0.1", "0.5"), "mm"),
+      field("Corner radius", lenIn("r", opts.r ?? 0, "0.1", "0"), "mm")),
     h("div", { class: "grid g2" },
-      h("label", { class: "f", "data-pos": "a" }, "Along wall", h("span", { class: "unit", "data-unit": "mm" }, numIn("a", opts.a ?? 0))),
-      h("label", { class: "f", "data-pos": "b" }, "Up from floor", h("span", { class: "unit", "data-unit": "mm" }, numIn("b", opts.b ?? 10)))),
+      h("label", { class: "f", "data-pos": "a" }, "Along wall", h("span", { class: "unit", "data-unit": "mm" }, lenIn("a", opts.a ?? 0))),
+      h("label", { class: "f", "data-pos": "b" }, "Up from floor", h("span", { class: "unit", "data-unit": "mm" }, lenIn("b", opts.b ?? 10)))),
     h("div", { class: "src" }));
   const sync = () => {
     const t = type.value, own = t === "round" || t === "rect";
@@ -574,9 +594,9 @@ function holeRow(opts = {}) {
 }
 function readHole(item) {
   const e = n => item.querySelector(`[name=${n}]`);
-  const face = e("face").value, t = e("type").value, at = [num(e("a").value), num(e("b").value)];
-  if (t === "round") return { face, shape: "round", size: [num(e("d").value)], at };
-  if (t === "rect") return { face, shape: "rect", size: [num(e("w").value), num(e("hh").value)], radius: num(e("r").value), at };
+  const face = e("face").value, t = e("type").value, at = [len(e("a")), len(e("b"))];
+  if (t === "round") return { face, shape: "round", size: [len(e("d"))], at };
+  if (t === "rect") return { face, shape: "rect", size: [len(e("w")), len(e("hh"))], radius: len(e("r")), at };
   return { face, preset: t, at };
 }
 function ventRow(o = {}) {
@@ -584,18 +604,18 @@ function ventRow(o = {}) {
     h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
     h("div", { class: "grid g2 head" }, field("Face", faceSel(o.face || "right"))),
     h("div", { class: "grid" },
-      field("Area width", numIn("w", o.w ?? 30, "1", "2"), "mm"), field("Area height", numIn("hh", o.hh ?? 20, "1", "2"), "mm"),
-      field("Slot width", numIn("slot", o.slot ?? 2, "0.1", "0.5"), "mm")),
+      field("Area width", lenIn("w", o.w ?? 30, "1", "2"), "mm"), field("Area height", lenIn("hh", o.hh ?? 20, "1", "2"), "mm"),
+      field("Slot width", lenIn("slot", o.slot ?? 2, "0.1", "0.5"), "mm")),
     h("div", { class: "grid" },
-      h("label", { class: "f", "data-pos": "a" }, "Along wall", h("span", { class: "unit", "data-unit": "mm" }, numIn("a", o.a ?? 0))),
-      h("label", { class: "f", "data-pos": "b" }, "Up from floor", h("span", { class: "unit", "data-unit": "mm" }, numIn("b", o.b ?? 15))),
-      field("Slot pitch", numIn("pitch", o.pitch ?? 4, "0.1", "1"), "mm")));
+      h("label", { class: "f", "data-pos": "a" }, "Along wall", h("span", { class: "unit", "data-unit": "mm" }, lenIn("a", o.a ?? 0))),
+      h("label", { class: "f", "data-pos": "b" }, "Up from floor", h("span", { class: "unit", "data-unit": "mm" }, lenIn("b", o.b ?? 15))),
+      field("Slot pitch", lenIn("pitch", o.pitch ?? 4, "0.1", "1"), "mm")));
   item.addEventListener("change", () => posLabels(item));
   item._sync = () => posLabels(item);
   return item;
 }
 const readVent = item => {
-  const e = n => num(item.querySelector(`[name=${n}]`).value);
+  const e = n => len(item.querySelector(`[name=${n}]`));
   return { face: item.querySelector("[name=face]").value, size: [e("w"), e("hh")], at: [e("a"), e("b")], slot: e("slot"), pitch: e("pitch") };
 };
 function labelRow(o = {}) {
@@ -604,31 +624,32 @@ function labelRow(o = {}) {
     h("div", { class: "grid g2 head" }, field("Face", faceSel(o.face || "lid")),
       field("Text", h("input", { name: "text", value: o.text ?? "POWER", maxlength: "40" }))),
     h("div", { class: "grid" },
-      h("label", { class: "f", "data-pos": "a" }, "X", h("span", { class: "unit", "data-unit": "mm" }, numIn("a", o.a ?? 0))),
-      h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": "mm" }, numIn("b", o.b ?? -15))),
-      field("Letter height", numIn("size", o.size ?? 6, "0.5", "2"), "mm")),
+      h("label", { class: "f", "data-pos": "a" }, "X", h("span", { class: "unit", "data-unit": "mm" }, lenIn("a", o.a ?? 0))),
+      h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": "mm" }, lenIn("b", o.b ?? -15))),
+      field("Letter height", lenIn("size", o.size ?? 6, "0.5", "2"), "mm")),
     h("div", { class: "grid g2" },
       field("Style", h("select", { name: "style" }, h("option", { value: "-1" }, "Recessed"), h("option", { value: "1" }, "Raised"))),
-      field("Depth", numIn("depth", o.depth ?? 0.6, "0.1", "0.2"), "mm")));
+      field("Depth", lenIn("depth", o.depth ?? 0.6, "0.1", "0.2"), "mm")));
   item.addEventListener("change", () => posLabels(item));
   item._sync = () => posLabels(item);
   return item;
 }
 const readLabel = item => {
   const e = n => item.querySelector(`[name=${n}]`).value;
-  return { face: e("face"), text: e("text"), at: [num(e("a")), num(e("b"))], size: num(e("size")), depth: num(e("style")) * num(e("depth")) };
+  const el = n => item.querySelector(`[name=${n}]`);
+  return { face: e("face"), text: e("text"), at: [len(el("a")), len(el("b"))], size: len(el("size")), depth: num(e("style")) * len(el("depth")) };
 };
 function soRow(o = {}) {
   const item = h("div", { class: "item" },
     h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
-    h("div", { class: "grid g2 head" }, field("X", numIn("x", o.x ?? 0), "mm"), field("Y", numIn("y", o.y ?? 0), "mm")));
+    h("div", { class: "grid g2 head" }, field("X", lenIn("x", o.x ?? 0), "mm"), field("Y", lenIn("y", o.y ?? 0), "mm")));
   item._sync = () => {};
   return item;
 }
 function cardRow(o = {}) {
   const item = h("div", { class: "item" },
     h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
-    h("div", { class: "grid g2 head" }, field("X position", numIn("x", o.x ?? 0), "mm")));
+    h("div", { class: "grid g2 head" }, field("X position", lenIn("x", o.x ?? 0), "mm")));
   item._sync = () => {};
   return item;
 }
@@ -637,20 +658,20 @@ function winRow(o = {}) {
     h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
     h("div", { class: "grid g2 head" }, field("Face", faceSel(o.face || "lid"))),
     h("div", { class: "grid" },
-      field("Opening width", numIn("w", o.w ?? 40, "0.5", "2"), "mm"), field("Opening height", numIn("hh", o.hh ?? 25, "0.5", "2"), "mm"),
-      field("Panel thickness", numIn("pt", o.pt ?? 1, "0.1", "0.2"), "mm")),
+      field("Opening width", lenIn("w", o.w ?? 40, "0.5", "2"), "mm"), field("Opening height", lenIn("hh", o.hh ?? 25, "0.5", "2"), "mm"),
+      field("Panel thickness", lenIn("pt", o.pt ?? 1, "0.1", "0.2"), "mm")),
     h("div", { class: "grid" },
-      field("Panel width", numIn("pw", o.pw ?? 46, "0.5", "2"), "mm"), field("Panel height", numIn("ph", o.ph ?? 31, "0.5", "2"), "mm")),
+      field("Panel width", lenIn("pw", o.pw ?? 46, "0.5", "2"), "mm"), field("Panel height", lenIn("ph", o.ph ?? 31, "0.5", "2"), "mm")),
     h("div", { class: "grid g2" },
-      h("label", { class: "f", "data-pos": "a" }, "X", h("span", { class: "unit", "data-unit": "mm" }, numIn("a", o.a ?? 0))),
-      h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": "mm" }, numIn("b", o.b ?? 0)))));
+      h("label", { class: "f", "data-pos": "a" }, "X", h("span", { class: "unit", "data-unit": "mm" }, lenIn("a", o.a ?? 0))),
+      h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": "mm" }, lenIn("b", o.b ?? 0)))));
   for (const opt of item.querySelectorAll("[name=face] option")) if (opt.value === "floor") opt.remove();
   item.addEventListener("change", () => posLabels(item));
   item._sync = () => posLabels(item);
   return item;
 }
 const readWin = item => {
-  const e = n => num(item.querySelector(`[name=${n}]`).value);
+  const e = n => len(item.querySelector(`[name=${n}]`));
   return { face: item.querySelector("[name=face]").value, size: [e("w"), e("hh")], at: [e("a"), e("b")], panel: [e("pw"), e("ph")], panel_t: e("pt") };
 };
 const xyRow = (o = {}) => soRow(o);
@@ -661,7 +682,7 @@ function batRow(o = {}) {
       field("Cell", h("select", { name: "cell" }, ["AA", "AAA", "18650", "21700"].map(c => h("option", { selected: c === (o.cell || "AA") }, c)))),
       field("How many", numIn("count", o.count ?? 2, "1", "1")),
       field("Cells along", h("select", { name: "axis" }, h("option", { value: "x", selected: (o.axis || "x") === "x" }, "X"), h("option", { value: "y", selected: o.axis === "y" }, "Y")))),
-    h("div", { class: "grid g2" }, field("X", numIn("x", o.x ?? 0), "mm"), field("Y", numIn("y", o.y ?? 0), "mm")));
+    h("div", { class: "grid g2" }, field("X", lenIn("x", o.x ?? 0), "mm"), field("Y", lenIn("y", o.y ?? 0), "mm")));
   item._sync = () => {};
   return item;
 }
@@ -670,15 +691,15 @@ function notchRow(o = {}) {
     h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
     h("div", { class: "grid head" },
       field("Wall", h("select", { name: "face" }, FACES.slice(0, 4).map(([v, t]) => h("option", { value: v, selected: v === (o.face || "back") }, t)))),
-      field("Along wall", numIn("a", o.a ?? 0), "mm"), field("Cable width", numIn("d", o.d ?? 6, "0.5", "2"), "mm")));
+      field("Along wall", lenIn("a", o.a ?? 0), "mm"), field("Cable width", lenIn("d", o.d ?? 6, "0.5", "2"), "mm")));
   item._sync = () => {};
   return item;
 }
 function lpRow(o = {}) {
   const item = h("div", { class: "item" },
     h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
-    h("div", { class: "grid head" }, field("X", numIn("x", o.x ?? 0), "mm"), field("Y", numIn("y", o.y ?? 0), "mm"),
-      field("Pipe Ø", numIn("d", o.d ?? 3, "0.5", "1"), "mm")));
+    h("div", { class: "grid head" }, field("X", lenIn("x", o.x ?? 0), "mm"), field("Y", lenIn("y", o.y ?? 0), "mm"),
+      field("Pipe Ø", lenIn("d", o.d ?? 3, "0.5", "1"), "mm")));
   item._sync = () => {};
   return item;
 }
@@ -687,12 +708,38 @@ const ROWS = { lp: ["#lp_rows", lpRow], lso: ["#lso_rows", xyRow], bat: ["#bat_r
 function addRow(kind, opts) {
   const [sel, make] = ROWS[kind];
   const item = make(opts);
+  for (const sp of item.querySelectorAll(".unit")) if (["mm", "in"].includes(sp.dataset.unit)) sp.dataset.unit = UNIT();
   $(sel).append(item);
   item._sync();
   return item;
 }
 for (const b of $$("[data-add]")) b.onclick = () => { const it = addRow(b.dataset.add); changed(it); it.querySelector("select, input")?.focus(); };
 function changed(el) { if (boxform.contains(el) || el.closest?.("#boxform") || !el.isConnected) later(); }
+
+function setUnits(next) {
+  const old = U; U = next;
+  for (const sp of document.querySelectorAll(".unit")) {
+    if (!["mm", "in"].includes(sp.dataset.unit)) continue;
+    sp.dataset.unit = UNIT();
+    const inp = sp.querySelector("input");
+    if (!inp) continue;
+    if (inp.value !== "") {
+      const mm = inp.dataset.mm !== undefined && inp.dataset.mm !== "" ? +inp.dataset.mm : num(inp.value) * old;
+      inp.dataset.mm = String(mm);
+      inp.value = show(mm);
+    }
+    if (inp.min !== "") inp.min = +(num(inp.min) * old / U).toFixed(4);
+    inp.step = U === 1 ? (inp.dataset.mmstep || "0.1") : "0.01";
+  }
+  for (const r of document.querySelectorAll("[name=units]")) r.checked = (r.value === UNIT());
+  try { localStorage.setItem("enclosure.units", UNIT()); } catch {}
+  if (boxData && !boxData.error) boxReport(boxData);
+}
+for (const inp of document.querySelectorAll(".unit input")) {
+  inp.dataset.mmstep = inp.step || "0.1";
+  if (["mm", "in"].includes(inp.parentElement.dataset.unit) && inp.value !== "") inp.dataset.mm = inp.value;
+}
+for (const r of document.querySelectorAll("[name=units]")) r.onchange = () => setUnits(r.value === "in" ? 25.4 : 1);
 
 // ---------- Show and hide by choice ----------
 const LIDHINT = {
@@ -775,8 +822,8 @@ const msg = (cls, text, fix) => h("div", { class: "msg " + cls }, text, fix ? h(
 function boxReport(data, error) {
   report.replaceChildren();
   if (error) return report.append(msg("err", error));
-  const f = v => v.map(x => +x.toFixed(2)).join(" × ");
-  report.append(h("div", { class: "dims" }, "Inside ", h("b", {}, f(data.inner)), " mm, outside ", h("b", {}, f(data.outer)), " mm",
+  const f = v => v.map(x => +(x / U).toFixed(U === 1 ? 2 : 3)).join(" × ");
+  report.append(h("div", { class: "dims" }, "Inside ", h("b", {}, f(data.inner)), ` ${UNIT()}, outside `, h("b", {}, f(data.outer)), ` ${UNIT()}`,
     data.estimate ? h("span", { class: "hint" }, ` · about ${Math.round(data.estimate.grams)} g of ${data.estimate.material}, ${data.estimate.hours} h to print`) : null));
   if (fromBoard) {
     const fb = fromBoard;
@@ -796,28 +843,28 @@ function boxBody() {
   const e = boxform.elements;
   const so = e.so_mode.value;
   return {
-    size: [num(e.L.value), num(e.W.value), num(e.H.value)], size_is: e.size_is.value,
-    wall: num(e.wall.value), floor: num(e.floor.value), corner_radius: num(e.corner_radius.value),
-    lid: e.lid.value, lid_thickness: num(e.lid_thickness.value), lip: num(e.lip.value), fit_clearance: num(e.fit_clearance.value),
+    size: [len(e.L), len(e.W), len(e.H)], size_is: e.size_is.value,
+    wall: len(e.wall), floor: len(e.floor), corner_radius: len(e.corner_radius),
+    lid: e.lid.value, lid_thickness: len(e.lid_thickness), lip: len(e.lip), fit_clearance: len(e.fit_clearance),
     lid_screw: e.lid_screw.value, lid_screw_hole: e.lid_screw_hole.value,
-    gasket: e.lid.value === "screw" && $("#gasket_on").checked ? num(e.gasket.value) : 0,
-    standoffs: so === "rect" ? `rect:${num(e.so_x.value)}x${num(e.so_y.value)}` : so === "custom"
-      ? $$("#so_rows .item").map(it => [num($("[name=x]", it).value), num($("[name=y]", it).value)]) : "",
-    standoff_height: num(e.standoff_height.value), standoff_screw: e.standoff_screw.value, standoff_hole: e.standoff_hole.value,
+    gasket: e.lid.value === "screw" && $("#gasket_on").checked ? len(e.gasket) : 0,
+    standoffs: so === "rect" ? `rect:${len(e.so_x)}x${len(e.so_y)}` : so === "custom"
+      ? $$("#so_rows .item").map(it => [len($("[name=x]", it)), len($("[name=y]", it))]) : "",
+    standoff_height: len(e.standoff_height), standoff_screw: e.standoff_screw.value, standoff_hole: e.standoff_hole.value,
     standoff_ribs: e.standoff_ribs.checked,
-    lid_standoffs: $$("#lso_rows .item").map(it => [num($("[name=x]", it).value), num($("[name=y]", it).value)]),
-    lid_standoff_height: num(e.lid_standoff_height.value), lid_standoff_screw: e.lid_standoff_screw.value,
+    lid_standoffs: $$("#lso_rows .item").map(it => [len($("[name=x]", it)), len($("[name=y]", it))]),
+    lid_standoff_height: len(e.lid_standoff_height), lid_standoff_screw: e.lid_standoff_screw.value,
     batteries: $$("#bat_rows .item").map(it => ({ cell: $("[name=cell]", it).value, count: num($("[name=count]", it).value),
-      axis: $("[name=axis]", it).value, at: [num($("[name=x]", it).value), num($("[name=y]", it).value)] })),
-    tie_points: $$("#tie_rows .item").map(it => [num($("[name=x]", it).value), num($("[name=y]", it).value)]),
-    cable_notches: $$("#notch_rows .item").map(it => ({ face: $("[name=face]", it).value, at: num($("[name=a]", it).value), d: num($("[name=d]", it).value) })),
+      axis: $("[name=axis]", it).value, at: [len($("[name=x]", it)), len($("[name=y]", it))] })),
+    tie_points: $$("#tie_rows .item").map(it => [len($("[name=x]", it)), len($("[name=y]", it))]),
+    cable_notches: $$("#notch_rows .item").map(it => ({ face: $("[name=face]", it).value, at: len($("[name=a]", it)), d: len($("[name=d]", it)) })),
     material: e.material.value, split: num(e.split.value), power_w: num(e.power_w.value),
-    light_pipes: $$("#lp_rows .item").map(it => ({ at: [num($("[name=x]", it).value), num($("[name=y]", it).value)], d: num($("[name=d]", it).value) })),
-    card_slots: $$("#card_rows .item").map(it => num($("[name=x]", it).value)), board_thickness: num(e.board_thickness.value),
+    light_pipes: $$("#lp_rows .item").map(it => ({ at: [len($("[name=x]", it)), len($("[name=y]", it))], d: len($("[name=d]", it)) })),
+    card_slots: $$("#card_rows .item").map(it => len($("[name=x]", it))), board_thickness: len(e.board_thickness),
     windows: $$("#win_rows .item").map(readWin),
     cutouts: $$("#cut_rows .item").map(readHole), vents: $$("#vent_rows .item").map(readVent), labels: $$("#label_rows .item").map(readLabel),
-    flange: num(e.flange.value), feet: num(e.feet.value), feet_depth: num(e.feet_depth.value), keyholes: e.keyholes.value || null,
-    din_rail: e.din_rail.checked, bottom_chamfer: num(e.bottom_chamfer.value), teardrop: e.teardrop.checked,
+    flange: len(e.flange), feet: len(e.feet), feet_depth: len(e.feet_depth), keyholes: e.keyholes.value || null,
+    din_rail: e.din_rail.checked, bottom_chamfer: len(e.bottom_chamfer), teardrop: e.teardrop.checked,
     format: e.format.value, stl: e.stl.checked,
   };
 }
@@ -870,7 +917,12 @@ $("#tofit").onclick = () => { fitform.elements.src.value = "box"; sync(); select
 // ---------- Loading a design into the form ----------
 const FACE_OF = { "-X": "left", "+X": "right", "-Y": "front", "+Y": "back", lid: "lid", floor: "floor", top: "lid", bottom: "floor" };
 function applySpec(sp) {
-  const e = boxform.elements, set = (n, v) => { if (v !== undefined && v !== null && e[n]) e[n].value = v; };
+  const LEN = new Set(["L", "W", "H", "wall", "floor", "corner_radius", "lid_thickness", "lip", "fit_clearance", "standoff_height",
+    "flange", "feet", "feet_depth", "bottom_chamfer", "gasket", "so_x", "so_y", "board_thickness", "lid_standoff_height"]);
+  const e = boxform.elements, set = (n, v) => {
+    if (v === undefined || v === null || !e[n]) return;
+    if (LEN.has(n) && typeof v === "number") { e[n].value = show(v); e[n].dataset.mm = String(v); } else e[n].value = v;
+  };
   const [L, W, H] = sp.size || [100, 60, 40];
   set("L", L); set("W", W); set("H", H);
   e.size_is.value = sp.size_is || "inner";
@@ -888,7 +940,7 @@ function applySpec(sp) {
   const xs = [...new Set(so.map(p => Math.abs(p[0])))], ys = [...new Set(so.map(p => Math.abs(p[1])))];
   if (!so.length) e.so_mode.value = "none";
   else if (so.length === 4 && xs.length === 1 && ys.length === 1 && new Set(so.map(p => `${Math.sign(p[0])}${Math.sign(p[1])}`)).size === 4) {
-    e.so_mode.value = "rect"; set("so_x", +(2 * xs[0]).toFixed(3)); set("so_y", +(2 * ys[0]).toFixed(3));
+    e.so_mode.value = "rect"; set("so_x", 2 * xs[0]); set("so_y", 2 * ys[0]);
   } else { e.so_mode.value = "custom"; for (const [x, y] of so) addRow("so", { x, y }); }
   $("#cut_rows").replaceChildren();
   for (const c of sp.cutouts || []) {
@@ -924,7 +976,7 @@ $("#fpbtn").onclick = async () => {
   const fd = new FormData();
   if (e.fp_board.files.length) fd.set("board", e.fp_board.files[0]); if (e.fp_parts.files.length) fd.set("parts", e.fp_parts.files[0]);
   if (e.fp_pcb.files.length) fd.set("pcb", e.fp_pcb.files[0]);
-  fd.set("lid", e.fp_lid.value); fd.set("edge_gap", num(e.fp_gap.value)); fd.set("headroom", num(e.fp_head.value));
+  fd.set("lid", e.fp_lid.value); fd.set("edge_gap", len(e.fp_gap)); fd.set("headroom", len(e.fp_head));
   await busy($("#fpbtn"), "Designing...", async () => {
     $("#status").textContent = "Designing the box around your board...";
     const res = await fetch("api/frompcb", { method: "POST", body: fd });
@@ -1073,25 +1125,26 @@ function fitData(withBoard) {
       if (e.pcb.files.length) fd.set("pcb", e.pcb.files[0]);
       if (e.parts.files.length) fd.set("parts", e.parts.files[0]);
     }
-    for (const k of ["clearance", "opening_margin", "max_setback"]) fd.set(k, num(e[k].value));
+    for (const k of ["clearance", "opening_margin", "max_setback"]) fd.set(k, len(e[k]));
   } else {
-    fd.set("clearance", num(e.board_clearance.value)); fd.set("thickness", num(e.thickness.value));
+    fd.set("clearance", len(e.board_clearance)); fd.set("thickness", len(e.thickness));
   }
   return fd;
 }
 const fmt = v => (+v).toFixed(2);
+const fmtL = v => `${(+v / U).toFixed(U === 1 ? 2 : 3)} ${UNIT()}`;
 function encSummary(d) {
   const enc = d.enclosure, [[x0, y0, z0], [x1, y1, z1]] = enc.cavity_bounds;
   const rows = [
-    ["Inside", `${fmt(x1 - x0)} × ${fmt(y1 - y0)} mm, floor at ${fmt(enc.floor)} mm`],
-    ["Ceiling", `${fmt(enc.ceiling)} mm (${enc.lid_underside != null ? "lid underside" : "top of the walls"})`],
-    ["Standoffs", enc.bosses.length ? `${enc.bosses.length}: ${[...new Set(enc.bosses.map(b => b.screw))].join("; ")}, top at ${fmt(Math.max(...enc.bosses.map(b => b.top)))} mm` : "none found"],
+    ["Inside", `${fmtL(x1 - x0)} × ${fmtL(y1 - y0)}, floor at ${fmtL(enc.floor)}`],
+    ["Ceiling", `${fmtL(enc.ceiling)} (${enc.lid_underside != null ? "lid underside" : "top of the walls"})`],
+    ["Standoffs", enc.bosses.length ? `${enc.bosses.length}: ${[...new Set(enc.bosses.map(b => b.screw))].join("; ")}, top at ${fmtL(Math.max(...enc.bosses.map(b => b.top)))}` : "none found"],
     ["Openings", enc.openings.length ? Object.entries(enc.openings.reduce((m, o) => {
       const k = `${o.wall} ${fmt(o.width)} × ${fmt(o.height)}`; m[k] = (m[k] || 0) + 1; return m; }, {}))
       .map(([k, n]) => n > 1 ? `${k} (${n} slots)` : k).join(", ") : "none"],
   ];
-  if (d.limits) rows.push(["Tallest part", `${fmt(d.limits.max_height_top)} mm on top, ${fmt(d.limits.max_height_bottom)} mm underneath`],
-    ["Board", `${fmt(d.limits.outline[1][0] - d.limits.outline[0][0])} × ${fmt(d.limits.outline[1][1] - d.limits.outline[0][1])} mm, ${d.limits.holes.length} mounting holes`]);
+  if (d.limits) rows.push(["Tallest part", `${fmtL(d.limits.max_height_top)} on top, ${fmtL(d.limits.max_height_bottom)} underneath`],
+    ["Board", `${fmtL(d.limits.outline[1][0] - d.limits.outline[0][0])} × ${fmtL(d.limits.outline[1][1] - d.limits.outline[0][1])}, ${d.limits.holes.length} mounting holes`]);
   return h("div", { class: "summary" }, h("table", {}, rows.map(([k, v]) => h("tr", {}, h("td", {}, k), h("td", {}, v)))),
     d.limits_error ? msg("warn", "No KiCad board: " + d.limits_error +
       (enc.bosses.length ? "" : ". Add board standoffs to the box (or check they are not under a gasket ledge).")) : null);
@@ -1186,6 +1239,7 @@ function selectTab(name) {
 for (const b of $$("[data-tab]")) b.onclick = () => selectTab(b.dataset.tab);
 
 // ---------- Start ----------
+try { if (localStorage.getItem("enclosure.units") === "in") setUnits(25.4); } catch {}
 fetch("api/presets").then(r => r.json()).then(p => {
   PRESETS = p;
   addRow("stock", { face: "front", preset: "pg9", a: 0, b: 12 });
