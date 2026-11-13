@@ -746,6 +746,21 @@ def build(spec: BoxSpec) -> dict:
         else:
             full = top - 0.3
         c = spec.fit_clearance
+        # Where dividers cross: a removable plate passes a fixed wall through a slot in it; two
+        # removable plates cross egg-crate style, each notched halfway.
+        info = []
+        for dv in spec.dividers:
+            ax_, run_ = dv["axis"], (W if dv["axis"] == "x" else L)
+            s0, s1 = (dv.get("span") or [-run_ / 2, run_ / 2])
+            info.append((ax_, float(dv.get("at", 0)), float(dv.get("thickness") or spec.wall),
+                         max(float(s0), -run_ / 2), min(float(s1), run_ / 2), bool(dv.get("removable"))))
+        crossings = [(i, j) for i, a in enumerate(info) for j, b in enumerate(info)
+                     if i < j and a[0] != b[0] and a[3] < b[1] < a[4] and b[3] < a[1] < b[4]]
+        slots = []
+        for i, j in crossings:
+            for r, f in ((i, j), (j, i)):
+                if info[r][5] and not info[f][5]:
+                    slots.append((r, f))
         for i, dv in enumerate(spec.dividers):
             axis, at = dv["axis"], float(dv.get("at", 0))
             t = float(dv.get("thickness") or spec.wall)
@@ -774,6 +789,18 @@ def build(spec: BoxSpec) -> dict:
                 plate = Box(plate_len, t, h - c, align=(Align.CENTER, Align.CENTER, Align.MIN))
                 if notch:
                     plate -= Pos(0, 0, h - c) * Cylinder(notch / 2, t * 4, rotation=(90, 0, 0))
+                for a_, b_ in crossings:
+                    if i not in (a_, b_):
+                        continue
+                    other = b_ if a_ == i else a_
+                    if not info[other][5]:
+                        continue
+                    u = info[other][1] - mid  # where the other plate crosses, along this one
+                    w_ = info[other][2] + 2 * c
+                    z_ = (h - c) / 2
+                    from_top = i == min(a_, b_)
+                    plate -= Pos(u, 0, z_ if from_top else 0) * Box(w_, t * 3, (h - c) / 2 + 0.01 + (0.01 if from_top else 0),
+                                                                     align=(Align.CENTER, Align.CENTER, Align.MIN))
                 if (a1 - a0) > 30 and not notch:  # a finger hole to lift it out
                     plate -= Pos(plate_len / 4, 0, h - c - 6) * Cylinder(4.0, t * 4, rotation=(90, 0, 0))
                 divider_parts.append((f"divider_{i + 1}", Rot(90, 0, 0) * plate))  # lying flat to print
@@ -799,6 +826,17 @@ def build(spec: BoxSpec) -> dict:
                 u = ky if axis == "x" else kx
                 if kr > 0 and d_ < kr + t / 2 and a0 - kr < u < a1 + kr:
                     checks.append(f"divider {i + 1} runs through the post or standoff at ({kx:g}, {ky:g}): move it or shorten its span")
+        for r, f in slots:  # a removable plate passes a fixed wall through a slot in it
+            ax_r, at_r, t_r = info[r][0], info[r][1], info[r][2]
+            at_f, t_f = info[f][1], info[f][2]
+            hgt = full - spec.floor + 1
+            if ax_r == "x":
+                base -= Box(t_r + 2 * c, t_f + 0.4, hgt).locate(Location((at_r, at_f, spec.floor + hgt / 2 + 0.01)))
+            else:
+                base -= Box(t_f + 0.4, t_r + 2 * c, hgt).locate(Location((at_f, at_r, spec.floor + hgt / 2 + 0.01)))
+            notes.append(f"divider {f + 1} has a slot where removable divider {r + 1} passes through it")
+        if any(info[a][5] and info[b][5] for a, b in crossings):
+            notes.append("crossing removable dividers are notched halfway, egg-crate style: the one notched from the top goes in first")
         sections = _sections(spec)
         if sections:
             notes.append("sections: " + ", ".join(f"{w:.1f} x {d:.1f} mm" for w, d in sections))

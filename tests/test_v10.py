@@ -175,3 +175,21 @@ def test_dividers():
         box.build(box.BoxSpec(size=[120, 80, 40], dividers=[{"axis": "x", "at": 70}]))
     hit = box.build(box.BoxSpec(size=[120, 80, 40], standoffs=[[0, 0]], dividers=[{"axis": "x", "at": 0}]))
     assert any("runs through" in c for c in hit["checks"])
+
+
+def test_crossing_dividers():
+    from build123d import Rot
+    for divs in ([{"axis": "x", "at": 0}, {"axis": "y", "at": 0, "removable": True}],
+                 [{"axis": "x", "at": 0, "removable": True}, {"axis": "y", "at": 0, "removable": True}]):
+        s = box.BoxSpec(size=[120, 80, 40], lid="friction", dividers=divs)
+        m = box.build(s)
+        assert m["base"].is_valid and len(m["base"].solids()) == 1
+        placed = []
+        for (_, part), dv in zip(m["extras"], [d for d in divs if d.get("removable")]):
+            p = Rot(-90, 0, 0) * part
+            p = Pos(0, 0, s.floor + 0.1 - p.bounding_box().min.Z) * p
+            placed.append(Pos(0, dv["at"], 0) * p if dv["axis"] == "y" else Pos(dv["at"], 0, 0) * (Rot(0, 0, 90) * p))
+        for p in placed:
+            assert (p & m["base"]).volume < 1e-6  # the plate fits its rails and slots
+        if len(placed) == 2:
+            assert (placed[0] & placed[1]).volume < 1e-6
