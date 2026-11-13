@@ -1696,6 +1696,7 @@ $("#plateshow").onclick = async () => {
     const g = new THREE.Group();
     d.meshes.forEach((m, i) => { const mm = mesh(m, 0xb8bec4); mm.position.x = i * (d.bed[0] + 20); g.add(mm); });
     const bed = new THREE.Mesh(new THREE.PlaneGeometry(d.bed[0], d.bed[1]), new THREE.MeshStandardMaterial({ color: 0x555555, transparent: true, opacity: .25 }));
+    bed.position.set(d.bed[0] / 2, d.bed[1] / 2, 0);
     g.add(bed);
     const bb = new THREE.Box3().setFromObject(g);
     views.parts = { group: g, lid: null, top: 0, size: bb.getSize(new THREE.Vector3()), framed: false };

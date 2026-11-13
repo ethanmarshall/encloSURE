@@ -74,7 +74,7 @@ def make(items: list[tuple[str, object]], bed=(250.0, 210.0), gap: float = GAP) 
         if current and y + d > bed[1]:
             plates.append(current)
             current, x, y, row_d = [], 0.0, 0.0, 0.0
-        current.append((name, Pos(x + w / 2 - bed[0] / 2, y + d / 2 - bed[1] / 2, 0) * s))
+        current.append((name, Pos(x + w / 2, y + d / 2, 0) * s))  # the bed's corner at the origin, as slicers expect
         x += w + gap
         row_d = max(row_d, d)
     if current:
@@ -96,7 +96,8 @@ def slicer() -> str | None:
     return shutil.which("prusa-slicer") or shutil.which("PrusaSlicer")
 
 
-def slice_numbers(path_3mf, material: str = "PETG", layer: float = 0.2, infill: int = 15, timeout: int = 240) -> dict | None:
+def slice_numbers(path_3mf, material: str = "PETG", layer: float = 0.2, infill: int = 15, timeout: int = 240,
+                  bed=(250.0, 210.0)) -> dict | None:
     """PrusaSlicer's print time and filament for a 3MF (its default printer settings, no supports),
     or None when PrusaSlicer isn't installed or fails."""
     exe = slicer()
@@ -106,7 +107,8 @@ def slice_numbers(path_3mf, material: str = "PETG", layer: float = 0.2, infill: 
         out = Path(d) / "plate.gcode"
         cmd = [exe, "--export-gcode", str(path_3mf), "--layer-height", str(layer), "--fill-density", f"{infill}%",
                "--perimeters", "2", "--filament-diameter", "1.75", "--nozzle-diameter", "0.4",
-               "--filament-density", str(DENSITY.get(material, 1.25)), "--dont-arrange", "-o", str(out)]
+               "--filament-density", str(DENSITY.get(material, 1.25)), "--dont-arrange",
+               "--bed-shape", f"0x0,{bed[0]:g}x0,{bed[0]:g}x{bed[1]:g},0x{bed[1]:g}", "-o", str(out)]
         global LAST_ERROR
         try:
             run = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=True)
@@ -143,7 +145,7 @@ def write(items, folder, bed=(250.0, 210.0), material: str = "PETG", slice_it: b
         export_3mf(p, path)
         files.append(str(path))
         if slice_it:
-            sliced.append(slice_numbers(path, material))
+            sliced.append(slice_numbers(path, material, bed=bed))
     out = {"files": files, "notes": r["notes"], "checks": r["checks"],
            "parts": [[n for n, _ in p] for p in r["plates"]]}
     if slice_it:

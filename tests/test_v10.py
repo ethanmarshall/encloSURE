@@ -42,7 +42,7 @@ def test_print_plate_and_slicer(tmp_path):
     r = plate.make(items, (180, 180))
     for name, shape in r["plates"][0]:
         bb = shape.bounding_box()
-        assert abs(bb.min.Z) < 1e-6 and -90 - 1e-6 <= bb.min.X and bb.max.X <= 90 + 1e-6
+        assert abs(bb.min.Z) < 1e-6 and -1e-6 <= bb.min.X and bb.max.X <= 180 + 1e-6 and -1e-6 <= bb.min.Y
     for (_, a), (_, b) in itertools.combinations(r["plates"][0], 2):
         assert (a & b).volume < 1e-6  # nothing overlaps on the bed
     out = plate.write(items, tmp_path, (180, 180))
