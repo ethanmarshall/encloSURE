@@ -4,3 +4,4 @@ __pycache__/
 /fit/
 /board/
 *.kicad_prl
+web.log
