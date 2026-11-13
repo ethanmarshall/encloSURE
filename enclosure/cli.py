@@ -107,15 +107,53 @@ def cmd_box(args):
                        ("lid_screw_hole", "lid_screw_hole"), ("lip", "lip"), ("clearance", "fit_clearance"),
                        ("standoff_height", "standoff_height"), ("standoff_screw", "standoff_screw"),
                        ("standoff_hole", "standoff_hole"), ("insert_hole", "insert_hole"),
-                       ("insert_depth", "insert_depth"), ("flange", "flange"), ("flange_screw", "flange_screw")):
+                       ("insert_depth", "insert_depth"), ("flange", "flange"), ("flange_screw", "flange_screw"),
+                       ("bottom_chamfer", "bottom_chamfer"), ("gasket", "gasket"), ("feet", "feet"),
+                       ("feet_depth", "feet_depth"), ("keyholes", "keyholes"), ("keyhole_spacing", "keyhole_spacing")):
         value = getattr(args, flag)
         if value is not None:
             setattr(spec, name, value)
     if args.standoffs:
         spec.standoffs = boxmod.standoff_pattern(args.standoffs)
     if args.cutout:
-        spec.cutouts = [boxmod.asdict(boxmod.Cutout.parse(c)) for c in args.cutout]
-    return boxmod.write(spec, args.out, stl=not args.no_stl)
+        spec.cutouts = [{k: v for k, v in boxmod.asdict(boxmod.Cutout.parse(c)).items() if v is not None}
+                        for c in args.cutout]
+    if args.vent:
+        spec.vents = [boxmod.parse_vent(v) for v in args.vent]
+    if args.label:
+        spec.labels = [boxmod.parse_label(t) for t in args.label]
+    for flag, name in (("no_teardrop", "teardrop"), ("no_ribs", "standoff_ribs")):
+        if getattr(args, flag):
+            setattr(spec, name, False)
+    if args.din_rail:
+        spec.din_rail = True
+    formats = {"step": ("step",), "onshape": ("onshape",), "both": ("step", "onshape")}[args.format]
+    return boxmod.write(spec, args.out, stl=not args.no_stl, formats=formats)
+
+
+def cmd_presets(args):
+    from .presets import PRESETS
+    return {name: {"shape": shape, "size": size, "radius": radius, "source": source}
+            for name, (shape, size, radius, source) in PRESETS.items()}
+
+
+def cmd_stock(args):
+    from . import stock
+    cutouts = [{k: v for k, v in boxmod.asdict(boxmod.Cutout.parse(c)).items() if v is not None}
+               for c in (args.cutout or [])]
+    if not cutouts:
+        raise ValueError("give at least one --cutout")
+    return stock.run(args.step, cutouts, args.out, lid_path=args.lid, teardrop=args.teardrop)
+
+
+def cmd_web(args):
+    try:
+        from .web import serve
+    except ImportError:
+        raise RuntimeError('the web page needs its extras: pip install "enclosure-sure[web]"') from None
+    print(f"EncloSURE at http://{args.host}:{args.port}  (Ctrl+C to stop)")
+    serve(args.host, args.port)
+    return None
 
 
 def cmd_sample(args):
@@ -186,13 +224,44 @@ def main(argv=None) -> int:
     p.add_argument("--insert-hole", type=float, help="heat-set insert hole diameter (your insert's datasheet)")
     p.add_argument("--insert-depth", type=float)
     p.add_argument("--cutout", action="append",
-                   help="FACE:rect:WxH[rR]@a,b or FACE:round:D@a,b; FACE left right front back lid floor "
+                   help="FACE:rect:WxH[rR]@a,b, FACE:round:D@a,b, or FACE:PRESET@a,b (enclosure presets); FACE left right front back lid floor "
                         "(-X +X -Y +Y; write --cutout=-X:... for those); on a wall a,b "
                         "is along the wall from its centre and height above the inside floor (repeatable)")
     p.add_argument("--flange", type=float, help="mounting ears this far out from the ends, mm")
     p.add_argument("--flange-screw", choices=list(boxmod.SCREWS))
+    p.add_argument("--format", choices=["step", "onshape", "both"], default="step",
+                   help="STEP files (and STL), an Onshape custom feature (enclosure_box.fs), or both")
     p.add_argument("--no-stl", action="store_true")
+    p.add_argument("--no-teardrop", action="store_true", help="plain round holes in walls")
+    p.add_argument("--bottom-chamfer", type=float, help="against first-layer squish, mm (0 for none)")
+    p.add_argument("--no-ribs", action="store_true", help="standoffs without gussets")
+    p.add_argument("--gasket", type=float, help="O-ring cord diameter for a sealed screw lid, mm")
+    p.add_argument("--vent", action="append", help="FACE:WxH@a,b[:slot[:pitch]]: slots filling an area (repeatable)")
+    p.add_argument("--feet", type=float, help="rubber foot diameter: four recesses under the floor")
+    p.add_argument("--feet-depth", type=float)
+    p.add_argument("--keyholes", choices=list(boxmod.SCREWS), help="two keyholes in the floor for hanging")
+    p.add_argument("--keyhole-spacing", type=float)
+    p.add_argument("--din-rail", action="store_true", help="a TS35 DIN rail clip under the floor")
+    p.add_argument("--label", action="append", help="FACE:TEXT@a,b[:size[:depth]]; depth < 0 recessed (repeatable)")
     p.set_defaults(fn=cmd_box)
+
+    p = sub.add_parser("presets", help="the named cutouts (--cutout left:usb-c@0,9) and their sources")
+    p.set_defaults(fn=cmd_presets)
+
+    from . import stock as stockmod
+    p = sub.add_parser("stock", help="cutouts and 1:1 drilling templates for a bought box (Hammond 1590...)",
+                       description=stockmod.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("step", help="the maker's STEP of the box, opening up (+Z); may hold the lid too")
+    p.add_argument("--lid", help="the lid's STEP, if it is a separate file")
+    p.add_argument("--cutout", action="append", help="as for `enclosure box --cutout` (repeatable)")
+    p.add_argument("--teardrop", action="store_true", help="teardrop wall holes (for a printed box)")
+    p.add_argument("-o", "--out", default="stock", help="folder for base.step, lid.step, drill_templates.pdf, holes.json")
+    p.set_defaults(fn=cmd_stock)
+
+    p = sub.add_parser("web", help="the quick box and bought-box tools as a web page with a 3D preview")
+    p.add_argument("--host", default="127.0.0.1", help="0.0.0.0 to let other computers on your network in")
+    p.add_argument("--port", type=int, default=8000)
+    p.set_defaults(fn=cmd_web)
 
     p = sub.add_parser("sample", help="write a sample enclosure, lid and board")
     p.add_argument("-o", "--out", default="sample")
@@ -204,6 +273,8 @@ def main(argv=None) -> int:
     except (ValueError, RuntimeError, FileNotFoundError) as e:
         print(json.dumps({"ok": False, "error": str(e)}))
         return 2
+    if result is None:
+        return 0
     print(json.dumps(result, indent=2))
     if args.cmd == "fit":
         return 0 if result["fits"] else 1

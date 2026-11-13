@@ -1,13 +1,14 @@
 [project]
 name = "enclosure-sure"
-version = "0.3.0"
+version = "0.4.0"
 description = "Make a PCB and its enclosure fit: read the enclosure, write KiCad board limits, check the finished board's fit."
 readme = "README.md"
 requires-python = ">=3.10"
-dependencies = ["build123d>=0.10"]
+dependencies = ["build123d>=0.10", "matplotlib"]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "httpx", "fastapi", "python-multipart", "matplotlib"]
+web = ["fastapi", "uvicorn", "python-multipart", "matplotlib"]
 
 [project.scripts]
 enclosure = "enclosure.cli:main"
@@ -18,3 +19,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
 packages = ["enclosure"]
+
+[tool.setuptools.package-data]
+enclosure = ["static/*"]

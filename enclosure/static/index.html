@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>EncloSURE Box</title>
+<style>
+  :root {
+    --bg: #f4f3ef; --panel: #ffffff; --ink: #1d1f21; --muted: #6b6f73; --line: #dcdad3;
+    --accent: #c4501b; --accent-ink: #ffffff; --warn-bg: #fff4e0; --warn: #8a5300; --err: #b3261e;
+    --view: #e9e7e1;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #151618; --panel: #1e2023; --ink: #e8e6e1; --muted: #9a9ea3; --line: #33363a;
+      --accent: #e8743f; --accent-ink: #151618; --warn-bg: #3a2c12; --warn: #f2c27a; --err: #ff8a80; --view: #24272b;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #151618; --panel: #1e2023; --ink: #e8e6e1; --muted: #9a9ea3; --line: #33363a;
+    --accent: #e8743f; --accent-ink: #151618; --warn-bg: #3a2c12; --warn: #f2c27a; --err: #ff8a80; --view: #24272b;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink); font: 14px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  header { display: flex; align-items: baseline; gap: 16px; padding: 14px 20px; border-bottom: 1px solid var(--line); }
+  header h1 { margin: 0; font-size: 18px; letter-spacing: .02em; }
+  header h1 b { color: var(--accent); }
+  .tabs { display: flex; gap: 4px; margin-left: auto; }
+  .tabs button { border: 1px solid var(--line); background: none; color: var(--ink); padding: 6px 12px; border-radius: 6px; cursor: pointer; }
+  .tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
+  main { display: grid; grid-template-columns: 380px 1fr; grid-template-rows: minmax(0, 1fr); height: calc(100vh - 53px); }
+  main > * { min-height: 0; }
+  form { overflow-y: auto; padding: 12px 20px 40px; border-right: 1px solid var(--line); background: var(--panel); }
+  fieldset { border: none; border-top: 1px solid var(--line); margin: 10px 0 0; padding: 10px 0 0; }
+  legend { font-weight: 600; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); padding: 0 6px 0 0; }
+  .row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; margin: 6px 0; }
+  .row.two { grid-template-columns: 1fr 1fr; }
+  .row.one { grid-template-columns: 1fr; }
+  label { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: var(--muted); }
+  label.check { flex-direction: row; align-items: center; gap: 6px; color: var(--ink); font-size: 13px; }
+  input, select, textarea { font: inherit; color: var(--ink); background: var(--bg); border: 1px solid var(--line); border-radius: 5px; padding: 5px 7px; width: 100%; }
+  label.check input { width: auto; }
+  textarea { font-family: ui-monospace, Consolas, monospace; font-size: 12px; min-height: 60px; resize: vertical; }
+  .hint { font-size: 11px; color: var(--muted); margin: 2px 0 0; }
+  .hint code { font-size: 11px; }
+  .actions { position: sticky; bottom: -40px; background: var(--panel); padding: 12px 0; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  .seg input { position: absolute; opacity: 0; width: 1px; height: 1px; }
+  .seg input:focus-visible + label { outline: 2px solid var(--accent); outline-offset: -2px; }
+  .seg label { padding: 6px 10px; cursor: pointer; color: var(--ink); font-size: 13px; flex-direction: row; }
+  .seg input:checked + label { background: var(--ink); color: var(--bg); }
+  button.go { background: var(--accent); color: var(--accent-ink); border: none; padding: 8px 14px; border-radius: 6px; font-weight: 600; cursor: pointer; }
+  button.go:disabled { opacity: .5; cursor: wait; }
+  .view { position: relative; display: flex; flex-direction: column; min-width: 0; }
+  #canvas { flex: 1; min-height: 300px; background: var(--view); }
+  .status { position: absolute; top: 10px; left: 12px; font-size: 12px; color: var(--muted); }
+  .viewopts { position: absolute; top: 8px; right: 12px; display: flex; gap: 10px; }
+  .report { padding: 10px 20px 14px; border-top: 1px solid var(--line); background: var(--panel); max-height: 34vh; overflow-y: auto; }
+  .report .dims { font-variant-numeric: tabular-nums; }
+  .check-item { background: var(--warn-bg); color: var(--warn); border-radius: 5px; padding: 5px 8px; margin: 4px 0; font-size: 12.5px; }
+  .error { color: var(--err); font-weight: 600; }
+  .notes { color: var(--muted); font-size: 12px; margin: 4px 0 0; padding-left: 16px; }
+  details summary { cursor: pointer; font-size: 12px; color: var(--muted); }
+  table.presets { border-collapse: collapse; font-size: 11.5px; width: 100%; margin-top: 4px; }
+  table.presets td { border-top: 1px solid var(--line); padding: 2px 4px; vertical-align: top; }
+  table.presets td:first-child { font-family: ui-monospace, Consolas, monospace; white-space: nowrap; }
+  [hidden] { display: none !important; }
+  @media (max-width: 800px) {
+    main { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; }
+    form { border-right: none; padding: 12px 16px 40px; }
+    #canvas { height: 60vh; }
+    header { padding: 12px 16px; flex-wrap: wrap; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <h1>Enclo<b>SURE</b></h1>
+  <div class="tabs" role="tablist">
+    <button role="tab" aria-selected="true" data-tab="box">Quick box</button>
+    <button role="tab" aria-selected="false" data-tab="stock">Bought box</button>
+  </div>
+</header>
+<main>
+  <form id="boxform" autocomplete="off">
+    <fieldset style="border-top:none;margin-top:0">
+      <legend>Size (mm)</legend>
+      <div class="row">
+        <label>Length X<input name="L" type="number" step="0.5" value="100"></label>
+        <label>Width Y<input name="W" type="number" step="0.5" value="60"></label>
+        <label>Height Z<input name="H" type="number" step="0.5" value="40"></label>
+      </div>
+      <label class="check"><input name="outer" type="checkbox"> These are outside sizes</label>
+      <div class="row">
+        <label>Wall<input name="wall" type="number" step="0.1" value="2"></label>
+        <label>Floor<input name="floor" type="number" step="0.1" value="2"></label>
+        <label>Corner radius<input name="corner_radius" type="number" step="0.5" value="3"></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Lid</legend>
+      <div class="row">
+        <label>Type<select name="lid">
+          <option value="screw">Screw</option><option value="friction">Friction</option>
+          <option value="snap">Snap</option><option value="slide">Slide</option><option value="none">None</option>
+        </select></label>
+        <label>Thickness<input name="lid_thickness" type="number" step="0.1" value="2"></label>
+        <label>Lip depth<input name="lip" type="number" step="0.5" value="3"></label>
+      </div>
+      <div class="row" data-for="screw">
+        <label>Screw<select name="lid_screw"></select></label>
+        <label>Post hole<select name="lid_screw_hole"><option>insert</option><option>tap</option><option>clearance</option></select></label>
+        <label>Fit gap<input name="fit_clearance" type="number" step="0.05" value="0.2"></label>
+      </div>
+      <div class="row two" data-for="screw">
+        <label>Gasket cord (0 none)<input name="gasket" type="number" step="0.1" value="0"></label>
+      </div>
+    </fieldset>
+    <fieldset>
+      <legend>Board standoffs</legend>
+      <div class="row one">
+        <label>Positions from the inside centre<input name="standoffs" placeholder="rect:80x40  or  x,y;x,y" value="rect:80x40"></label>
+      </div>
+      <div class="row">
+        <label>Height<input name="standoff_height" type="number" step="0.5" value="5"></label>
+        <label>Screw<select name="standoff_screw"></select></label>
+        <label>Hole<select name="standoff_hole"><option>insert</option><option>tap</option><option>clearance</option></select></label>
+      </div>
+      <label class="check"><input name="standoff_ribs" type="checkbox" checked> Gussets at their feet</label>
+    </fieldset>
+    <fieldset>
+      <legend>Cutouts</legend>
+      <textarea name="cutouts" spellcheck="false">left:usb-c@0,8
+back:pg9@20,20
+lid:round:6@20,0</textarea>
+      <p class="hint">One per line: <code>FACE:PRESET@a,b</code>, <code>FACE:round:D@a,b</code> or <code>FACE:rect:WxH[rR]@a,b</code>. Faces: left right front back lid floor. On a wall, a is along it from the middle and b is up from the inside floor.</p>
+      <details><summary>Presets</summary><table class="presets" id="presets"></table></details>
+    </fieldset>
+    <fieldset>
+      <legend>Mounting and extras</legend>
+      <div class="row">
+        <label>Ears (mm out)<input name="flange" type="number" step="1" value="0"></label>
+        <label>Feet dia.<input name="feet" type="number" step="0.5" value="0"></label>
+        <label>Keyholes<select name="keyholes"><option value="">none</option></select></label>
+      </div>
+      <label class="check"><input name="din_rail" type="checkbox"> DIN rail clip (TS35) under the floor</label>
+      <label style="margin-top:8px">Vents<textarea name="vents" spellcheck="false" placeholder="right:30x20@0,15"></textarea></label>
+      <p class="hint"><code>FACE:WxH@a,b[:slot[:pitch]]</code></p>
+      <label style="margin-top:8px">Labels<textarea name="labels" spellcheck="false" placeholder="lid:POWER@0,-15"></textarea></label>
+      <p class="hint"><code>FACE:TEXT@a,b[:size[:depth]]</code>, negative depth is recessed</p>
+    </fieldset>
+    <fieldset>
+      <legend>Printing</legend>
+      <div class="row two">
+        <label>Bottom chamfer<input name="bottom_chamfer" type="number" step="0.1" value="0.4"></label>
+      </div>
+      <label class="check"><input name="teardrop" type="checkbox" checked> Teardrop holes in walls</label>
+    </fieldset>
+    <div class="actions">
+      <div class="seg" role="radiogroup" aria-label="Download">
+        <input type="radio" name="format" id="f-step" value="step" checked><label for="f-step">STEP</label>
+        <input type="radio" name="format" id="f-onshape" value="onshape"><label for="f-onshape">Onshape</label>
+        <input type="radio" name="format" id="f-both" value="both"><label for="f-both">Both</label>
+      </div>
+      <label class="check"><input name="stl" type="checkbox" checked> STL</label>
+      <button class="go" type="submit">Download</button>
+    </div>
+  </form>
+
+  <form id="stockform" hidden>
+    <fieldset style="border-top:none;margin-top:0">
+      <legend>Your box</legend>
+      <p class="hint" style="font-size:12.5px">Download the maker's STEP for the box you bought (Hammond has one on each 1590 product page). It must stand with its opening up.</p>
+      <div class="row one"><label>Box STEP (may hold the lid too)<input name="step" type="file" accept=".step,.stp" required></label></div>
+      <div class="row one"><label>Lid STEP, if separate<input name="lid" type="file" accept=".step,.stp"></label></div>
+    </fieldset>
+    <fieldset>
+      <legend>Cutouts</legend>
+      <textarea name="cutouts" spellcheck="false" required>front:pg9@0,12
+lid:pushbutton-22@0,0</textarea>
+      <p class="hint">Same lines as the quick box. You get the drilled box as STEP and a PDF with a 1:1 drilling template per face.</p>
+      <label class="check"><input name="teardrop" type="checkbox" value="true"> Teardrop wall holes (printed box)</label>
+    </fieldset>
+    <div class="actions"><button class="go" type="submit">Make templates</button></div>
+  </form>
+
+  <section class="view">
+    <div id="canvas"></div>
+    <div class="status" id="status">Loading...</div>
+    <div class="viewopts">
+      <label class="check"><input id="explode" type="checkbox" checked> Lift lid</label>
+      <label class="check"><input id="showlid" type="checkbox" checked> Show lid</label>
+    </div>
+    <div class="report" id="report"></div>
+  </section>
+</main>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+} }
+</script>
+<script type="module">
+import * as THREE from "three";
+import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+import { STLLoader } from "three/addons/loaders/STLLoader.js";
+
+const SCREWS = ["M2", "M2.5", "M3", "M4"];
+const $ = (s, el = document) => el.querySelector(s);
+const boxform = $("#boxform"), stockform = $("#stockform");
+for (const name of ["lid_screw", "standoff_screw", "keyholes"]) {
+  const sel = boxform.elements[name];
+  for (const s of SCREWS) sel.add(new Option(s, s, false, s === "M3" && name !== "keyholes"));
+}
+
+// The viewer. Our frame is Z up; three.js is Y up.
+const host = $("#canvas");
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+host.appendChild(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(35, 1, 1, 10000);
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x666666, 2.2));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(1, 2, 1.5); scene.add(sun);
+const world = new THREE.Group(); world.rotation.x = -Math.PI / 2; scene.add(world);
+const loader = new STLLoader();
+let baseMesh = null, lidMesh = null, framed = false, lastTop = 0;
+
+function themeColors() {
+  const cs = getComputedStyle(document.documentElement);
+  scene.background = new THREE.Color(cs.getPropertyValue("--view").trim());
+}
+themeColors();
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", themeColors);
+
+function resize() {
+  const w = host.clientWidth, h = host.clientHeight;
+  renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+new ResizeObserver(resize).observe(host);
+(function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+
+function meshFrom(b64, color) {
+  const bytes = Uint8Array.from(atob(b64), c => c.charCodeAt(0));
+  const geo = loader.parse(bytes.buffer);
+  geo.computeVertexNormals();
+  return new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ color, roughness: .65, metalness: .05, flatShading: false }));
+}
+function placeLid() {
+  if (!lidMesh) return;
+  lidMesh.position.z = $("#explode").checked ? Math.max(15, lastTop * 0.5) : 0;
+  lidMesh.visible = $("#showlid").checked;
+}
+$("#explode").onchange = placeLid; $("#showlid").onchange = placeLid;
+
+function show(data) {
+  for (const m of [baseMesh, lidMesh]) if (m) { world.remove(m); m.geometry.dispose(); }
+  baseMesh = meshFrom(data.base, 0x8d9aa6); world.add(baseMesh);
+  lidMesh = data.lid ? meshFrom(data.lid, 0xd9a066) : null;
+  if (lidMesh) world.add(lidMesh);
+  lastTop = data.outer[2];
+  placeLid();
+  if (!framed) {
+    const r = Math.hypot(...data.outer);
+    camera.position.set(r * 1.3, r * 1.1, r * 1.5);
+    controls.target.set(0, data.outer[2] / 2, 0);
+    framed = true;
+  }
+}
+
+function report(data, error) {
+  const el = $("#report");
+  if (error) { el.innerHTML = `<div class="error"></div>`; el.firstChild.textContent = error; return; }
+  const f = v => v.map(x => +x.toFixed(2)).join(" x ");
+  el.innerHTML = `<div class="dims">Inside <b>${f(data.inner)}</b> mm, outside <b>${f(data.outer)}</b> mm</div>`;
+  for (const c of data.checks) { const d = document.createElement("div"); d.className = "check-item"; d.textContent = c; el.appendChild(d); }
+  if (data.notes.length) {
+    const ul = document.createElement("ul"); ul.className = "notes";
+    for (const n of data.notes) { const li = document.createElement("li"); li.textContent = n; ul.appendChild(li); }
+    el.appendChild(ul);
+  }
+}
+
+function body() {
+  const e = boxform.elements, num = n => parseFloat(e[n].value || "0");
+  return {
+    size: [num("L"), num("W"), num("H")], size_is: e.outer.checked ? "outer" : "inner",
+    wall: num("wall"), floor: num("floor"), corner_radius: num("corner_radius"),
+    lid: e.lid.value, lid_thickness: num("lid_thickness"), lip: num("lip"),
+    lid_screw: e.lid_screw.value, lid_screw_hole: e.lid_screw_hole.value, fit_clearance: num("fit_clearance"),
+    gasket: e.lid.value === "screw" ? num("gasket") : 0,
+    standoffs: e.standoffs.value.trim(), standoff_height: num("standoff_height"),
+    standoff_screw: e.standoff_screw.value, standoff_hole: e.standoff_hole.value, standoff_ribs: e.standoff_ribs.checked,
+    cutouts: e.cutouts.value, vents: e.vents.value, labels: e.labels.value,
+    flange: num("flange"), feet: num("feet"), keyholes: e.keyholes.value || null, din_rail: e.din_rail.checked,
+    bottom_chamfer: num("bottom_chamfer"), teardrop: e.teardrop.checked,
+    format: e.format.value, stl: e.stl.checked,
+  };
+}
+
+async function errorOf(res) {
+  try { const j = await res.json(); return j.error || j.detail || res.statusText; } catch { return res.statusText; }
+}
+
+let timer = null, seq = 0;
+async function refresh() {
+  const mine = ++seq;
+  $("#status").textContent = "Building...";
+  try {
+    const res = await fetch("api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body()) });
+    if (mine !== seq) return;
+    if (!res.ok) { report(null, await errorOf(res)); $("#status").textContent = "Not built"; return; }
+    const data = await res.json();
+    show(data); report(data);
+    $("#status").textContent = "";
+  } catch (err) { if (mine === seq) { report(null, String(err)); $("#status").textContent = ""; } }
+}
+function later() { clearTimeout(timer); timer = setTimeout(refresh, 500); }
+boxform.addEventListener("input", later);
+boxform.addEventListener("change", later);
+function lidRows() { for (const r of boxform.querySelectorAll('[data-for="screw"]')) r.hidden = boxform.elements.lid.value !== "screw"; }
+boxform.elements.lid.addEventListener("change", lidRows); lidRows();
+
+async function download(res, fallback) {
+  if (!res.ok) { report(null, await errorOf(res)); return; }
+  const blob = await res.blob();
+  const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") || "")?.[1] || fallback;
+  const a = Object.assign(document.createElement("a"), { href: URL.createObjectURL(blob), download: name });
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+}
+boxform.addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const b = ev.submitter; b.disabled = true; b.textContent = "Making...";
+  try { await download(await fetch("api/box", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body()) }), "enclosure_box.zip"); }
+  finally { b.disabled = false; b.textContent = "Download"; }
+});
+stockform.addEventListener("submit", async ev => {
+  ev.preventDefault();
+  const b = ev.submitter; b.disabled = true; b.textContent = "Working...";
+  const fd = new FormData(stockform);
+  if (!stockform.elements.lid.files.length) fd.delete("lid");
+  if (!stockform.elements.teardrop.checked) fd.set("teardrop", "false");
+  try { await download(await fetch("api/stock", { method: "POST", body: fd }), "drilled.zip"); }
+  finally { b.disabled = false; b.textContent = "Make templates"; }
+});
+
+for (const t of document.querySelectorAll("[data-tab]")) t.onclick = () => {
+  for (const u of document.querySelectorAll("[data-tab]")) u.setAttribute("aria-selected", u === t);
+  boxform.hidden = t.dataset.tab !== "box"; stockform.hidden = t.dataset.tab !== "stock";
+};
+
+fetch("api/presets").then(r => r.json()).then(p => {
+  const tbl = $("#presets");
+  for (const [name, v] of Object.entries(p)) {
+    const tr = tbl.insertRow(); tr.insertCell().textContent = name; tr.insertCell().textContent = v.source;
+  }
+});
+refresh();
+</script>
+</body>
+</html>
