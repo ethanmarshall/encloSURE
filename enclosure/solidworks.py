@@ -19,7 +19,8 @@ from .box import SCREWS, BoxSpec, Cutout, _post_boss, face_name
 from .presets import resolve
 
 LEFT_OUT = ("vents", "labels", "gasket", "keyholes", "din_rail", "feet", "windows", "card_slots", "batteries",
-            "tie_points", "cable_notches", "light_pipes", "lid_standoffs", "flange")
+            "tie_points", "cable_notches", "light_pipes", "lid_standoffs", "flange", "dividers", "battery_door",
+            "strain_reliefs", "wall_bracket", "stacking")
 
 
 def _m(mm: float) -> str:

@@ -158,3 +158,20 @@ def test_endpoints(tmp_path, monkeypatch):
     listed = c.get("/api/library").json()["designs"]
     assert listed[0]["type"] == "part" and c.get(f"/api/library/{saved['id']}").json()["part"]["params"]["diameter"] == 25
     assert c.post("/api/library", json={"name": "bad", "part": {"kind": "knob", "params": {"nope": 1}}}).status_code == 400
+
+
+def test_dividers():
+    s = box.BoxSpec(size=[120, 80, 40], lid="friction")
+    s.dividers = box.grid_dividers(s, 3, 2) + [{"axis": "x", "at": 0, "removable": True, "notch": 8}]
+    m = box.build(s)
+    assert m["base"].is_valid and len(m["base"].solids()) == 1
+    assert (m["base"] & m["lid"]).volume < 1e-6  # clear of the lid's lip
+    assert [n for n, _ in m["extras"]] == ["divider_4"]
+    assert any(n.startswith("sections:") for n in m["notes"])
+    # A probe in the middle of a section is empty; one in a divider is solid.
+    assert (m["base"] & Pos(40, 20, 20) * Box(1, 1, 1)).volume < 1e-6
+    assert (m["base"] & Pos(-20, 20, 20) * Box(0.5, 0.5, 0.5)).volume > 0
+    with pytest.raises(ValueError):
+        box.build(box.BoxSpec(size=[120, 80, 40], dividers=[{"axis": "x", "at": 70}]))
+    hit = box.build(box.BoxSpec(size=[120, 80, 40], standoffs=[[0, 0]], dividers=[{"axis": "x", "at": 0}]))
+    assert any("runs through" in c for c in hit["checks"])

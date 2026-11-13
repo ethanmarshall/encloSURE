@@ -34,7 +34,9 @@ def unsupported(spec: BoxSpec) -> list[str]:
     if spec.light_pipes:
         out.append("light pipes")
     for name, on in (("gasket", spec.gasket), ("keyholes", spec.keyholes), ("DIN clip", spec.din_rail),
-                     ("labels", spec.labels), ("mounting ears", spec.flange),
+                     ("labels", spec.labels), ("mounting ears", spec.flange), ("dividers", spec.dividers),
+                     ("battery door", spec.battery_door), ("strain reliefs", spec.strain_reliefs),
+                     ("wall bracket", spec.wall_bracket), ("stacking", spec.stacking),
                      ("standoff gussets", spec.standoffs and spec.standoff_ribs), ("pin standoffs", spec.standoff_hole == "pin")):
         if on:
             out.append(name)

@@ -177,6 +177,9 @@ class BoxSpec:
     battery_door: dict | None = None
     # Cable strain relief: a clamp inside behind a cable hole: [{face, d (cable), at [along, height]}]
     strain_reliefs: list[dict] = field(default_factory=list)
+    # Dividers: walls splitting the inside into sections: [{axis: x (a wall across at X = at) or y,
+    # at, thickness, height (blank: up to under the lid), span [from, to] along it, removable, notch (a cable gap)}]
+    dividers: list[dict] = field(default_factory=list)
     wall_bracket: bool = False  # a French-cleat rail on the floor and a bracket for the wall (its own part)
     stacking: bool = False  # pins on the lid and sockets under the floor so boxes stack in line
 
@@ -276,6 +279,14 @@ class BoxSpec:
             raise ValueError(f"feet: the floor needs {self.feet_depth + 0.8:g} mm for {self.feet_depth:g} mm recesses")
         if self.din_rail and self.inner[1] + 2 * self.wall < RAIL_W + 8:
             raise ValueError(f"din_rail: the box must be at least {RAIL_W + 8:g} mm wide outside")
+        for dv in self.dividers:
+            if dv.get("axis") not in ("x", "y"):
+                raise ValueError("divider axis: x (a wall across the box at X = at) or y (at Y = at)")
+            half = (L_in if dv["axis"] == "x" else W_in) / 2
+            if abs(float(dv.get("at", 0))) > half - 2:
+                raise ValueError(f"divider at {dv.get('at')}: keep it inside the walls (±{half - 2:g} mm)")
+            if not 0.8 <= float(dv.get("thickness") or self.wall) <= 10:
+                raise ValueError("divider thickness: 0.8 to 10 mm")
         for c in self.cutouts:
             Cutout(**resolve(c)).check()
         for v in self.vents:
@@ -489,6 +500,34 @@ def screw_plan(spec: "BoxSpec") -> dict:
     return {**plan, "checks": checks}
 
 
+def _sections(spec: "BoxSpec") -> list[tuple[float, float]]:
+    """The sections' inside sizes when the dividers run wall to wall (a grid); [] when any is partial."""
+    L, W, _ = spec.inner
+    xs, ys = [-L / 2, L / 2], [-W / 2, W / 2]
+    for dv in spec.dividers:
+        if dv.get("span"):
+            return []
+        (xs if dv["axis"] == "x" else ys).append(float(dv["at"]))
+    xs.sort()
+    ys.sort()
+    t = {dv["axis"]: float(dv.get("thickness") or spec.wall) for dv in spec.dividers}
+    out = []
+    for i in range(len(xs) - 1):
+        for j in range(len(ys) - 1):
+            w = xs[i + 1] - xs[i] - (t.get("x", 0) / 2 if i > 0 else 0) - (t.get("x", 0) / 2 if i < len(xs) - 2 else 0)
+            d = ys[j + 1] - ys[j] - (t.get("y", 0) / 2 if j > 0 else 0) - (t.get("y", 0) / 2 if j < len(ys) - 2 else 0)
+            out.append((w, d))
+    return out
+
+
+def grid_dividers(spec: "BoxSpec", nx: int, ny: int, **kw) -> list[dict]:
+    """Dividers for an even grid of nx by ny sections."""
+    L, W, _ = spec.inner
+    out = [{"axis": "x", "at": round(-L / 2 + L * i / nx, 3), **kw} for i in range(1, nx)]
+    out += [{"axis": "y", "at": round(-W / 2 + W * j / ny, 3), **kw} for j in range(1, ny)]
+    return out
+
+
 def build(spec: BoxSpec) -> dict:
     """The base and lid as solids, notes on what was made, and checks worth a look."""
     spec.check()
@@ -694,6 +733,75 @@ def build(spec: BoxSpec) -> dict:
             lid = lid - tool
         else:
             base = base - tool
+
+    # Dividers: walls across the inside, fixed or sliding into rails on the walls.
+    divider_parts = []
+    if spec.dividers:
+        if spec.lid in PLATE_LIDS and spec.lip > 0 and not spec.gasket:
+            full = top - spec.lip - spec.fit_clearance - 0.3  # clear of the lid's lip
+        elif spec.lid == "slide":
+            full = base_h - 1.0 - spec.lid_thickness - spec.fit_clearance  # under the sliding panel
+        elif spec.gasket:
+            full = top - max(0.75 * spec.gasket + 3.0, 4.0) - 0.3  # under the gasket ledge
+        else:
+            full = top - 0.3
+        c = spec.fit_clearance
+        for i, dv in enumerate(spec.dividers):
+            axis, at = dv["axis"], float(dv.get("at", 0))
+            t = float(dv.get("thickness") or spec.wall)
+            h_top = min(spec.floor + float(dv["height"]), full) if dv.get("height") else full
+            run = W if axis == "x" else L  # the length it spans, wall to wall
+            a0, a1 = (dv.get("span") or [-run / 2, run / 2])
+            a0, a1 = max(float(a0), -run / 2), min(float(a1), run / 2)
+            if a1 - a0 < 3:
+                raise ValueError(f"divider {i + 1}: its span is under 3 mm")
+            h = h_top - spec.floor
+            mid = (a0 + a1) / 2
+            notch = float(dv.get("notch") or 0)
+            if dv.get("removable"):
+                # Two rails on each wall it meets (only where the span reaches a wall), the plate its own part.
+                gap, rail_t, rail_d = t + 2 * c, 1.6, 2.5
+                ends = [e for e in (-1, 1) if abs((a1 if e > 0 else a0) - e * run / 2) < 1e-6]
+                for e in ends:
+                    for side in (-1, 1):
+                        off = side * (gap / 2 + rail_t / 2)
+                        if axis == "x":
+                            r = Box(rail_t, rail_d, h).locate(Location((at + off, e * (W / 2 - rail_d / 2), spec.floor + h / 2)))
+                        else:
+                            r = Box(rail_d, rail_t, h).locate(Location((e * (L / 2 - rail_d / 2), at + off, spec.floor + h / 2)))
+                        base += r
+                plate_len = (a1 - a0) - 2 * c
+                plate = Box(plate_len, t, h - c, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                if notch:
+                    plate -= Pos(0, 0, h - c) * Cylinder(notch / 2, t * 4, rotation=(90, 0, 0))
+                if (a1 - a0) > 30 and not notch:  # a finger hole to lift it out
+                    plate -= Pos(plate_len / 4, 0, h - c - 6) * Cylinder(4.0, t * 4, rotation=(90, 0, 0))
+                divider_parts.append((f"divider_{i + 1}", Rot(90, 0, 0) * plate))  # lying flat to print
+                notes.append(f"divider {i + 1} (removable): a {t:g} mm plate {plate_len:.1f} x {h - c:.1f} mm sliding into rails "
+                             f"at {axis.upper()} {at:g}" + (f", Ø{notch:g} mm cable gap on top" if notch else "") + "; print it flat")
+            else:
+                if axis == "x":
+                    wall = Box(t, a1 - a0, h + 0.01).locate(Location((at, mid, spec.floor + h / 2 - 0.005)))
+                else:
+                    wall = Box(a1 - a0, t, h + 0.01).locate(Location((mid, at, spec.floor + h / 2 - 0.005)))
+                if notch:
+                    if axis == "x":
+                        wall -= Pos(at, mid, h_top) * Cylinder(notch / 2, t * 4, rotation=(0, 90, 0))
+                    else:
+                        wall -= Pos(mid, at, h_top) * Cylinder(notch / 2, t * 4, rotation=(90, 0, 0))
+                base += wall
+                notes.append(f"divider {i + 1}: a {t:g} mm wall at {axis.upper()} {at:g}, {h:.1f} mm tall"
+                             + (f", from {a0:g} to {a1:g}" if (a0, a1) != (-run / 2, run / 2) else "")
+                             + (f", Ø{notch:g} mm cable gap on top" if notch else ""))
+            # Anything it runs through: posts, standoffs.
+            for kx, ky, kr in keep_out:
+                d_ = abs((kx if axis == "x" else ky) - at)
+                u = ky if axis == "x" else kx
+                if kr > 0 and d_ < kr + t / 2 and a0 - kr < u < a1 + kr:
+                    checks.append(f"divider {i + 1} runs through the post or standoff at ({kx:g}, {ky:g}): move it or shorten its span")
+        sections = _sections(spec)
+        if sections:
+            notes.append("sections: " + ", ".join(f"{w:.1f} x {d:.1f} mm" for w, d in sections))
 
     # Cutouts.
     for raw in spec.cutouts:
@@ -996,7 +1104,7 @@ def build(spec: BoxSpec) -> dict:
             checks.append(f"about {dt:g} °C above the room with {spec.power_w:g} W: add vents low and high (a chimney), "
                           f"make the box bigger, or move heat out through a metal panel")
 
-    extras = []  # other printed parts: a battery door, clamp bars, a wall bracket
+    extras = list(divider_parts)  # other printed parts: dividers, a battery door, clamp bars, a wall bracket
 
     # Battery door: an opening in the floor, a rebate round it for a flush door, two screw bosses inside.
     if spec.battery_door:

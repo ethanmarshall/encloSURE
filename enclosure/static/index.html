@@ -279,6 +279,18 @@
   </fieldset>
 
   <fieldset>
+    <legend>Sections</legend>
+    <p class="hint">Dividers split the inside into compartments. "Across the length" puts a wall across the box at that X (from the centre); "across the width" at that Y. Height blank runs it up to just under the lid. Removable ones slide into rails and print as their own part.</p>
+    <div class="grid" style="align-items:end">
+      <label class="f">Sections along the length<input name="grid_nx" type="number" min="1" max="12" step="1" value="2"></label>
+      <label class="f">Sections across the width<input name="grid_ny" type="number" min="1" max="12" step="1" value="1"></label>
+      <button type="button" class="plain" id="gridbtn">Make an even grid</button>
+    </div>
+    <div class="rows" id="div_rows"></div>
+    <button type="button" class="add" data-add="div">+ Add a divider</button>
+  </fieldset>
+
+  <fieldset>
     <legend>Boards standing on edge</legend>
     <p class="hint">Card guides: pairs of rails on the front and back walls hold a board standing across the box. Give the X position of each.</p>
     <div class="rows" id="card_rows"></div>
@@ -858,7 +870,29 @@ function srRow(o = {}) {
   return item;
 }
 const readSr = it => ({ face: $("[name=face]", it).value, d: len($("[name=d]", it)), at: [len($("[name=a]", it)), len($("[name=b]", it))] });
-const ROWS = { sr: ["#sr_rows", srRow], lp: ["#lp_rows", lpRow], lso: ["#lso_rows", xyRow], bat: ["#bat_rows", batRow], tie: ["#tie_rows", xyRow], notch: ["#notch_rows", notchRow],
+function divRow(o = {}) {
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid" },
+      field("Runs", h("select", { name: "axis" }, h("option", { value: "x", selected: (o.axis || "x") === "x" }, "Across the length (at X)"),
+        h("option", { value: "y", selected: o.axis === "y" }, "Across the width (at Y)"))),
+      field("Position", lenIn("at", o.at ?? 0), UNIT()),
+      field("Thickness (blank: the wall)", (() => { const el = o.thickness ? lenIn("t", o.thickness, "0.1", "0.8") : h("input", { type: "number", name: "t", min: "0.8", step: "0.1" }); return el; })(), UNIT())),
+    h("div", { class: "grid" },
+      field("Height (blank: up to the lid)", (() => o.height ? lenIn("hh", o.height, "0.5", "1") : h("input", { type: "number", name: "hh", min: "1", step: "0.5" }))(), UNIT()),
+      field("Cable gap on top (0: none)", lenIn("notch", o.notch ?? 0, "0.5", "0"), UNIT()),
+      h("label", { class: "check" }, h("input", { type: "checkbox", name: "removable", checked: !!o.removable }), " Removable (slides in)")));
+  item._sync = () => {};
+  return item;
+}
+const readDiv = it => {
+  const opt = n => { const el = $(`[name=${n}]`, it); return el.value === "" ? null : len(el); };
+  const d = { axis: $("[name=axis]", it).value, at: len($("[name=at]", it)), removable: $("[name=removable]", it).checked };
+  const t = opt("t"), hh = opt("hh"), notch = opt("notch");
+  if (t) d.thickness = t; if (hh) d.height = hh; if (notch) d.notch = notch;
+  return d;
+};
+const ROWS = { div: ["#div_rows", divRow], sr: ["#sr_rows", srRow], lp: ["#lp_rows", lpRow], lso: ["#lso_rows", xyRow], bat: ["#bat_rows", batRow], tie: ["#tie_rows", xyRow], notch: ["#notch_rows", notchRow],
   card: ["#card_rows", cardRow], win: ["#win_rows", winRow], cut: ["#cut_rows", holeRow], vent: ["#vent_rows", ventRow], label: ["#label_rows", labelRow], so: ["#so_rows", soRow], stock: ["#stock_rows", holeRow] };
 function addRow(kind, opts) {
   const [sel, make] = ROWS[kind];
@@ -1044,6 +1078,7 @@ function boxBody() {
     wall_bracket: e.wall_bracket.checked, stacking: e.stacking.checked,
     battery_door: $("#bd_on").checked ? { size: [len(e.bd_w), len(e.bd_l)], at: [len(e.bd_x), len(e.bd_y)], screw: e.bd_screw.value } : null,
     strain_reliefs: $$("#sr_rows .item").map(readSr),
+    dividers: $$("#div_rows .item").map(readDiv),
     board_screw_length: e.board_screw_length.value ? len(e.board_screw_length) : null,
     lid_screw_length: e.lid_screw_length.value ? len(e.lid_screw_length) : null,
     format: e.format.value, stl: e.stl.checked,
@@ -1117,6 +1152,7 @@ function applySpec(sp) {
   $("#bd_on").checked = !!sp.battery_door;
   if (sp.battery_door) { set("bd_w", sp.battery_door.size[0]); set("bd_l", sp.battery_door.size[1]); set("bd_x", (sp.battery_door.at || [0, 0])[0]);
     set("bd_y", (sp.battery_door.at || [0, 0])[1]); e.bd_screw.value = sp.battery_door.screw || "M2"; }
+  $("#div_rows").replaceChildren(); for (const d of sp.dividers || []) addRow("div", d);
   $("#sr_rows").replaceChildren(); for (const r of sp.strain_reliefs || []) addRow("sr", { face: FACE_OF[r.face] || r.face, d: r.d, a: (r.at || [0, 6])[0], b: (r.at || [0, 6])[1] });
   for (const n of ["board_screw_length", "lid_screw_length"]) { e[n].value = sp[n] ? show(sp[n]) : ""; if (sp[n]) e[n].dataset.mm = String(sp[n]); else delete e[n].dataset.mm; }
   let so = sp.standoffs || [];
@@ -1542,6 +1578,16 @@ $("#lcdl").onclick = async () => busy($("#lcdl"), "Making...", async () => {
   const r = await download(await fetch("api/lasercut", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(lcBody()) }), "laser_cut_box.zip");
   if (r.error) boxReport(null, r.error);
 });
+$("#gridbtn").onclick = () => {
+  const e = boxform.elements, nx = Math.max(1, Math.min(12, Math.round(num(e.grid_nx.value) || 1))), ny = Math.max(1, Math.min(12, Math.round(num(e.grid_ny.value) || 1)));
+  // The inside size, from the form (an outside size loses the walls).
+  const out = e.size_is.value === "outer", wall = len(e.wall);
+  const L = len(e.L) - (out ? 2 * wall : 0), W = len(e.W) - (out ? 2 * wall : 0);
+  $("#div_rows").replaceChildren();
+  for (let i = 1; i < nx; i++) addRow("div", { axis: "x", at: +(-L / 2 + L * i / nx).toFixed(3) });
+  for (let j = 1; j < ny; j++) addRow("div", { axis: "y", at: +(-W / 2 + W * j / ny).toFixed(3) });
+  changed($("#div_rows"));
+};
 $("#mouldbtn").onclick = async () => busy($("#mouldbtn"), "Checking...", async () => {
   const res = await fetch("api/moulding", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ box: boxBody(), resin: boxform.elements.resin.value }) });
   if (!res.ok) { boxReport(null, await errorOf(res)); return; }

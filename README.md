@@ -317,6 +317,10 @@ The Quick box tab's "Made another way" makes the same inside size and holes as:
 - **Screws**: board and lid screws are picked from stock lengths so they never bottom out and bite
   enough (or give your own length); a screw that's too long or too short is flagged. The assembly
   uses real ISO 4762 screws and heat-set inserts.
+- **Sections**: dividers split the inside into compartments, fixed walls or removable plates that
+  slide into rails (printed as their own parts), each with an optional cable gap on top. "Make an
+  even grid" on the page sets up N x M sections; the notes list each section's inside size. They stop
+  under the lid's lip on their own.
 - **Honeycomb vents**, counted in the temperature estimate.
 - **Battery door**: an opening in the floor with a flush door that screws on (the door is its own part).
 - **Cable strain relief**: a hole for the cable and a clamp bar on two posts inside.
