@@ -50,7 +50,18 @@ Before checking, build `parts.json` (next to the board):
 3. Read `fit/report.json`. Each finding has `severity`, `code`, `subject` (a reference, J1), a
    `message`, a `fix`, and where a move fixes it, `kicad_move` [dx, dy] in mm on the KiCad board.
 
-## Fixing
+## Fixing it for you
+
+`enclosure autofit base.step board.kicad_pcb --lid lid.step --parts parts.json -o autofit` does the
+loop below on its own: export the STEP with `kicad-cli`, check, move what the check asks to move,
+and repeat until the board fits or a round asks for no moves. The user's board is never changed: the
+result is `autofit/board_fixed.kicad_pcb`. Tell the user what moved (autofit.json lists each round)
+and what is left, then, if they agree, open the fixed board in KiCad in place of the original.
+
+To start a box from a finished board instead: `enclosure frompcb board.step -o box` (the board's STEP
+export); it designs the box, checks the board in it, and writes `box/box.json` to adjust.
+
+## Fixing by hand
 
 - `opening_misaligned`, `hole_off_standoff`, `board_edge_clearance`: apply `kicad_move` to the
   footprint (or the hole), then check again.

@@ -158,6 +158,7 @@ def preview(body: dict):
     except (ValueError, RuntimeError) as e:
         _bad(e)
     out = {"inner": made["inner"], "outer": made["outer"], "notes": made["notes"], "checks": made["checks"],
+           "estimate": made.get("estimate"),
            "base": base64.b64encode(_stl(made["base"])).decode()}
     if made["lid"] is not None:
         out["lid"] = base64.b64encode(_stl(made["lid"])).decode()
@@ -197,7 +198,8 @@ def make_box(body: dict):
 
 @app.post("/api/stock")
 async def make_stock(step: UploadFile = File(...), lid: UploadFile | None = File(None),
-                     cutouts: str = Form(...), teardrop: bool = Form(False)):
+                     cutouts: str = Form(...), teardrop: bool = Form(False), drawings: str = Form(""),
+                     part_number: str = Form(""), material: str = Form("")):
     from . import stock
     try:
         rows = json.loads(cutouts) if cutouts.lstrip().startswith("[") else cutouts
@@ -217,6 +219,15 @@ async def make_stock(step: UploadFile = File(...), lid: UploadFile | None = File
             result = stock.run(base_path, parsed, out, lid_path=lid_path, teardrop=teardrop)
             (out / "checks.json").write_text(json.dumps(
                 {"inside": result["inside"], "checks": result["checks"]}, indent=2) + "\n")
+            if drawings in ("asme", "iso"):
+                from . import drawing
+                title = {k: v for k, v in (("part_number", part_number), ("material", material)) if v.strip()}
+                drawing.make(out, out / "drawings", drawings, title, "pdf")
+                for j in (out / "drawings").glob("*.drawing.json"):
+                    j.unlink()
+                for pdf in (out / "drawings").glob("*.pdf"):
+                    pdf.rename(out / f"drawing_{pdf.name}")
+                (out / "drawings").rmdir() if not any((out / "drawings").iterdir()) else None
             return _zip(out, base_path.stem + "_drilled")
     except (ValueError, RuntimeError) as e:
         _bad(e)
@@ -323,6 +334,75 @@ async def fit_check(board: UploadFile | None = File(None), base: UploadFile | No
                     "report": json.loads(Path(files["report"]).read_text()),
                     "view": Path(files["view"]).read_text()}
     except (ValueError, RuntimeError, json.JSONDecodeError) as e:
+        _bad(e)
+
+
+def _title(body: dict) -> dict:
+    t = body.get("title") or {}
+    return {k: str(v).strip()[:60] for k, v in t.items() if k in ("title", "part_number", "material", "drawn_by", "company") and str(v).strip()}
+
+
+@app.get("/api/health")
+def health():
+    from . import drawing
+    try:
+        drawing.find_draftwright()
+        dw = True
+    except RuntimeError:
+        dw = False
+    return {"ok": True, "draftwright": dw}
+
+
+@app.post("/api/drawing")
+def make_drawing(body: dict):
+    """ASME or ISO drawings of the quick box's base and lid, as PDF and SVG."""
+    from . import drawing
+    standard = body.get("standard", "asme")
+    try:
+        spec = spec_from(body)
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            boxmod.write(spec, d / "box", stl=False)
+            r = drawing.make(d / "box", d / "out", standard, _title(body), "pdf,svg")
+            (d / "out" / "review.txt").write_text("\n".join(r["review"]) + "\n" if r["review"] else "No problems found.\n")
+            for j in (d / "out").glob("*.drawing.json"):
+                j.unlink()
+            return _zip(d / "out", f"enclosure_drawings_{standard}")
+    except (ValueError, RuntimeError) as e:
+        _bad(e)
+
+
+@app.post("/api/describe")
+def describe_box(body: dict):
+    from . import describe
+    text = str(body.get("text", ""))[:600]
+    if not text.strip():
+        _bad(ValueError("describe the project first"))
+    try:
+        r = describe.make(text)
+        return {"spec": asdict(r["spec"]), "notes": r["notes"], "kicad_pcb": r["kicad_pcb"]}
+    except (ValueError, RuntimeError) as e:
+        _bad(e)
+
+
+@app.post("/api/assembly")
+def make_assembly(body: dict):
+    """An exploded assembly drawing and parts list for the quick box (a plate stands in for the board)."""
+    from . import assembly
+    try:
+        spec = spec_from(body)
+        with tempfile.TemporaryDirectory() as d:
+            d = Path(d)
+            r = assembly.make(spec, d / "a", None, body.get("standard", "asme"))
+            out = d / "out"
+            out.mkdir()
+            for key, name in (("drawing", "assembly_drawing.pdf"), ("parts_list", "parts_list.csv"), ("step", "exploded.step")):
+                if key in r["files"]:
+                    Path(r["files"][key]).rename(out / name)
+            if r["notes"]:
+                (out / "notes.txt").write_text("\n".join(r["notes"]) + "\n")
+            return _zip(out, "enclosure_assembly")
+    except (ValueError, RuntimeError) as e:
         _bad(e)
 
 

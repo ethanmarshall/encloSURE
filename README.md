@@ -62,6 +62,14 @@ snap -o my_box_v2` rebuilds it with one thing changed.
 | Snap-in pins | `standoff_hole: "pin"` in box.json, or "Snap-in pins" on the page: a split peg with a barb goes up through each mounting hole and the board clicks down | screws |
 | Card guides | `card_slots: [x, ...]`, `board_thickness`: rails on the front and back walls hold a board standing across the box | none |
 | Windows | `windows: [{face, size, at, panel, panel_t}]`: an opening with a recess behind it for a clear panel or a display's glass, glued in from inside | none |
+| Lid posts | `lid_standoffs: [[x, y], ...]`, `lid_standoff_height`, `lid_standoff_screw`: posts hanging from the lid for a display or button board behind it | none |
+| Batteries | `batteries: [{cell: AA, AAA, 18650 or 21700, count, at, axis}]`: a cradle on the floor with room for spring contacts | none |
+| Cables | `tie_points: [[x, y]]` (zip-tie anchors), `cable_notches: [{face, at, d}]` (a U in the top of a wall the lid closes) | none |
+| Material | `material`: PETG, PLA, ABS or ASA, for the weight estimate | PETG |
+
+Every box also reports a rough weight and print time, and flags what prints badly: walls under
+1.2 mm, flat-topped wall openings over 10 mm that need bridging or support, round wall holes without
+teardrops, and raised text under 4 mm.
 | Printing | `--no-teardrop` (round wall holes get a 45° peak by default, to print without support), `--bottom-chamfer` (against first-layer squish), `--no-ribs` (gussets at the standoffs' feet) | on, 0.4 mm, on |
 | Output | `--format step` (STEP and STL), `onshape` (an Onshape custom feature), or `both`; `--no-stl` | step |
 
@@ -116,6 +124,20 @@ and teardrops are in the STEP only, and the command lists which of your settings
 out. Run `--format both` to have both. The geometry was checked in
 Onshape against the STEP build (the base's volume matches within 0.01%).
 
+## Describe it in words
+
+```
+enclosure describe "Arduino Uno, USB-C, two buttons, OLED, wall-mounted, splash-proof" -o first
+```
+
+A first box and the KiCad board to start in, from a few words. It reads keywords, not meaning: a
+known board (Raspberry Pi, Pi Zero, Arduino Uno or Mega, with their published mounting holes) or a
+size like 80x50; connectors and controls by name and count (USB-C, micro-USB, Ethernet, barrel jack,
+SMA, BNC, toggle, 22 mm buttons, buttons, LEDs, glands); a display (OLED, 16x2 LCD, TFT: typical
+window sizes, set yours from the module); batteries (AA, AAA, 18650, 21700); and where it lives
+(splash-proof, wall-mounted, DIN, on a desk, hot). Everything it assumed is listed, and wall openings
+start spread round the walls, to move to where your connectors are.
+
 ## A box around a board
 
 ```
@@ -142,6 +164,17 @@ enclosure fix board.kicad_pcb fit/report.json -o board_fixed.kicad_pcb
 onto its standoff) and writes a new file; the original is left alone. Re-export the STEP from KiCad
 and check again. Problems a move can't fix (a part too tall, an opening too small) are listed.
 
+## Fixing it automatically
+
+```
+enclosure autofit base.step board.kicad_pcb --lid lid.step -o autofit
+```
+
+Round after round: export the STEP with `kicad-cli` (Backplane's, through `$BACKPLANE_KICAD_CLI`,
+inside Backplane), check, move what the check asks to move, until the board fits or a round asks for
+nothing a move can fix. Your board is left alone; the result is `autofit/board_fixed.kicad_pcb`, with
+each round's report beside it. The `enclosure-fit` skill tells an agent in Backplane to use it.
+
 ## Fit test print
 
 `enclosure coupon -o coupon` (or "Print a fit test" on the page) writes a plate of pockets and six
@@ -157,7 +190,17 @@ enclosure drawing my_box --standard asme --part-number ENC-001 -o drawings
 An ASME (inch, Y14.5) or ISO (mm) drawing of the base and lid as PDF and SVG, made by the
 [draftwright fork](https://github.com/ethanmarshall/draftwright-rust): build it (`cargo build
 --release`) and set `DRAFTWRIGHT` to the binary. It works on a drilled bought box too, for a
-machinist. It runs where draftwright is installed, so it is on the command line, not the web page.
+machinist. The web page has it built in (the Dockerfile builds draftwright at a fixed commit).
+
+## Exploded assembly and parts list
+
+```
+enclosure assembly my_box/box.json --board board.step -o assembly
+```
+
+The base, board, lid and screws pulled apart along Z, drawn by draftwright's assembly pack with
+balloons and a parts list (`assembly/pack/pack.pdf`), plus `parts_list.csv` (screws sized to stock
+lengths, inserts, the O-ring cord, feet and panel parts) and the exploded STEP.
 
 ## A box you bought
 
@@ -191,10 +234,12 @@ extent: measure from the bottom edge and the centre line.
   if you have them) to check the fit, with each problem's fix, the KiCad move, and a 3D view.
 - **Bought box**: holes in a maker's STEP and the drilling templates.
 
-"Start from a finished board" on the Quick box tab designs the box around an uploaded board STEP and
+"Describe it in words" and "Start from a finished board" on the Quick box tab start a design;
+"Download drawings" and "Exploded assembly + parts list" make the drawings; the Bought box tab can
+add a drawing for the machinist. "Start from a finished board" designs the box around an uploaded board STEP and
 fills in the form. A fit check with the `.kicad_pcb` uploaded hands back a fixed copy. "Copy share
-link" puts every setting in the link, "Open box.json" loads a saved design, and the page remembers
-your last box in that browser. Set `ENCLOSURE_PASSWORD` on the server to make the page ask for a
+link" puts every setting in the link, "Open box.json" loads a saved design, "Save version" keeps
+numbered versions in that browser to open, download or delete, and the page remembers your last box. Set `ENCLOSURE_PASSWORD` on the server to make the page ask for a
 password (any user name).
 
 ```

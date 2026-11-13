@@ -1,6 +1,6 @@
 [project]
 name = "enclosure-sure"
-version = "0.5.0"
+version = "0.6.0"
 description = "Make a PCB and its enclosure fit: read the enclosure, write KiCad board limits, check the finished board's fit."
 readme = "README.md"
 requires-python = ">=3.10"

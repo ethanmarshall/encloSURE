@@ -74,10 +74,19 @@ def design(board_step, settings: Settings | None = None, specs: dict | None = No
     thick = bz1 - bz0
     edges = _edges(pb)
     parts = [n for n in solids if n is not pcb]
+    notes = []
+    # Parts with no 3D model: blocks from parts.json's body at their footprints, so they count too.
+    if footprints:
+        have = {n.name.split(" ")[0] for n in parts}
+        blocks, made, missing = fitmod.stand_ins(pcb.shape, have, specs or {}, footprints)
+        parts += blocks
+        if made:
+            notes.append(f"no 3D model, sized from parts.json: {', '.join(made)}")
+        if missing:
+            notes.append(f"no 3D model and no size in parts.json, so the box ignores them: {', '.join(missing)}")
     holes = fitmod.mounting_holes(pcb.shape)
     if not holes:
         raise ValueError("no mounting holes found in the board (round holes 1.9 to 5.5 mm through it)")
-    notes = []
 
     # Heights, from the board's top and bottom.
     tops = [bbox(p.shape)[1][2] - bz1 for p in parts if bbox(p.shape)[1][2] > bz1 + 0.01]

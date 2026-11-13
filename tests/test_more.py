@@ -88,7 +88,7 @@ def test_pins_card_guides_and_windows():
     base, lid = made["base"], made["lid"]
     assert base.is_valid and len(base.solids()) == 1 and lid.is_valid and len(lid.solids()) == 1
     assert geom.overlap_volume(base, lid) < 1e-3
-    assert not made["checks"]
+    assert made["checks"] == ["printing upright, these openings have flat tops to bridge or support: -Y window 20 mm"]
     top = spec.floor + 50
     # The lid's recess: 1 mm deep from below, 1.5 mm of lid left over it.
     assert not shell.solid_at(lid, (21.5, 0, top + 0.1), (21.5, 0, top + 0.9))

@@ -124,12 +124,19 @@
 <!-- ============ QUICK BOX ============ -->
 <form id="boxform" autocomplete="off" novalidate>
   <p class="intro">An enclosure from a size and a few choices. Everything is in millimetres, measured from the centre of the inside, with Z up. The preview updates as you type.</p>
+  <details class="startbox" id="describe" open>
+    <summary>Describe it in words</summary>
+    <p class="hint">Name the board (a Raspberry Pi, an Arduino Uno, or a size like 80x50), the connectors and controls, a display or batteries, and where it lives. It reads keywords, and lists everything it assumed.</p>
+    <textarea name="ds_text" rows="3" style="width:100%;font:inherit;font-size:13px;border:1px solid var(--line);border-radius:5px;padding:6px;background:var(--bg);color:var(--ink)" placeholder="ESP32 board 60x40, USB-C, two buttons, OLED, wall-mounted, splash-proof"></textarea>
+    <div class="links"><button class="go" type="button" id="dsbtn">Make it</button><button class="plain" type="button" id="dspcb" hidden>Download its KiCad board</button></div>
+  </details>
   <details class="startbox" id="startboard">
     <summary>Start from a finished board</summary>
     <p class="hint">Upload KiCad's STEP export of the board (File &gt; Export &gt; STEP, with 3D models). The box is sized around it, with standoffs under the mounting holes and openings for the connectors at its edges, then checked with the board inside. Every setting below stays editable.</p>
     <div class="grid g1">
       <label class="f">Board STEP<input type="file" name="fp_board" accept=".step,.stp"></label>
-      <label class="f">parts.json (optional: datasheet panel cutouts)<input type="file" name="fp_parts" accept=".json"></label>
+      <label class="f">The .kicad_pcb (optional: parts with no 3D model)<input type="file" name="fp_pcb" accept=".kicad_pcb"></label>
+      <label class="f">parts.json (optional: sizes and datasheet panel cutouts)<input type="file" name="fp_parts" accept=".json"></label>
     </div>
     <div class="grid">
       <label class="f">Lid<select name="fp_lid"><option value="screw">Screw-down</option><option value="friction">Press-fit</option><option value="snap">Snap-fit</option><option value="none">No lid</option></select></label>
@@ -258,6 +265,33 @@
   </fieldset>
 
   <fieldset>
+    <legend>Board under the lid</legend>
+    <p class="hint">Posts hanging from the lid for a display or button board behind it, at the hole positions from its datasheet. Pair them with a window.</p>
+    <div class="rows" id="lso_rows"></div>
+    <button type="button" class="add" data-add="lso">+ Add a lid post</button>
+    <div class="grid g2" style="margin-top:8px">
+      <label class="f">Post length<span class="unit" data-unit="mm"><input name="lid_standoff_height" type="number" min="1" step="0.5" value="4"></span></label>
+      <label class="f">Screw<select name="lid_standoff_screw"></select></label>
+    </div>
+  </fieldset>
+
+  <fieldset>
+    <legend>Batteries</legend>
+    <p class="hint">A cradle on the floor with room at the ends for spring contacts. Cell sizes are the usual maximums; check yours.</p>
+    <div class="rows" id="bat_rows"></div>
+    <button type="button" class="add" data-add="bat">+ Add a battery cradle</button>
+  </fieldset>
+
+  <fieldset>
+    <legend>Cables</legend>
+    <p class="hint">Zip-tie anchors on the floor, and notches in the top of a wall that the lid closes over a cable (fit a grommet).</p>
+    <div class="rows" id="tie_rows"></div>
+    <button type="button" class="add" data-add="tie">+ Add a zip-tie anchor</button>
+    <div class="rows" id="notch_rows" style="margin-top:8px"></div>
+    <button type="button" class="add" data-add="notch">+ Add a cable notch</button>
+  </fieldset>
+
+  <fieldset>
     <legend>Mounting</legend>
     <div class="grid g2">
       <label class="f">Screw ears out from the walls<span class="unit" data-unit="mm"><input name="flange" type="number" min="0" step="1" value="0"></span></label>
@@ -276,7 +310,24 @@
     <label class="check"><input type="checkbox" name="teardrop" checked> Pointed tops on wall holes (print without supports)</label>
     <div class="grid g2">
       <label class="f">Bottom edge chamfer<span class="unit" data-unit="mm"><input name="bottom_chamfer" type="number" min="0" step="0.1" value="0.4"></span></label>
+      <label class="f">Material<select name="material"><option>PETG</option><option>PLA</option><option>ABS</option><option>ASA</option></select></label>
     </div>
+  </fieldset>
+
+  <fieldset data-drawing>
+    <legend>Drawings</legend>
+    <p class="hint">A dimensioned drawing of the base and lid as PDF and SVG, by draftwright: ASME Y14.5 in inches, or ISO in millimetres.</p>
+    <div class="grid">
+      <label class="f">Standard<select name="dw_standard"><option value="asme">ASME (inch)</option><option value="iso">ISO (mm)</option></select></label>
+      <label class="f">Part number<input name="dw_number" placeholder="ENC-001"></label>
+      <label class="f">Material<input name="dw_material" placeholder="PETG (3D printed)"></label>
+    </div>
+    <div class="grid g2">
+      <label class="f">Title<input name="dw_title" placeholder="ENCLOSURE"></label>
+      <label class="f">Drawn by<input name="dw_by"></label>
+    </div>
+    <div class="links"><button class="plain" type="button" id="dwbtn">Download drawings</button>
+      <button class="plain" type="button" id="asmbtn">Exploded assembly + parts list</button></div>
   </fieldset>
 
   <div class="actions">
@@ -291,9 +342,14 @@
       <button class="plain" type="button" id="tofit">Fit a board in it</button>
       <button class="plain" type="button" id="sharebtn">Copy share link</button>
       <button class="plain" type="button" id="openbtn">Open box.json</button>
+      <button class="plain" type="button" id="savebtn">Save version</button>
       <input type="file" id="openfile" accept=".json" hidden>
       <span class="hint" id="sharestate" style="margin:0;align-self:center"></span>
     </div>
+    <details id="versions" style="width:100%" hidden>
+      <summary>Saved versions (in this browser)</summary>
+      <div id="verlist"></div>
+    </details>
   </div>
 </form>
 
@@ -373,6 +429,14 @@
     <button type="button" class="add" data-add="stock">+ Add a hole</button>
     <label class="check"><input name="teardrop" type="checkbox"> Pointed tops on wall holes (for a printed box)</label>
   </fieldset>
+  <fieldset data-drawing>
+    <legend>Drawing for the machinist</legend>
+    <div class="grid">
+      <label class="f">Drawing<select name="drawings"><option value="">None</option><option value="asme">ASME (inch)</option><option value="iso">ISO (mm)</option></select></label>
+      <label class="f">Part number<input name="part_number"></label>
+      <label class="f">Material<input name="material" placeholder="As supplied"></label>
+    </div>
+  </fieldset>
   <div class="actions"><button class="go" type="submit">Make templates</button></div>
 </form>
 
@@ -415,20 +479,20 @@ const SCREWS = ["M2", "M2.5", "M3", "M4"];
 const FACES = [["left", "Left wall (-X)"], ["right", "Right wall (+X)"], ["front", "Front wall (-Y)"], ["back", "Back wall (+Y)"], ["lid", "Lid"], ["floor", "Floor"]];
 const WALL = new Set(["left", "right", "front", "back"]);
 const GROUPS = [
-  ["Connectors", ["usb-c", "keystone", "m8-panel", "m12-panel"]],
+  ["Connectors", ["usb-c", "keystone", "m8-panel", "m12-panel", "dc-barrel-snap", "sma-bulkhead", "bnc-bulkhead"]],
   ["Buttons and switches", ["pushbutton-22", "toggle-1/4", "toggle-15/32"]],
   ["Cable glands", ["pg7", "pg9", "pg11", "pg13.5", "pg16", "pg21", "m12", "m16", "m20", "m25"]],
   ["Other", ["drain"]],
 ];
 const NAMES = {
-  "usb-c": "USB-C receptacle", "keystone": "Keystone jack (RJ45, HDMI...)", "m8-panel": "M8 panel connector", "m12-panel": "M12 panel connector",
+  "usb-c": "USB-C receptacle", "keystone": "Keystone jack (RJ45, HDMI...)", "m8-panel": "M8 panel connector", "m12-panel": "M12 panel connector", "dc-barrel-snap": "DC barrel jack (snap-in)", "sma-bulkhead": "SMA bulkhead (antenna)", "bnc-bulkhead": "BNC bulkhead",
   "pushbutton-22": "22 mm pushbutton or pilot light", "toggle-1/4": "Toggle switch, 1/4\" bushing", "toggle-15/32": "Toggle switch, 15/32\" bushing",
   "pg7": "PG7 gland", "pg9": "PG9 gland", "pg11": "PG11 gland", "pg13.5": "PG13.5 gland", "pg16": "PG16 gland", "pg21": "PG21 gland",
   "m12": "M12 gland or vent plug", "m16": "M16 gland", "m20": "M20 gland", "m25": "M25 gland", "drain": "Drain or breather hole",
 };
 let PRESETS = {};
 
-for (const [name, first] of [["lid_screw", "M3"], ["standoff_screw", "M3"]])
+for (const [name, first] of [["lid_screw", "M3"], ["standoff_screw", "M3"], ["lid_standoff_screw", "M2.5"]])
   for (const s of SCREWS) boxform.elements[name].add(new Option(s, s, false, s === first));
 for (const s of ["M3", "M4"]) boxform.elements.keyholes.add(new Option(`${s} screws`, s));
 
@@ -557,7 +621,29 @@ const readWin = item => {
   const e = n => num(item.querySelector(`[name=${n}]`).value);
   return { face: item.querySelector("[name=face]").value, size: [e("w"), e("hh")], at: [e("a"), e("b")], panel: [e("pw"), e("ph")], panel_t: e("pt") };
 };
-const ROWS = { card: ["#card_rows", cardRow], win: ["#win_rows", winRow], cut: ["#cut_rows", holeRow], vent: ["#vent_rows", ventRow], label: ["#label_rows", labelRow], so: ["#so_rows", soRow], stock: ["#stock_rows", holeRow] };
+const xyRow = (o = {}) => soRow(o);
+function batRow(o = {}) {
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid head" },
+      field("Cell", h("select", { name: "cell" }, ["AA", "AAA", "18650", "21700"].map(c => h("option", { selected: c === (o.cell || "AA") }, c)))),
+      field("How many", numIn("count", o.count ?? 2, "1", "1")),
+      field("Cells along", h("select", { name: "axis" }, h("option", { value: "x", selected: (o.axis || "x") === "x" }, "X"), h("option", { value: "y", selected: o.axis === "y" }, "Y")))),
+    h("div", { class: "grid g2" }, field("X", numIn("x", o.x ?? 0), "mm"), field("Y", numIn("y", o.y ?? 0), "mm")));
+  item._sync = () => {};
+  return item;
+}
+function notchRow(o = {}) {
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid head" },
+      field("Wall", h("select", { name: "face" }, FACES.slice(0, 4).map(([v, t]) => h("option", { value: v, selected: v === (o.face || "back") }, t)))),
+      field("Along wall", numIn("a", o.a ?? 0), "mm"), field("Cable width", numIn("d", o.d ?? 6, "0.5", "2"), "mm")));
+  item._sync = () => {};
+  return item;
+}
+const ROWS = { lso: ["#lso_rows", xyRow], bat: ["#bat_rows", batRow], tie: ["#tie_rows", xyRow], notch: ["#notch_rows", notchRow],
+  card: ["#card_rows", cardRow], win: ["#win_rows", winRow], cut: ["#cut_rows", holeRow], vent: ["#vent_rows", ventRow], label: ["#label_rows", labelRow], so: ["#so_rows", soRow], stock: ["#stock_rows", holeRow] };
 function addRow(kind, opts) {
   const [sel, make] = ROWS[kind];
   const item = make(opts);
@@ -647,10 +733,11 @@ function boxReport(data, error) {
   report.replaceChildren();
   if (error) return report.append(msg("err", error));
   const f = v => v.map(x => +x.toFixed(2)).join(" × ");
-  report.append(h("div", { class: "dims" }, "Inside ", h("b", {}, f(data.inner)), " mm, outside ", h("b", {}, f(data.outer)), " mm"));
+  report.append(h("div", { class: "dims" }, "Inside ", h("b", {}, f(data.inner)), " mm, outside ", h("b", {}, f(data.outer)), " mm",
+    data.estimate ? h("span", { class: "hint" }, ` · about ${Math.round(data.estimate.grams)} g of ${data.estimate.material}, ${data.estimate.hours} h to print`) : null));
   if (fromBoard) {
     const fb = fromBoard;
-    report.append(fb.fits ? msg("ok", "Made around your board, and the board fits." + (fb.warnings ? ` ${fb.warnings} warning(s) below.` : ""))
+    report.append(fb.described ? msg("ok", "Here's a first box. What it assumed:") : fb.fits ? msg("ok", "Made around your board, and the board fits." + (fb.warnings ? ` ${fb.warnings} warning(s) below.` : ""))
       : msg("err", `Made around your board, but the check found ${fb.errors} problem(s): ` + fb.findings.filter(f => f.severity === "error").map(f => `${f.subject}: ${f.message}`).join("; ")));
     report.append(h("ul", { class: "notes" }, fb.notes.map(n => h("li", {}, n))));
     fromBoard = null;
@@ -673,6 +760,13 @@ function boxBody() {
       ? $$("#so_rows .item").map(it => [num($("[name=x]", it).value), num($("[name=y]", it).value)]) : "",
     standoff_height: num(e.standoff_height.value), standoff_screw: e.standoff_screw.value, standoff_hole: e.standoff_hole.value,
     standoff_ribs: e.standoff_ribs.checked,
+    lid_standoffs: $$("#lso_rows .item").map(it => [num($("[name=x]", it).value), num($("[name=y]", it).value)]),
+    lid_standoff_height: num(e.lid_standoff_height.value), lid_standoff_screw: e.lid_standoff_screw.value,
+    batteries: $$("#bat_rows .item").map(it => ({ cell: $("[name=cell]", it).value, count: num($("[name=count]", it).value),
+      axis: $("[name=axis]", it).value, at: [num($("[name=x]", it).value), num($("[name=y]", it).value)] })),
+    tie_points: $$("#tie_rows .item").map(it => [num($("[name=x]", it).value), num($("[name=y]", it).value)]),
+    cable_notches: $$("#notch_rows .item").map(it => ({ face: $("[name=face]", it).value, at: num($("[name=a]", it).value), d: num($("[name=d]", it).value) })),
+    material: e.material.value,
     card_slots: $$("#card_rows .item").map(it => num($("[name=x]", it).value)), board_thickness: num(e.board_thickness.value),
     windows: $$("#win_rows .item").map(readWin),
     cutouts: $$("#cut_rows .item").map(readHole), vents: $$("#vent_rows .item").map(readVent), labels: $$("#label_rows .item").map(readLabel),
@@ -700,7 +794,7 @@ async function refresh() {
   } catch (err) { if (mine === seq && tab === "box") { boxReport(null, String(err)); $("#status").textContent = ""; } }
 }
 function later() { clearTimeout(timer); timer = setTimeout(refresh, 450); }
-const outsideBox = ev => ev.target.closest && ev.target.closest("#startboard");
+const outsideBox = ev => ev.target.closest && ev.target.closest("#startboard, #describe, [data-drawing]");
 boxform.addEventListener("input", ev => outsideBox(ev) || later()); boxform.addEventListener("change", ev => outsideBox(ev) || later());
 
 async function download(res, fallback) {
@@ -758,6 +852,11 @@ function applySpec(sp) {
     else addRow("cut", { face, shape: "round", d: c.size[0], a, b });
   }
   $("#card_rows").replaceChildren(); for (const x of sp.card_slots || []) addRow("card", { x });
+  $("#lso_rows").replaceChildren(); for (const [x, y] of sp.lid_standoffs || []) addRow("lso", { x, y });
+  set("lid_standoff_height", sp.lid_standoff_height); set("lid_standoff_screw", sp.lid_standoff_screw); set("material", sp.material);
+  $("#bat_rows").replaceChildren(); for (const b of sp.batteries || []) addRow("bat", { cell: b.cell, count: b.count, axis: b.axis, x: b.at[0], y: b.at[1] });
+  $("#tie_rows").replaceChildren(); for (const [x, y] of sp.tie_points || []) addRow("tie", { x, y });
+  $("#notch_rows").replaceChildren(); for (const c of sp.cable_notches || []) addRow("notch", { face: FACE_OF[c.face] || c.face, a: c.at, d: c.d });
   set("board_thickness", sp.board_thickness);
   $("#win_rows").replaceChildren();
   for (const w of sp.windows || []) addRow("win", { face: FACE_OF[w.face] || w.face, w: w.size[0], hh: w.size[1], a: w.at[0], b: w.at[1], pw: w.panel[0], ph: w.panel[1], pt: w.panel_t });
@@ -776,6 +875,7 @@ $("#fpbtn").onclick = async () => {
   if (!e.fp_board.files.length) { boxReport(null, "Choose the board's STEP first."); return; }
   const fd = new FormData();
   fd.set("board", e.fp_board.files[0]); if (e.fp_parts.files.length) fd.set("parts", e.fp_parts.files[0]);
+  if (e.fp_pcb.files.length) fd.set("pcb", e.fp_pcb.files[0]);
   fd.set("lid", e.fp_lid.value); fd.set("edge_gap", num(e.fp_gap.value)); fd.set("headroom", num(e.fp_head.value));
   await busy($("#fpbtn"), "Designing...", async () => {
     $("#status").textContent = "Designing the box around your board...";
@@ -788,7 +888,43 @@ $("#fpbtn").onclick = async () => {
     applySpec(d.spec);
   });
 };
-let fromBoard = null;
+let fromBoard = null, describedPcb = null;
+$("#dsbtn").onclick = async () => {
+  const text = boxform.elements.ds_text.value.trim();
+  if (!text) { boxReport(null, "Describe the project first."); return; }
+  await busy($("#dsbtn"), "Working...", async () => {
+    const res = await fetch("api/describe", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ text }) });
+    if (!res.ok) { boxReport(null, await errorOf(res)); return; }
+    const d = await res.json();
+    describedPcb = d.kicad_pcb; $("#dspcb").hidden = !describedPcb;
+    reframe = true; fromBoard = { fits: true, warnings: 0, findings: [], notes: d.notes, described: true };
+    applySpec(d.spec);
+  });
+};
+$("#dspcb").onclick = () => describedPcb && saveBlob(new Blob([describedPcb], { type: "text/plain" }), "described_board.kicad_pcb");
+
+// ---------- Drawings ----------
+$("#dwbtn").onclick = async () => {
+  const e = boxform.elements;
+  const body = { ...boxBody(), standard: e.dw_standard.value,
+    title: { part_number: e.dw_number.value, material: e.dw_material.value, title: e.dw_title.value, drawn_by: e.dw_by.value } };
+  await busy($("#dwbtn"), "Drawing...", async () => {
+    $("#status").textContent = "Making the drawings (about half a minute)...";
+    const r = await download(await fetch("api/drawing", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), "enclosure_drawings.zip");
+    $("#status").textContent = "";
+    if (r.error) boxReport(null, r.error);
+  });
+};
+$("#asmbtn").onclick = async () => {
+  const body = { ...boxBody(), standard: boxform.elements.dw_standard.value };
+  await busy($("#asmbtn"), "Drawing...", async () => {
+    $("#status").textContent = "Making the assembly drawing (about half a minute)...";
+    const r = await download(await fetch("api/assembly", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) }), "enclosure_assembly.zip");
+    $("#status").textContent = "";
+    if (r.error) boxReport(null, r.error);
+  });
+};
+fetch("api/health").then(r => r.json()).then(hh => { if (!hh.draftwright) for (const el of $$("[data-drawing]")) el.hidden = true; }).catch(() => {});
 
 // ---------- Saving and sharing ----------
 const KEEP = "enclosure.box.v1";
@@ -809,6 +945,28 @@ $("#openfile").onchange = async () => {
   catch (err) { boxReport(null, `${f.name}: not a box.json (${err.message})`); }
   $("#openfile").value = "";
 };
+// Saved versions: kept in this browser only.
+const VERS = "enclosure.versions.v1";
+function versions() { try { return JSON.parse(localStorage.getItem(VERS) || "[]"); } catch { return []; } }
+function keepVersions(list) { try { localStorage.setItem(VERS, JSON.stringify(list.slice(0, 40))); return true; } catch { return false; } }
+function showVersions() {
+  const list = versions();
+  $("#versions").hidden = !list.length;
+  $("#verlist").replaceChildren(...list.map((v, i) => h("div", { class: "links", style: "align-items:center;margin:4px 0" },
+    h("span", { style: "flex:1;font-size:12.5px" }, h("b", {}, v.name), h("span", { class: "hint" }, ` · ${new Date(v.at).toLocaleString()}`)),
+    h("button", { class: "plain", type: "button", onclick: () => { reframe = true; applySpec(v.design); $("#sharestate").textContent = `Opened "${v.name}".`; } }, "Open"),
+    h("button", { class: "plain", type: "button", onclick: () => saveBlob(new Blob([JSON.stringify(v.design, null, 2)], { type: "application/json" }), `${v.name.replace(/[^\w.-]+/g, "_")}.box.json`) }, "Download"),
+    h("button", { class: "plain", type: "button", "aria-label": `Delete ${v.name}`, onclick: () => { const l = versions(); l.splice(i, 1); keepVersions(l); showVersions(); } }, "Delete"))));
+}
+$("#savebtn").onclick = () => {
+  const name = `${boxform.elements.L.value} x ${boxform.elements.W.value} x ${boxform.elements.H.value} ${boxform.elements.lid.value} lid`;
+  const list = versions();
+  list.unshift({ name: `v${list.length + 1}: ${name}`, at: Date.now(), design: designOf() });
+  $("#sharestate").textContent = keepVersions(list) ? "Saved in this browser." : "This browser won't keep it: use Copy share link or Download.";
+  showVersions(); $("#versions").open = true;
+};
+showVersions();
+
 function startDesign() {
   const m = /#d=([A-Za-z0-9_-]+)/.exec(location.hash);
   if (m) { try { applySpec(JSON.parse(unb64(m[1]))); return true; } catch {} }
@@ -917,9 +1075,11 @@ stockform.addEventListener("submit", async ev => {
   const fd = new FormData();
   fd.set("step", e.step.files[0]); if (e.lid.files.length) fd.set("lid", e.lid.files[0]);
   fd.set("cutouts", JSON.stringify(rows)); fd.set("teardrop", e.teardrop.checked ? "true" : "false");
+  fd.set("drawings", e.drawings.value); fd.set("part_number", e.part_number.value); fd.set("material", e.material.value);
   await busy(ev.submitter, "Working...", async () => {
     const r = await download(await fetch("api/stock", { method: "POST", body: fd }), "drilled.zip");
-    report.replaceChildren(r.error ? msg("err", r.error) : msg("ok", "Downloaded: the drilled box as STEP, drill_templates.pdf and holes.json. Print the PDF at 100% and check the 50 mm bar."));
+    report.replaceChildren(r.error ? msg("err", r.error) : msg("ok", "Downloaded: the drilled box as STEP, drill_templates.pdf and holes.json" +
+      (e.drawings.value ? ", and the drawings" : "") + ". Print the templates at 100% and check the 50 mm bar."));
   });
 });
 

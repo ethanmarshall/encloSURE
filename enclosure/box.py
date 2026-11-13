@@ -45,6 +45,11 @@ SCREWS = {
 }
 LIDS = ("screw", "friction", "snap", "slide", "none")
 PIN_HOLE = {"M2": 2.2, "M2.5": 2.7, "M3": 3.2, "M4": 4.3}  # the board hole a pin goes through
+# Cells: (diameter, length) with a little room; AA and AAA are IEC 60086-2 maximums, 18650 and 21700
+# their names (18 x 65, 21 x 70 mm) plus room for protected cells. Check your cells.
+CELLS = {"AAA": (10.5, 44.5), "AA": (14.5, 50.5), "18650": (18.6, 67.5), "21700": (21.6, 70.5)}
+CONTACT_ROOM = 7.0  # both ends' spring and button contacts (Keystone-style), mm
+DENSITY = {"PETG": 1.27, "PLA": 1.24, "ABS": 1.04, "ASA": 1.07}  # g/cm3
 FACES = ("-X", "+X", "-Y", "+Y", "lid", "floor")
 WALLS = ("-X", "+X", "-Y", "+Y")
 # Plain names for the walls (a leading "-" reads as a flag on the command line).
@@ -149,6 +154,16 @@ class BoxSpec:
     card_slots: list[float] = field(default_factory=list)  # X of each board standing in guides on the ±Y walls
     # Windows: a through opening with a recess behind it for a clear panel or display
     windows: list[dict] = field(default_factory=list)  # {face, size [w, h], at, panel [w, h], panel_t}
+    # Posts under the lid for a display or button board behind it: [x, y] from the centre
+    lid_standoffs: list[list[float]] = field(default_factory=list)
+    lid_standoff_height: float = 4.0  # down from the lid's underside
+    lid_standoff_screw: str = "M2.5"
+    # Batteries: a cradle on the floor: {cell, count, at [x, y], axis x|y}
+    batteries: list[dict] = field(default_factory=list)
+    # Cables: zip-tie anchors on the floor [[x, y]], and notches in the top of a wall {face, at, d}
+    tie_points: list[list[float]] = field(default_factory=list)
+    cable_notches: list[dict] = field(default_factory=list)
+    material: str = "PETG"  # for the weight estimate: PETG, PLA, ABS, ASA
 
     # The box's dimensions
     @property
@@ -193,6 +208,20 @@ class BoxSpec:
         if self.standoff_hole not in ("tap", "insert", "clearance", "pin"):
             raise ValueError("standoff_hole: tap, insert, clearance or pin (a snap-in peg)")
         L_in, W_in, _ = self.inner
+        if self.lid_standoffs and self.lid not in ("screw", "friction", "snap"):
+            raise ValueError("lid standoffs need a lid on top")
+        if self.lid_standoff_screw not in SCREWS:
+            raise ValueError(f"lid_standoff_screw: one of {', '.join(SCREWS)}")
+        for bt in self.batteries:
+            if bt.get("cell") not in CELLS:
+                raise ValueError(f"battery cell: one of {', '.join(CELLS)}")
+            if bt.get("axis", "x") not in ("x", "y") or not 1 <= int(bt.get("count", 1)) <= 8:
+                raise ValueError("battery: axis x or y, 1 to 8 cells")
+        for n in self.cable_notches:
+            if face_name(n.get("face", "")) not in WALLS or not 2 <= n.get("d", 0) <= 30:
+                raise ValueError("cable notch: on a wall, 2 to 30 mm wide")
+        if self.material not in DENSITY:
+            raise ValueError(f"material: one of {', '.join(DENSITY)}")
         for x in self.card_slots:
             if abs(x) > L_in / 2 - 4:
                 raise ValueError(f"card slot at X {x:g}: keep it 4 mm or more from the end walls")
@@ -609,7 +638,95 @@ def build(spec: BoxSpec) -> dict:
             base = base + placed if depth > 0 else base - placed
         notes.append(f"label {t['text']!r} on {face}, {'raised' if depth > 0 else 'recessed'} {abs(depth):g} mm")
 
-    return {"base": base, "lid": lid, "notes": notes, "checks": checks,
+    # Posts under the lid, for a display or button board mounted behind it.
+    if spec.lid_standoffs and lid is not None:
+        d, depth = spec.hole(spec.lid_standoff_screw, "tap")
+        boss = _post_boss(spec, d)
+        hgt = spec.lid_standoff_height
+        for x, y in spec.lid_standoffs:
+            if abs(x) + boss / 2 > L / 2 - spec.fit_clearance - 1.6 or abs(y) + boss / 2 > W / 2 - spec.fit_clearance - 1.6:
+                checks.append(f"lid standoff at ({x:g}, {y:g}) runs into the lid's lip or the walls")
+            lid += Cylinder(boss / 2, hgt + 0.01).locate(Location((x, y, top - hgt / 2 + 0.005)))
+            lid -= Cylinder(d / 2, hgt + spec.lid_thickness - 0.8).locate(Location((x, y, top - hgt + (hgt + spec.lid_thickness - 0.8) / 2)))
+        notes.append(f"{len(spec.lid_standoffs)} posts {hgt:g} mm down from the lid, tapped for {spec.lid_standoff_screw} "
+                     f"(Ø{d:g}), for a board behind the lid")
+        room = (top - hgt) - (spec.floor + spec.standoff_height + 1.6) if spec.standoffs else None
+        if room is not None and room < 8:
+            checks.append(f"only {room:.1f} mm between the main board's top and the lid posts' ends: little room for "
+                          f"parts on either board")
+
+    # Battery cradles on the floor: low walls round the cells, low ribs between them.
+    for bt in spec.batteries:
+        dia, length = CELLS[bt["cell"]]
+        n, (bx, by), axis = int(bt.get("count", 1)), bt.get("at", [0, 0]), bt.get("axis", "x")
+        inner_len, inner_w = length + CONTACT_ROOM, n * (dia + 0.4)
+        wall_h, t_w = round(0.6 * dia, 1), 1.6
+        ox, oy = (inner_len, inner_w) if axis == "x" else (inner_w, inner_len)
+        if abs(bx) + ox / 2 + t_w > L / 2 or abs(by) + oy / 2 + t_w > W / 2:
+            raise ValueError(f"the {n} x {bt['cell']} cradle at ({bx:g}, {by:g}) does not fit inside the walls")
+        ring = Box(ox + 2 * t_w, oy + 2 * t_w, wall_h).locate(Location((bx, by, spec.floor + wall_h / 2)))
+        ring -= Box(ox, oy, wall_h + 1).locate(Location((bx, by, spec.floor + wall_h / 2)))
+        rib_h = round(0.35 * dia, 1)
+        for i in range(1, n):
+            off = -inner_w / 2 + i * (dia + 0.4)
+            rib = Box(inner_len - 2 * CONTACT_ROOM, 1.0, rib_h) if axis == "x" else Box(1.0, inner_len - 2 * CONTACT_ROOM, rib_h)
+            ring += rib.locate(Location((bx + (0 if axis == "x" else off), by + (off if axis == "x" else 0), spec.floor + rib_h / 2)))
+        base += ring
+        hits = sorted({f"({kx:g}, {ky:g})" for kx, ky, kr in keep_out
+                       if kr > 0 and abs(kx - bx) < ox / 2 + t_w + kr and abs(ky - by) < oy / 2 + t_w + kr})
+        if hits:
+            checks.append(f"the {bt['cell']} cradle at ({bx:g}, {by:g}) runs into the standoffs or posts at {', '.join(hits)}")
+        notes.append(f"cradle for {n} x {bt['cell']} ({dia:g} x {length:g} mm cells) at ({bx:g}, {by:g}) along {axis.upper()}, "
+                     f"{inner_len:g} mm long inside with {CONTACT_ROOM:g} mm for the contacts: add your spring contacts")
+
+    # Zip-tie anchors: a bridge on the floor a tie threads under (for ties up to 4.8 mm wide).
+    for tx, ty in spec.tie_points:
+        span, gap_h, post = 5.2, 2.2, 2.0
+        bridge = Box(span + 2 * post, 3.0, gap_h + 1.6).locate(Location((tx, ty, spec.floor + (gap_h + 1.6) / 2)))
+        bridge -= Box(span, 4.0, gap_h).locate(Location((tx, ty, spec.floor + gap_h / 2)))
+        base += bridge
+    if spec.tie_points:
+        notes.append(f"{len(spec.tie_points)} zip-tie anchors (ties up to 4.8 mm wide)")
+
+    # Cable notches: a U in the top of a wall, closed by the lid; fit a grommet or seal with the cable.
+    for cn in spec.cable_notches:
+        face = face_name(cn["face"])
+        d, a = cn["d"], cn.get("at", 0.0)
+        depth = cn.get("depth", d)
+        tool = Box(d, depth + 1, spec.wall * 4)
+        tool = tool + Cylinder(d / 2, spec.wall * 4).locate(Location((0, -(depth + 1) / 2, 0)))
+        cut("base", _on_wall(Pos(0, (depth + 1) / 2 - (depth + 1) / 2, 0) * tool, face, a, top - (depth + 1) / 2 + 0.5, oL, oW))
+        notes.append(f"cable notch {d:g} mm wide in the top of the {face} wall at {a:g}")
+
+    # What will print badly.
+    for name, v in (("wall", spec.wall), ("floor", spec.floor), ("lid", spec.lid_thickness if lid is not None else 9)):
+        if v < 1.2:
+            checks.append(f"{name} {v:g} mm: under three 0.4 mm lines, it will be weak and may leak light")
+    flat = []
+    for raw in spec.cutouts:
+        c = Cutout(**resolve(raw))
+        if c.face in WALLS and c.shape == "rect" and c.size[0] > 10:
+            flat.append(f"{c.face} {c.size[0]:g} mm")
+        if c.face in WALLS and c.shape == "round" and not spec.teardrop and c.size[0] > 8:
+            flat.append(f"{c.face} Ø{c.size[0]:g} hole")
+    for wdw in spec.windows:
+        if face_name(wdw["face"]) in WALLS and wdw["size"][0] > 10:
+            flat.append(f"{face_name(wdw['face'])} window {wdw['size'][0]:g} mm")
+    if flat:
+        checks.append("printing upright, these openings have flat tops to bridge or support: " + ", ".join(flat))
+    for t in spec.labels:
+        if t.get("depth", -0.6) > 0 and t.get("size", 6.0) < 4:
+            checks.append(f"raised text {t['text']!r} under 4 mm tall may not print cleanly")
+
+    # Weight and print time, roughly.
+    vol = base.volume + (lid.volume if lid is not None else 0.0)
+    grams = vol / 1000 * DENSITY[spec.material]
+    hours = vol / 8.0 / 3600  # about 8 mm3/s, a typical 0.4 mm nozzle at moderate speed
+    estimate = {"material": spec.material, "grams": round(grams, 1), "hours": round(hours, 1),
+                "volume_cm3": round(vol / 1000, 1)}
+    notes.append(f"about {grams:.0f} g of {spec.material} and {hours:.1f} h to print (solid; rough, a slicer knows better)")
+
+    return {"base": base, "lid": lid, "notes": notes, "checks": checks, "estimate": estimate,
             "inner": [round(v, 3) for v in spec.inner], "outer": [round(v, 3) for v in spec.outer]}
 
 

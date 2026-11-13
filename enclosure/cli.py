@@ -148,6 +148,31 @@ def cmd_stock(args):
     return stock.run(args.step, cutouts, args.out, lid_path=args.lid, teardrop=args.teardrop)
 
 
+def cmd_assembly(args):
+    from . import assembly
+    spec = boxmod.load(args.box)
+    return assembly.make(spec, args.out, args.board, args.standard)
+
+
+def cmd_describe(args):
+    from . import describe
+    out = Path(args.out)
+    out.mkdir(parents=True, exist_ok=True)
+    r = describe.make(" ".join(args.text), out / "board.kicad_pcb")
+    files = boxmod.write(r["spec"], out, stl=not args.no_stl)
+    return {"assumed": r["notes"], "inner": files["inner"], "outer": files["outer"], "checks": files["checks"],
+            "files": {**files["files"], "kicad_board": str(out / "board.kicad_pcb")},
+            "next": "adjust box.json (or the page's form) and rebuild with `enclosure box --from`"}
+
+
+def cmd_autofit(args):
+    from . import autofit
+    base, lid, enc = _enclosure(args)
+    settings = fitmod.Settings(clearance=args.clearance)
+    specs = partsmod.load(args.parts) if args.parts else {}
+    return autofit.run(enc, base, lid, args.pcb, args.out, args.rounds, settings, specs)
+
+
 def cmd_drawing(args):
     from . import drawing
     title = {}
@@ -304,6 +329,32 @@ def main(argv=None) -> int:
     p.add_argument("--teardrop", action="store_true", help="teardrop wall holes (for a printed box)")
     p.add_argument("-o", "--out", default="stock", help="folder for base.step, lid.step, drill_templates.pdf, holes.json")
     p.set_defaults(fn=cmd_stock)
+
+    from . import assembly as assemblymod
+    p = sub.add_parser("assembly", help="an exploded assembly drawing with a parts list (uses draftwright)",
+                       description=assemblymod.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("box", help="the box's box.json")
+    p.add_argument("--board", help="the board's STEP from KiCad (else a plain plate stands in)")
+    p.add_argument("--standard", default="asme", choices=("asme", "iso"))
+    p.add_argument("-o", "--out", default="assembly")
+    p.set_defaults(fn=cmd_assembly)
+
+    from . import describe as describemod
+    p = sub.add_parser("describe", help="a first box and KiCad board from a few words",
+                       description=describemod.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("text", nargs="+", help='e.g. "Arduino Uno, USB-C, two buttons, OLED, wall-mounted"')
+    p.add_argument("--no-stl", action="store_true")
+    p.add_argument("-o", "--out", default="described")
+    p.set_defaults(fn=cmd_describe)
+
+    from . import autofit as autofitmod
+    p = sub.add_parser("autofit", help="check, fix and re-export with KiCad until the board fits",
+                       description=autofitmod.__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("base"); p.add_argument("pcb", help="the board's .kicad_pcb (left unchanged)")
+    p.add_argument("--lid"); p.add_argument("--parts"); p.add_argument("--clearance", type=float, default=0.5)
+    p.add_argument("--rounds", type=int, default=4)
+    p.add_argument("-o", "--out", default="autofit")
+    p.set_defaults(fn=cmd_autofit)
 
     from . import drawing as drawingmod
     p = sub.add_parser("drawing", help="ASME or ISO drawings of a box's parts (uses draftwright)",

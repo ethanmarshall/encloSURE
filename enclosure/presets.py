@@ -33,6 +33,10 @@ PRESETS = {
     "m25": ("round", [25.5], 0.0, "M25x1.5 gland: 25 mm thread + 0.5 mm"),
     "m8-panel": ("round", [8.5], 0.0, "M8 panel connector: 8 mm thread + 0.5 mm"),
     "m12-panel": ("round", [12.5], 0.0, "M12 panel connector: 12 mm thread + 0.5 mm"),
+    # RF and power panel parts, each from one maker's datasheet: check yours.
+    "sma-bulkhead": ("round", [6.35], 0.0, "SMA rear-mount bulkhead, 1/4-36 thread: 6.35 mm panel hole (Wurth 60312042641504)"),
+    "bnc-bulkhead": ("round", [12.7], 0.0, "BNC bulkhead jack with flange: 12.7 mm panel hole (Telegaertner J01001A0079)"),
+    "dc-barrel-snap": ("round", [12.6], 0.0, "5.5 x 2.1 mm DC barrel jack, snap-in panel mount: 12.6 mm hole (Parts Express 090-5042)"),
     # A drain or breather hole: a design choice, not a part.
     "drain": ("round", [3.0], 0.0, "3 mm drain hole"),
 }
