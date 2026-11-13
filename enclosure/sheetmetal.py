@@ -340,6 +340,7 @@ def write(sheet: Sheet, folder) -> dict:
 
 
 def notes_for(sheet: Sheet) -> list[str]:
+    sheet.check()
     L, W, H = sheet.size
     t = sheet.thickness
     f = flats(sheet)
@@ -361,6 +362,7 @@ def notes_for(sheet: Sheet) -> list[str]:
 
 def formed(sheet: Sheet) -> dict:
     """The formed parts as solids (sharp corners: the bend radii are left out of the 3D)."""
+    sheet.check()  # settles an automatic lip height first
     L, W, H = sheet.size
     t = sheet.thickness
     base = Box(L + 2 * t, W, t, align=(Align.CENTER, Align.CENTER, Align.MIN))

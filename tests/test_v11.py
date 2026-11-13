@@ -113,3 +113,10 @@ def test_rmfg_rules():
     assert ("warning", "U-channel") in rules and ("error", "hole near a bend") in rules
     thin = sm.Sheet(size=[150, 100, 30], thickness=0.5, lip=10)
     assert ("error", "material") in {(r["severity"], r["rule"]) for r in sm.rmfg_check(thin)}
+
+
+def test_sheet_metal_automatic_lip_from_the_page():
+    from fastapi.testclient import TestClient
+    from enclosure.web import app
+    r = TestClient(app).post("/api/sheetmetal", json={"box": {"size": [150, 100, 30]}, "preview": True})
+    assert r.status_code == 200 and "rmfg" in r.json()
