@@ -231,7 +231,7 @@ def write(sheet: Sheet, folder) -> dict:
     export_step(Compound(children=[made["base"], made["cover"]]), str(step))
     files["step"] = str(step)
     notes = notes_for(sheet)
-    (folder / "notes.md").write_text("# Sheet metal enclosure\n\n" + "\n".join(f"- {n}" for n in notes) + "\n")
+    (folder / "notes.md").write_text("# Sheet metal enclosure\n\n" + "\n".join(f"- {n}" for n in notes) + "\n", encoding="utf-8")
     files["notes"] = str(folder / "notes.md")
     return {"files": files, "notes": notes, "flats": {k: {"core": f[k]["core"]} for k in ("base", "cover")}}
 

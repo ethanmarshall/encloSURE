@@ -689,7 +689,9 @@ def health():
     except RuntimeError:
         dw = False
     from . import onshape_push
-    return {"ok": True, "draftwright": dw, "library": _library() is not None, "onshape": onshape_push.enabled()}
+    from . import plate
+    return {"ok": True, "draftwright": dw, "library": _library() is not None, "onshape": onshape_push.enabled(),
+            "slicer": bool(plate.slicer()), "slicer_error": plate.LAST_ERROR or None}
 
 
 @app.post("/api/drawing")

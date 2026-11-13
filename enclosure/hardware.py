@@ -947,7 +947,7 @@ def write(kind: str, folder, stl: bool = True, **params) -> dict:
         files["stl"] = str(out / f"{stem}.stl")
     lines = [f"# {r['label']}", ""] + [f"- {n}" for n in r["notes"]] + [f"- check: {c}" for c in r["checks"]]
     lines += ["", "Settings: " + ", ".join(f"{k}={v}" for k, v in params.items())]
-    (out / "notes.md").write_text("\n".join(lines) + "\n")
+    (out / "notes.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
     files["notes"] = str(out / "notes.md")
     return {**r, "files": files}
 

@@ -17,6 +17,7 @@ from pathlib import Path
 from build123d import Mesher, Pos, Rot
 
 GAP = 5.0  # between parts on the bed, mm
+LAST_ERROR = ""  # why the slicer last failed, for the health check
 BEDS = {"prusa-mk4": (250, 210), "prusa-mini": (180, 180), "bambu-x1": (256, 256), "ender-3": (220, 220),
         "prusa-xl": (360, 360), "voron-350": (350, 350)}
 DENSITY = {"PETG": 1.27, "PLA": 1.24, "ABS": 1.04, "ASA": 1.07, "nylon": 1.14}
@@ -106,9 +107,14 @@ def slice_numbers(path_3mf, material: str = "PETG", layer: float = 0.2, infill: 
         cmd = [exe, "--export-gcode", str(path_3mf), "--layer-height", str(layer), "--fill-density", f"{infill}%",
                "--perimeters", "2", "--filament-diameter", "1.75", "--nozzle-diameter", "0.4",
                "--filament-density", str(DENSITY.get(material, 1.25)), "--dont-arrange", "-o", str(out)]
+        global LAST_ERROR
         try:
             subprocess.run(cmd, capture_output=True, text=True, timeout=timeout, check=True)
-        except (subprocess.SubprocessError, OSError):
+        except subprocess.CalledProcessError as e:
+            LAST_ERROR = ((e.stderr or "") + (e.stdout or "")).strip()[-400:]
+            return None
+        except (subprocess.SubprocessError, OSError) as e:
+            LAST_ERROR = str(e)[:400]
             return None
         text = out.read_text(errors="replace")[-40000:] if out.exists() else ""
     t = re.search(r"estimated printing time \(normal mode\) = ([^\n]+)", text)
@@ -143,5 +149,6 @@ def write(items, folder, bed=(250.0, 210.0), material: str = "PETG", slice_it: b
                              "grams": round(sum(s["grams"] or 0 for s in sliced), 1),
                              "per_plate": sliced, "settings": sliced[0]["settings"]}
         else:
-            out["notes"].append("no slicer on this server: times and grams are the rough estimate")
+            out["notes"].append("no slicer on this server: times and grams are the rough estimate" if not slicer() else
+                                f"PrusaSlicer didn't slice it ({LAST_ERROR[-160:] or 'no reason given'}): times and grams are the rough estimate")
     return out

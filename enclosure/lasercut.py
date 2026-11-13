@@ -171,7 +171,7 @@ def write(box: Laser, folder) -> dict:
              "cut a test corner first and change the kerf if it's loose or won't go",
              "the DXF has the cuts on layer CUT and each panel's name on LABELS (engrave it, or turn it off)",
              "the top lifts off and a lip under it keeps it in place" if box.lid == "loose" else "glue the joints (acrylic cement, wood glue), or leave the top dry-fitted"]
-    (folder / "notes.md").write_text("# Laser-cut box\n\n" + "\n".join(f"- {n}" for n in notes) + "\n")
+    (folder / "notes.md").write_text("# Laser-cut box\n\n" + "\n".join(f"- {n}" for n in notes) + "\n", encoding="utf-8")
     return {"files": {"dxf": str(p_dxf), "step": str(step), "notes": str(folder / "notes.md")}, "notes": notes,
             "sheet": [round(x - 6, 1), round(max(p["size"][1] for p in ps.values()) + 2 * t, 1)]}
 

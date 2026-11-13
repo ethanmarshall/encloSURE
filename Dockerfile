@@ -16,7 +16,7 @@ FROM python:3.12-slim
 RUN apt-get update && apt-get install -y --no-install-recommends libgl1 libglib2.0-0 libxrender1 fonts-dejavu-core prusa-slicer \
     && rm -rf /var/lib/apt/lists/*
 COPY --from=draftwright /draftwright /usr/local/bin/draftwright
-ENV DRAFTWRIGHT=/usr/local/bin/draftwright
+ENV DRAFTWRIGHT=/usr/local/bin/draftwright PYTHONUTF8=1 LANG=C.UTF-8
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY enclosure ./enclosure
