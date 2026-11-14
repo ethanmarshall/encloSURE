@@ -94,9 +94,11 @@ def _label(t) -> dict:
          "at": [_num(x, "label position") for x in t.get("at", [0, 0])]}
     if not d["text"]:
         raise ValueError("a label needs its text")
-    for k in ("size", "depth"):
+    for k in ("size", "depth", "rotate"):
         if t.get(k) not in (None, ""):
             d[k] = _num(t[k], f"label {k}")
+    if t.get("bold"):
+        d["bold"] = True
     return d
 
 

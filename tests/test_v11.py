@@ -60,7 +60,7 @@ def test_handheld_grounding_fan():
                     lanyard=True, belt_clip=True, handle=True, ground_lug=[30, 20], shielding=True)
     m = box.build(s)
     assert len(m["base"].solids()) == 1
-    assert [n for n, _ in m["extras"]] == ["belt_clip", "handle"]
+    assert [n for n, _ in m["extras"]] == ["belt_clip", "handle_1"]
     assert any("nowhere for the air" in c for c in m["checks"])  # no vents for the fan
     assert m["thermal"]["rise_c"] < 5
 

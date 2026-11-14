@@ -308,9 +308,20 @@
   </fieldset>
 
   <fieldset>
-    <legend>Text</legend>
+    <legend>Text and artwork</legend>
+    <p class="hint">Press "Place on the model", then tap where it should go on the 3D view: the face and position fill in. Or type them.</p>
     <div class="rows" id="label_rows"></div>
     <button type="button" class="add" data-add="label">+ Add text</button>
+    <div class="rows" id="art_rows"></div>
+    <button type="button" class="add" data-add="art">+ Add artwork (SVG or DXF)</button>
+    <p class="hint">Artwork: a logo or drawing as SVG (from Inkscape, Illustrator or Onshape) or DXF. Filled shapes come out solid, lines as strokes. A PNG or JPG needs tracing to SVG first (Inkscape: Path &gt; Trace Bitmap).</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Handles</legend>
+    <div class="rows" id="handle_rows"></div>
+    <button type="button" class="add" data-add="handle">+ Add a handle</button>
+    <p class="hint">Bar and knob handles print as their own parts and screw on; a grip is a finger pocket in a wall; strap loops take a webbing strap.</p>
   </fieldset>
 
   <fieldset>
@@ -402,7 +413,6 @@
     <label class="check"><input type="checkbox" name="stacking"> Stacking: pins on the lid, sockets under the floor</label>
     <label class="check"><input type="checkbox" name="lanyard"> Lanyard loop</label>
     <label class="check"><input type="checkbox" name="belt_clip"> Belt clip (its own part, screws to the floor)</label>
-    <label class="check"><input type="checkbox" name="handle"> Handle on the lid (its own part)</label>
   </fieldset>
 
   <fieldset>
@@ -1070,9 +1080,13 @@ function labelRow(o = {}) {
       h("label", { class: "f", "data-pos": "a" }, "X", h("span", { class: "unit", "data-unit": "mm" }, lenIn("a", o.a ?? 0))),
       h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": "mm" }, lenIn("b", o.b ?? -15))),
       field("Letter height", lenIn("size", o.size ?? 6, "0.5", "2"), "mm")),
-    h("div", { class: "grid g2" },
-      field("Style", h("select", { name: "style" }, h("option", { value: "-1" }, "Recessed"), h("option", { value: "1" }, "Raised"))),
-      field("Depth", lenIn("depth", o.depth ?? 0.6, "0.1", "0.2"), "mm")));
+    h("div", { class: "grid" },
+      field("Style", h("select", { name: "style" }, h("option", { value: "-1", selected: !(o.depth > 0) }, "Recessed"), h("option", { value: "1", selected: o.depth > 0 }, "Raised"))),
+      field("Depth", lenIn("depth", Math.abs(o.depth ?? 0.6), "0.1", "0.2"), "mm"),
+      field("Turn (°)", h("input", { name: "rotate", type: "number", step: "15", value: o.rotate ?? 0 }))),
+    h("div", { class: "links", style: "align-items:center" },
+      h("label", { class: "check", style: "margin:0" }, h("input", { type: "checkbox", name: "bold", checked: !!o.bold }), " Bold"),
+      placeBtn(item => item, "label")));
   item.addEventListener("change", () => posLabels(item));
   item._sync = () => posLabels(item);
   return item;
@@ -1080,7 +1094,8 @@ function labelRow(o = {}) {
 const readLabel = item => {
   const e = n => item.querySelector(`[name=${n}]`).value;
   const el = n => item.querySelector(`[name=${n}]`);
-  return { face: e("face"), text: e("text"), at: [len(el("a")), len(el("b"))], size: len(el("size")), depth: num(e("style")) * len(el("depth")) };
+  return { face: e("face"), text: e("text"), at: [len(el("a")), len(el("b"))], size: len(el("size")), depth: num(e("style")) * len(el("depth")),
+           rotate: num(e("rotate")) || 0, bold: el("bold").checked };
 };
 function soRow(o = {}) {
   const item = h("div", { class: "item" },
@@ -1180,7 +1195,7 @@ const readDiv = it => {
   if (t) d.thickness = t; if (hh) d.height = hh; if (notch) d.notch = notch;
   return d;
 };
-const ROWS = { div: ["#div_rows", divRow], sr: ["#sr_rows", srRow], lp: ["#lp_rows", lpRow], lso: ["#lso_rows", xyRow], bat: ["#bat_rows", batRow], tie: ["#tie_rows", xyRow], notch: ["#notch_rows", notchRow],
+const ROWS = { art: ["#art_rows", artRow], handle: ["#handle_rows", handleRow], div: ["#div_rows", divRow], sr: ["#sr_rows", srRow], lp: ["#lp_rows", lpRow], lso: ["#lso_rows", xyRow], bat: ["#bat_rows", batRow], tie: ["#tie_rows", xyRow], notch: ["#notch_rows", notchRow],
   card: ["#card_rows", cardRow], win: ["#win_rows", winRow], cut: ["#cut_rows", holeRow], vent: ["#vent_rows", ventRow], label: ["#label_rows", labelRow], so: ["#so_rows", soRow], stock: ["#stock_rows", holeRow] };
 function addRow(kind, opts) {
   const [sel, make] = ROWS[kind];
@@ -1370,8 +1385,9 @@ function boxBody() {
     battery_door: $("#bd_on").checked ? { size: [len(e.bd_w), len(e.bd_l)], at: [len(e.bd_x), len(e.bd_y)], screw: e.bd_screw.value } : null,
     strain_reliefs: $$("#sr_rows .item").map(readSr),
     dividers: $$("#div_rows .item").map(readDiv),
+    art: $$("#art_rows .item").map(readArt).filter(Boolean), handles: $$("#handle_rows .item").map(readHandle),
     icons: e.icons.checked, icon_style: e.icon_style.value, two_color: e.two_color.checked,
-    lanyard: e.lanyard.checked, belt_clip: e.belt_clip.checked, handle: e.handle.checked, shielding: e.shielding.checked,
+    lanyard: e.lanyard.checked, belt_clip: e.belt_clip.checked, shielding: e.shielding.checked,
     ground_lug: $("#gl_on").checked ? [len(e.gl_x), len(e.gl_y)] : null, fan_flow_cfm: num(e.fan_flow_cfm.value) || 0,
     board_screw_length: e.board_screw_length.value ? len(e.board_screw_length) : null,
     lid_screw_length: e.lid_screw_length.value ? len(e.lid_screw_length) : null,
@@ -1442,7 +1458,7 @@ function applySpec(sp) {
     "standoff_height", "standoff_screw", "standoff_hole", "flange", "feet", "feet_depth", "bottom_chamfer"]) set(n, sp[n]);
   $("#gasket_on").checked = !!sp.gasket; if (sp.gasket) set("gasket", sp.gasket);
   e.keyholes.value = sp.keyholes || "";
-  for (const n of ["din_rail", "teardrop", "standoff_ribs", "wall_bracket", "stacking", "icons", "two_color", "lanyard", "belt_clip", "handle", "shielding"])
+  for (const n of ["din_rail", "teardrop", "standoff_ribs", "wall_bracket", "stacking", "icons", "two_color", "lanyard", "belt_clip", "shielding"])
     if (n in sp) e[n].checked = !!sp[n];
   if (sp.icon_style) e.icon_style.value = sp.icon_style;
   set("fan_flow_cfm", sp.fan_flow_cfm);
@@ -1486,8 +1502,12 @@ function applySpec(sp) {
   for (const v of sp.vents || []) addRow("vent", { face: FACE_OF[v.face] || v.face, w: v.size[0], hh: v.size[1], a: v.at[0], b: v.at[1],
     pattern: v.pattern, slot: v.pattern === "honeycomb" ? (v.cell ?? 4) : (v.slot ?? 2), pitch: v.pattern === "honeycomb" ? (v.web ?? 1.2) : (v.pitch ?? 4) });
   $("#label_rows").replaceChildren();
+  $("#art_rows").replaceChildren(); for (const g of sp.art || []) addRow("art", { ...g, face: FACE_OF[g.face] || g.face, a: (g.at || [0, 0])[0], b: (g.at || [0, 0])[1] });
+  $("#handle_rows").replaceChildren(); if (sp.handle) addRow("handle", { face: "lid", type: "bar" });
+  for (const hd of sp.handles || []) addRow("handle", { ...hd, face: FACE_OF[hd.face] || hd.face, a: (hd.at || [0, 0])[0], b: (hd.at || [0, 0])[1] });
   for (const t of sp.labels || []) {
-    const it = addRow("label", { face: FACE_OF[t.face] || t.face, text: t.text, a: t.at[0], b: t.at[1], size: t.size ?? 6, depth: Math.abs(t.depth ?? 0.6) });
+    const it = addRow("label", { face: FACE_OF[t.face] || t.face, text: t.text, a: t.at[0], b: t.at[1], size: t.size ?? 6, depth: Math.abs(t.depth ?? 0.6),
+      rotate: t.rotate, bold: t.bold });
     $("[name=style]", it).value = (t.depth ?? -0.6) < 0 ? "-1" : "1";
   }
   sync(); refresh();
@@ -1666,9 +1686,13 @@ const b64 = str => btoa(unescape(encodeURIComponent(str))).replace(/\+/g, "-").r
 const unb64 = str => decodeURIComponent(escape(atob(str.replace(/-/g, "+").replace(/_/g, "/"))));
 function remember() { try { localStorage.setItem(KEEP, JSON.stringify(designOf())); } catch {} }
 $("#sharebtn").onclick = async () => {
-  const url = `${location.origin}${location.pathname}#d=${b64(JSON.stringify(designOf()))}`;
+  const d = designOf();
+  const hadArt = (d.art || []).length > 0;
+  d.art = [];  // artwork files are too big for a link: they travel in saved versions and design files
+  const url = `${location.origin}${location.pathname}#d=${b64(JSON.stringify(d))}`;
   history.replaceState(null, "", url);
-  try { await navigator.clipboard.writeText(url); $("#sharestate").textContent = "Link copied: it opens this box with every setting."; }
+  try { await navigator.clipboard.writeText(url); $("#sharestate").textContent = "Link copied: it opens this box with every setting"
+    + (hadArt ? " except the artwork, which is too big for a link (save the design file to share that)." : "."); }
   catch { $("#sharestate").textContent = "The link is in the address bar: copy it from there."; }
 };
 $("#openbtn").onclick = () => $("#openfile").click();
@@ -1981,6 +2005,115 @@ $("#oldl").onclick = () => busy($("#oldl"), "Making...", async () => {
   const r = await download(await fetch("api/outline", { method: "POST", body: fd }), "outline_box.zip");
   if (r.error) report.replaceChildren(msg("err", r.error));
 });
+
+
+// ---------- Artwork and handle rows; placing things by tapping the model ----------
+function artRow(o = {}) {
+  const file = h("input", { type: "file", accept: ".svg,.dxf", name: "file" });
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid g2 head" }, field("Face", faceSel(o.face || "lid")), field("SVG or DXF", file)),
+    h("div", { class: "hint", "data-artname": "" }, o.name ? `Loaded: ${o.name}` : "No file yet"),
+    h("div", { class: "grid" },
+      h("label", { class: "f", "data-pos": "a" }, "X", h("span", { class: "unit", "data-unit": UNIT() }, lenIn("a", o.a ?? 0))),
+      h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": UNIT() }, lenIn("b", o.b ?? 0))),
+      field("Width", lenIn("width", o.width ?? 30, "1", "3"), UNIT())),
+    h("div", { class: "grid" },
+      field("Style", h("select", { name: "style" }, h("option", { value: "1", selected: (o.depth ?? 0.6) > 0 }, "Raised"), h("option", { value: "-1", selected: (o.depth ?? 0.6) < 0 }, "Engraved"))),
+      field("Depth", lenIn("depth", Math.abs(o.depth ?? 0.6), "0.1", "0.2"), UNIT()),
+      field("Turn (°)", h("input", { name: "rotate", type: "number", step: "15", value: o.rotate ?? 0 }))),
+    h("div", { class: "grid g2" }, field("Line width (for strokes)", lenIn("line", o.line ?? 0.8, "0.1", "0.4"), UNIT())),
+    placeBtn(it => it, "label"));
+  item._art = o.data ? { data: o.data, kind: o.kind || "svg", name: o.name || "" } : null;
+  file.onchange = async () => {
+    const f = file.files[0]; if (!f) return;
+    if (f.size > 400000) { $("[data-artname]", item).textContent = "That file is over 400 kB: simplify it or save it as plain SVG."; return; }
+    const kind = /\.dxf$/i.test(f.name) ? "dxf" : "svg";
+    item._art = { data: await f.text(), kind, name: f.name };
+    $("[data-artname]", item).textContent = `Loaded: ${f.name}`;
+    changed(item);
+  };
+  item.addEventListener("change", () => posLabels(item));
+  item._sync = () => posLabels(item);
+  return item;
+}
+function readArt(it) {
+  if (!it._art) return null;
+  const el = n => $(`[name=${n}]`, it);
+  return { face: el("face").value, data: it._art.data, kind: it._art.kind, name: it._art.name, at: [len(el("a")), len(el("b"))],
+           width: len(el("width")), depth: num(el("style").value) * len(el("depth")), rotate: num(el("rotate").value) || 0, line: len(el("line")) };
+}
+function handleRow(o = {}) {
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid g2 head" }, field("Face", faceSel(o.face || "lid")),
+      field("Type", h("select", { name: "type" }, [["bar", "Bar handle"], ["knob", "Pull knob"], ["grip", "Finger grip (walls)"], ["strap", "Strap loops"]]
+        .map(([v, t]) => h("option", { value: v, selected: v === (o.type || "bar") }, t))))),
+    h("div", { class: "grid" },
+      h("label", { class: "f", "data-pos": "a" }, "X", h("span", { class: "unit", "data-unit": UNIT() }, lenIn("a", o.a ?? 0))),
+      h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": UNIT() }, lenIn("b", o.b ?? 0))),
+      field("Length (blank: auto)", (() => o.length ? lenIn("length", o.length, "1", "10") : h("input", { type: "number", name: "length", min: "10", step: "1" }))(), UNIT())),
+    placeBtn(it => it, "hole"));
+  item.addEventListener("change", () => posLabels(item));
+  item._sync = () => posLabels(item);
+  return item;
+}
+function readHandle(it) {
+  const el = n => $(`[name=${n}]`, it);
+  const d = { face: el("face").value, type: el("type").value, at: [len(el("a")), len(el("b"))] };
+  if (el("length").value !== "") d.length = len(el("length"));
+  return d;
+}
+
+// Tap-to-place: the next tap on the model sets this row's face and position. "label" rows read left to
+// right from outside (as text does); "hole" rows use the box's own axes along each wall.
+var placing = null;
+function placeBtn(_, mode) {
+  const btn = h("button", { type: "button", class: "plain", style: "margin-top:6px" }, "Place on the model");
+  btn.onclick = () => {
+    const item = btn.closest(".item");
+    if (placing) placing.btn.textContent = "Place on the model";
+    placing = { item, mode, btn };
+    btn.textContent = "Now tap the model...";
+    if (window.matchMedia("(max-width: 860px)").matches) window.scrollTo({ top: 0, behavior: "smooth" });
+  };
+  return btn;
+}
+(function () {
+  const ray = new THREE.Raycaster(), ptr = new THREE.Vector2();
+  let down = null;
+  renderer.domElement.addEventListener("pointerdown", e => { down = [e.clientX, e.clientY]; });
+  renderer.domElement.addEventListener("pointerup", e => {
+    if (!placing || !current || !down || Math.hypot(e.clientX - down[0], e.clientY - down[1]) > 6) return;  // a drag turns the view
+    const r = renderer.domElement.getBoundingClientRect();
+    ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
+    ray.setFromCamera(ptr, camera);
+    const hit = ray.intersectObjects(current.group.children.filter(o => o.visible), false)[0];
+    if (!hit) return;
+    const onLid = hit.object === current.lid;
+    const p = current.group.worldToLocal(hit.point.clone());
+    if (onLid) p.z -= hit.object.position.z;  // undo the lifted lid
+    const n = hit.face.normal.clone();  // the model's own axes (the meshes aren't rotated inside the group)
+    const ax = Math.abs(n.x), ay = Math.abs(n.y), az = Math.abs(n.z);
+    let face, a, b;
+    const floor = len(boxform.elements.floor);
+    if (az >= ax && az >= ay) {
+      if (n.z < 0) return;  // the underside: not a place for these
+      face = "lid"; a = p.x; b = p.y;
+    } else if (ax > ay) {
+      face = n.x > 0 ? "right" : "left";
+      a = placing.mode === "label" ? (n.x > 0 ? p.y : -p.y) : p.y; b = p.z - floor;
+    } else {
+      face = n.y > 0 ? "back" : "front";
+      a = placing.mode === "label" ? (n.y > 0 ? -p.x : p.x) : p.x; b = p.z - floor;
+    }
+    const it = placing.item, set = (nm, v) => { const el = $(`[name=${nm}]`, it); el.value = show(v); el.dataset.mm = String(+v.toFixed(3)); };
+    $("[name=face]", it).value = face; set("a", a); set("b", b);
+    placing.btn.textContent = "Place on the model"; placing = null;
+    posLabels(it); changed(it);
+    if (window.matchMedia("(max-width: 860px)").matches) it.scrollIntoView({ behavior: "smooth", block: "center" });
+  });
+})();
 
 // ---------- Parts: screws, nuts, washers, spacers, springs, clips ----------
 const partform = $("#partform");

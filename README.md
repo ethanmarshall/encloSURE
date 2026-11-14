@@ -343,6 +343,11 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
 - **Stacking**: pins on the lid and sockets under the floor.
 - **Getting the board in**: the fit check lowers the board in from above and says whether anything
   stands over it, and whether connectors reaching into wall openings need the board slid or tilted in.
+- **Text and artwork**: labels can turn to any angle and be bold; artwork is a logo or drawing from an
+  SVG or DXF (filled shapes solid, lines as strokes), any width, turned, raised or engraved. On the page,
+  "Place on the model" then a tap on the 3D view sets the face and position.
+- **Handles** on the lid or any wall: a bar handle or pull knob (their own parts, screwed on), a
+  finger grip pocket in a wall, or strap loops for a webbing strap.
 - **Look**: icons beside panel holes (USB, power, antenna, fan, DC, fuse, LAN, I/O), engraved or
   raised; with two colours on, labels and icons are their own bodies in the 3MF for the AMS. Window
   panels can print as their own part in clear filament.

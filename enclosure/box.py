@@ -186,7 +186,12 @@ class BoxSpec:
     fan_flow_cfm: float = 0.0  # a fan's airflow through the box, for the temperature estimate
     lanyard: bool = False
     belt_clip: bool = False
-    handle: bool = False
+    handle: bool = False  # (older) a bar handle on the lid; handles below is the full set
+    # Handles: [{face (lid, or a wall), type: bar, knob, grip (a recessed finger pocket), strap (loops for a
+    # webbing strap), length, at [a, b]}]
+    handles: list[dict] = field(default_factory=list)
+    # Artwork: [{face, data (the SVG or DXF's text), kind svg|dxf, width, at [a, b], rotate, depth, line, name}]
+    art: list[dict] = field(default_factory=list)
     ground_lug: list[float] | None = None  # [x, y]: an M3 insert boss for a ground terminal
     shielding: bool = False  # notes on copper-tape shielding
     wall_bracket: bool = False  # a French-cleat rail on the floor and a bracket for the wall (its own part)
@@ -561,6 +566,111 @@ def living_print_body(spec: "BoxSpec", base, lid):
     strip_len = oL - 2 * spec.corner_radius - 2.0
     strip = Box(strip_len, LIVING_T, t + 0.02, align=(Align.CENTER, Align.MAX, Align.MIN)).locate(Location((0, oW / 2, top - 0.01)))
     return base + strip + opened, turn
+
+
+HANDLE_TYPES = ("bar", "knob", "grip", "strap")
+
+
+def _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks):
+    """One handle: a part to screw on (bar, knob), a finger pocket in a wall (grip), or loops for a
+    strap (strap). Returns (extra parts, notes, base, lid)."""
+    face = face_name(hd.get("face", "lid"))
+    kind = hd.get("type", "bar")
+    if kind not in HANDLE_TYPES:
+        raise ValueError(f"handle type: one of {', '.join(HANDLE_TYPES)}")
+    L, W, H = spec.inner
+    m = "M3"
+    clear, pilot = SCREWS[m][0], SCREWS[m][1]
+    extras, notes = [], []
+    a, b = hd.get("at", [0, 0 if face == "lid" else H * 0.7])
+    on_lid = face == "lid"
+    if on_lid and lid is None:
+        raise ValueError("a handle on the lid needs a lid")
+    if not on_lid and face not in WALLS:
+        raise ValueError("handles go on the lid or a wall")
+    span = (oW if face in ("-X", "+X") else oL)
+    length = float(hd.get("length") or (min((oL if on_lid else span) * 0.6, 120.0) if kind == "bar" else 60.0))
+    name = f"handle_{i + 1}"
+
+    # Where things go on a wall: a point on its outside face, and the outward direction.
+    def wall_point(u, z):
+        out = {"-Y": (0, -1), "+Y": (0, 1), "-X": (-1, 0), "+X": (1, 0)}[face]
+        half = (oL / 2) if face in ("-X", "+X") else (oW / 2)
+        along = (1, 0) if face in ("-Y", "+Y") else (0, 1)
+        return (out[0] * half + along[0] * u, out[1] * half + along[1] * u, spec.floor + z), out
+
+    def turn_to_wall(shape):
+        """A shape built standing on z = 0 pointing up (+Z = out of the wall), turned to point out of this wall."""
+        rot = {"-Y": Rot(90, 0, 0), "+Y": Rot(-90, 0, 0), "-X": Rot(0, -90, 0), "+X": Rot(0, 90, 0)}[face]
+        if face in ("-X", "+X"):
+            shape = Rot(0, 0, 90) * shape  # its length along the wall (Y)
+        return rot * shape
+
+    if kind == "bar":
+        hl = length
+        bar = Box(hl, 12, 4, align=(Align.CENTER, Align.CENTER, Align.MIN)).locate(Location((0, 0, 22)))
+        for sx in (-1, 1):
+            bar += Box(10, 12, 26, align=(Align.CENTER, Align.CENTER, Align.MIN)).locate(Location((sx * (hl / 2 - 5), 0, 0)))
+            bar -= Pos(sx * (hl / 2 - 5), 0, 0) * Cylinder(pilot / 2, 16, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        holes = [-(hl / 2 - 5), hl / 2 - 5]
+        if on_lid:
+            for u in holes:
+                lid -= Pos(a + u, b, top) * Cylinder(clear / 2, 40)
+        else:
+            for u in holes:
+                (x, y, z), out = wall_point(a + u, b)
+                tool = Cylinder(clear / 2, spec.wall * 6, rotation=(90, 0, 0) if face in ("-Y", "+Y") else (0, 90, 0))
+                base -= Pos(x, y, z) * tool
+        extras.append((name, Rot(90, 0, 0) * bar))
+        notes.append(f"bar handle on {face}: its own part, two M3 screws through the {'lid' if on_lid else 'wall'} into it, "
+                     f"{hl - 10:g} mm apart; print it on its side")
+    elif kind == "knob":
+        knob = Cylinder(9, 4, align=(Align.CENTER, Align.CENTER, Align.MIN)) + Pos(0, 0, 4) * Cylinder(5, 10, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        knob += Pos(0, 0, 14) * Cylinder(10, 6, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        knob -= Cylinder(pilot / 2, 12, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        if on_lid:
+            lid -= Pos(a, b, top) * Cylinder(clear / 2, 40)
+        else:
+            (x, y, z), out = wall_point(a, b)
+            base -= Pos(x, y, z) * Cylinder(clear / 2, spec.wall * 6, rotation=(90, 0, 0) if face in ("-Y", "+Y") else (0, 90, 0))
+        extras.append((name, Rot(180, 0, 0) * knob))
+        notes.append(f"pull knob on {face}: its own part, one M3 screw through the {'lid' if on_lid else 'wall'} into it; print it top down")
+    elif kind == "grip":
+        # A finger pocket: the wall thickened inside behind it, the pocket cut from outside.
+        if on_lid:
+            raise ValueError("a grip pocket goes in a wall (use a bar or knob on the lid)")
+        gl, gh, depth = length, 18.0, 7.0
+        (x, y, z), out = wall_point(a, b)
+        back = Box(gl + 6, depth + 1.2 - spec.wall + 0.01, gh + 6) if face in ("-Y", "+Y") else Box(depth + 1.2 - spec.wall + 0.01, gl + 6, gh + 6)
+        inner = depth + 1.2 - spec.wall
+        bx = x - out[0] * (spec.wall + inner / 2)
+        by = y - out[1] * (spec.wall + inner / 2)
+        base += Pos(bx, by, z) * back
+        pocket = Box(gl, depth * 2, gh) if face in ("-Y", "+Y") else Box(depth * 2, gl, gh)
+        base -= Pos(x, y, z) * pocket
+        notes.append(f"finger grip in the {face} wall: a {gl:g} x {gh:g} mm pocket {depth:g} mm deep, the wall thickened inside "
+                     f"behind it ({inner:.1f} mm into the box)")
+        checks.append(f"the grip on {face} takes {inner:.1f} mm of the inside behind it: check the board clears it")
+    else:  # strap loops, a pair on this wall
+        sw = float(hd.get("strap_width", 25.0))
+        slot_t = 3.5
+        for su in (-1, 1):
+            u = a + su * (length / 2)
+            (x, y, z), out = wall_point(u, b)
+            loop_w, loop_d, loop_h = sw + 7, slot_t + 4, 12.0
+            if face in ("-Y", "+Y"):
+                blk, slot = Box(loop_w, loop_d, loop_h), Box(sw + 1, slot_t, loop_h * 3)
+            else:
+                blk, slot = Box(loop_d, loop_w, loop_h), Box(slot_t, sw + 1, loop_h * 3)
+            cx_ = x + out[0] * (loop_d / 2 - 0.01)
+            cy_ = y + out[1] * (loop_d / 2 - 0.01)
+            base += Pos(cx_, cy_, z) * blk
+            base -= Pos(x + out[0] * (1.5 + slot_t / 2), y + out[1] * (1.5 + slot_t / 2), z) * slot  # 1.5 mm of block on the wall side
+        if length < sw + 9:
+            checks.append(f"strap loops on {face}: {length:g} mm apart is less than their width; space them further")
+        notes.append(f"strap loops on {face}: two, {length:g} mm apart, each with a {sw + 1:g} x {slot_t:g} mm slot standing up for a "
+                     f"{sw:g} mm strap (thread it down through both)")
+    return extras, notes, base, lid
 
 
 def build(spec: BoxSpec) -> dict:
@@ -1029,8 +1139,30 @@ def build(spec: BoxSpec) -> dict:
         face = face_name(t["face"])
         size, depth = t.get("size", 6.0), t.get("depth", -0.6)
         a, b = t.get("at", [0, 0])
-        mark(extrude(Text(t["text"], size, align=(Align.CENTER, Align.CENTER)), amount=abs(depth)), face, a, b, depth, f"label_{i + 1}")
-        notes.append(f"label {t['text']!r} on {face}, {'raised' if depth > 0 else 'recessed'} {abs(depth):g} mm")
+        from build123d import FontStyle
+        txt = Text(t["text"], size, align=(Align.CENTER, Align.CENTER),
+                   font_style=FontStyle.BOLD if t.get("bold") else FontStyle.REGULAR)
+        body = extrude(txt, amount=abs(depth))
+        if t.get("rotate"):
+            body = Rot(0, 0, float(t["rotate"])) * body
+        mark(body, face, a, b, depth, f"label_{i + 1}")
+        notes.append(f"label {t['text']!r} on {face}, {'raised' if depth > 0 else 'recessed'} {abs(depth):g} mm"
+                     + (f", turned {float(t['rotate']):g}°" if t.get("rotate") else ""))
+
+    for i, g in enumerate(spec.art):
+        from .art import solid as art_solid
+        face = face_name(g["face"])
+        depth = float(g.get("depth", -0.6))
+        width = float(g.get("width", 30.0))
+        body, (w_, h_) = art_solid(g["data"], g.get("kind", "svg"), width, abs(depth), float(g.get("line", 0.8)))
+        if g.get("rotate"):
+            body = Rot(0, 0, float(g["rotate"])) * body
+        a, b = g.get("at", [0, 0])
+        mark(body, face, a, b, depth, f"art_{i + 1}")
+        notes.append(f"artwork {g.get('name') or i + 1} on {face}: {w_:.1f} x {h_:.1f} mm, {'raised' if depth > 0 else 'engraved'} "
+                     f"{abs(depth):g} mm" + (f", turned {float(g['rotate']):g}°" if g.get("rotate") else ""))
+        if min(w_, h_) < 4:
+            checks.append(f"artwork {g.get('name') or i + 1} is under 4 mm one way: fine details under about 0.8 mm won't print")
 
     if spec.icons:
         from .icons import icon_for, icon_shape
@@ -1283,17 +1415,11 @@ def build(spec: BoxSpec) -> dict:
         clip += Pos(-cl / 2 + tongue_l - 3, 0, 4.5) * Box(3, cw, 1.2, align=(Align.MIN, Align.CENTER, Align.MAX))  # a bump
         extras.append(("belt_clip", clip))
         notes.append(f"belt clip: its own part, two M3 screws through the floor {cl / 2:g} mm apart (nuts inside); print it on its side")
-    if spec.handle:
-        hl = min(L * 0.6, 120.0)
-        m_ = "M3"
-        handle = Box(hl, 12, 4, align=(Align.CENTER, Align.CENTER, Align.MIN)).locate(Location((0, 0, 22)))
-        for sx in (-1, 1):
-            handle += Box(10, 12, 26, align=(Align.CENTER, Align.CENTER, Align.MIN)).locate(Location((sx * (hl / 2 - 5), 0, 0)))
-            handle -= Pos(sx * (hl / 2 - 5), 0, 0) * Cylinder(SCREWS[m_][1] / 2, 16, align=(Align.CENTER, Align.CENTER, Align.MIN))
-            if lid is not None:
-                lid -= Pos(sx * (hl / 2 - 5), 0, top) * Cylinder(SCREWS[m_][0] / 2, 40)
-        extras.append(("handle", Rot(90, 0, 0) * handle))
-        notes.append(f"handle: its own part, two M3 screws up through the lid into it, {hl - 10:g} mm apart; print it on its side")
+    handles = list(spec.handles) + ([{"face": "lid", "type": "bar"}] if spec.handle else [])
+    for i, hd in enumerate(handles):
+        extras_h, notes_h, base, lid = _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks)
+        extras += extras_h
+        notes += notes_h
 
     # Grounding: a boss for a ground lug, and where copper tape would shield the inside.
     if spec.ground_lug:
