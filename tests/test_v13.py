@@ -66,3 +66,17 @@ def test_magnets_through_the_web():
     assert r.status_code == 200, r.text
     notes = " ".join(r.json()["notes"])
     assert "magnet lid" in notes and "magnet 1" in notes
+
+
+def test_dowel_chamfers():
+    plain = hw.make("dowel", ends="none")["shape"].volume
+    both = hw.make("dowel", chamfer=0.5)
+    one = hw.make("dowel", chamfer=0.5, ends="one")
+    lead = hw.make("dowel", chamfer=0.4, chamfer_angle=15)
+    assert plain > one["shape"].volume > both["shape"].volume
+    assert lead["shape"].is_valid and "at 15°" in lead["notes"][0]
+    assert hw.make("dowel", mode="print", chamfer=0.6)["info"]["chamfer"] == 0.6
+    with pytest.raises(ValueError):
+        hw.make("dowel", chamfer=3)
+    fields = {f["name"] for f in hw.catalog()["kinds"]["dowel"]["fields"]}
+    assert {"chamfer", "chamfer_angle", "ends"} <= fields

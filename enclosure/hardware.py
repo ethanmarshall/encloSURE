@@ -999,43 +999,72 @@ def grommet(hole=12.0, panel=2.0, cable_d=6.0, flange=2.5, split=False, membrane
             "info": {"panel_hole": hole, "bore": round(bore, 2), "flange_d": od, "groove": round(groove, 2)}, "buy": buy}
 
 
-def dowel(diameter=4.0, length=20.0, fit="press", mode="reference", clearance=0.2):
+def _pin(d: float, L: float, c: float, angle: float, ends: str):
+    """A round pin standing on z = 0, its ends chamfered `c` mm deep (radially) at `angle` degrees from
+    its axis (45 is a plain chamfer; 15 to 30 a longer lead-in)."""
+    from build123d import revolve
+    r = d / 2
+    ca = c / math.tan(math.radians(angle)) if c > 0 else 0.0
+    lo = (c, ca) if ends in ("both", "bottom") else (0.0, 0.0)
+    hi = (c, ca) if ends == "both" else (0.0, 0.0)
+    pts = [(0, 0), (r - lo[0], 0)] + ([(r, lo[1])] if lo[0] else []) + \
+          ([(r, L - hi[1])] if hi[0] else []) + [(r - hi[0], L), (0, L)]
+    prof = Plane.XZ * Polygon(*pts, align=None)
+    return revolve(prof, axis=Axis.Z)
+
+
+def _dowel_chamfer(d, L, chamfer_, angle, ends):
+    """The chamfer to use, checked: blank picks about 10% of the diameter."""
+    if ends not in ("both", "one", "none"):
+        raise ValueError("chamfered ends: both, one or none")
+    a = float(angle)
+    if not 5 <= a <= 60:
+        raise ValueError("chamfer angle: 5 to 60° from the pin's axis")
+    c = float(chamfer_) if chamfer_ not in (None, "") else round(min(0.1 * d + 0.1, 0.8), 2)
+    if ends == "none":
+        c = 0.0
+    if c < 0 or c > 0.4 * d:
+        raise ValueError(f"chamfer: 0 to {0.4 * d:g} mm (40% of the diameter)")
+    axial = c / math.tan(math.radians(a)) if c else 0.0
+    if axial * (2 if ends == "both" else 1) > 0.8 * L:
+        raise ValueError("the chamfers take up most of the pin: a smaller chamfer, a steeper angle or a longer pin")
+    return c, a, axial, ("both" if ends == "both" else "bottom" if ends == "one" else "none")
+
+
+def dowel(diameter=4.0, length=20.0, fit="press", chamfer=None, chamfer_angle=45.0, ends="both", mode="reference",
+          clearance=0.2):
     """A dowel pin standing on z = 0. Reference: a hardened ISO 8734 (m6) pin. Print: lying on its side
     with a small flat so it stays on the bed (round enough, and much stronger than printed upright), its
-    diameter taken down by `clearance` for a slip fit."""
+    diameter taken down by `clearance` for a slip fit. The ends get a chamfer: blank picks about 10% of
+    the diameter; the angle is from the pin's axis (45 plain, 15 to 30 a long lead-in for pressing in)."""
     d, L = float(diameter), float(length)
     if not 1 <= d <= 25 or not 2 <= L <= 200:
         raise ValueError("dowel: diameter 1 to 25 mm, length 2 to 200 mm")
     if fit not in ("press", "slip"):
         raise ValueError("fit: press or slip")
     notes, checks = [], []
+    c, ang, axial, which = _dowel_chamfer(d, L, chamfer, chamfer_angle, ends)
+    cham = (f"{'both ends' if which == 'both' else 'one end'} chamfered {c:g} mm"
+            + (f" at {ang:g}° ({axial:.2f} mm long)" if ang != 45 else " x 45°")) if c else "square ends"
     if mode == "reference":
-        pin = Cylinder(d / 2, L, align=(Align.CENTER, Align.CENTER, Align.MIN))
-        try:
-            pin = chamfer(pin.edges().sort_by(Axis.Z)[0:1] + pin.edges().sort_by(Axis.Z)[-1:], min(0.1 * d + 0.1, L / 6))
-        except Exception:
-            pass
+        pin = _pin(d, L, c, ang, which)
         hole = (f"reamed Ø{d:g} H7 for a light press; in a printed part print the hole Ø{d:g} and drive it in"
                 if fit == "press" else f"Ø{d + 0.02:g} G7 to slide; in a printed part print it Ø{d + 0.25:g}")
-        notes.append(f"dowel pin Ø{d:g} x {L:g} mm, ISO 8734 (hardened, m6); hole: {hole}")
+        notes.append(f"dowel pin Ø{d:g} x {L:g} mm, ISO 8734 (hardened, m6), {cham}; hole: {hole}")
         std = [3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 24, 25, 28, 30, 32, 35, 40, 45, 50, 55, 60, 70, 80, 90, 100]
         if int(L) not in std or L != int(L):
             checks.append(f"{L:g} mm isn't a stock length; near ones are {', '.join(str(x) for x in std if abs(x - L) <= 6)}")
         return {"shape": pin, "notes": notes, "checks": checks,
-                "info": {"diameter": d, "length": L, "standard": "ISO 8734 m6"}, "buy": f"Ø{d:g} x {L:g} mm dowel pin, ISO 8734"}
+                "info": {"diameter": d, "length": L, "standard": "ISO 8734 m6", "chamfer": c, "chamfer_angle": ang}, "buy": f"Ø{d:g} x {L:g} mm dowel pin, ISO 8734"}
     dp = d - (clearance if fit == "slip" else 0.0)
-    pin = Cylinder(dp / 2, L, align=(Align.CENTER, Align.CENTER, Align.MIN))
-    try:
-        pin = chamfer(pin.edges().sort_by(Axis.Z)[0:1] + pin.edges().sort_by(Axis.Z)[-1:], min(0.4, dp * 0.1))
-    except Exception:
-        pass
+    pin = _pin(dp, L, min(c, 0.4 * dp), ang, which)
     flat = max(0.2, dp * 0.08)
     pin -= Pos(0, -dp / 2, L / 2) * Box(dp * 2, 2 * flat, L * 2)
-    notes.append(f"printed dowel Ø{dp:g} x {L:g} mm with a {flat:.2f} mm flat to lie on; print it on its side "
+    notes.append(f"printed dowel Ø{dp:g} x {L:g} mm, {cham}, with a {flat:.2f} mm flat to lie on; print it on its side "
                  + ("(sand it to fit if it's tight)" if fit == "press" else f"({clearance:g} mm under for a slip fit)"))
     if dp < 3:
         checks.append("printed pins under Ø3 mm are weak: use a steel pin or a length of filament")
-    return {"shape": pin, "notes": notes, "checks": checks, "info": {"diameter": round(dp, 3), "length": L}, "buy": None}
+    return {"shape": pin, "notes": notes, "checks": checks, "info": {"diameter": round(dp, 3), "length": L, "chamfer": c, "chamfer_angle": ang}, "buy": None}
 
 
 # Retaining rings (circlips): nominal -> (thickness s, free diameter d3, groove diameter d2, lug height a, lug hole d5).
@@ -1216,7 +1245,8 @@ KINDS = {
     "wheel": (wheel, "Wheel", {"diameter": 40.0, "width": 12.0, "bore": "round", "bore_d": 5.0, "bearing": "608", "hub": 0.0,
                                "set_screw": None, "tread": "flat", "o_ring": 3.0, "holes": 0}),
     "grommet": (grommet, "Grommet", {"hole": 12.0, "panel": 2.0, "cable_d": 6.0, "flange": 2.5, "split": False, "membrane": False}),
-    "dowel": (dowel, "Dowel pin", {"diameter": 4.0, "length": 20.0, "fit": "press"}),
+    "dowel": (dowel, "Dowel pin", {"diameter": 4.0, "length": 20.0, "fit": "press", "chamfer": None, "chamfer_angle": 45.0,
+                                   "ends": "both"}),
     "snap_ring": (snap_ring, "Snap ring (circlip)", {"size": 10.0, "type": "external"}),
     "thumbscrew": (thumbscrew, "Thumb screw", {"size": "M3", "length": 10.0, "style": "knurled", "threads": False, "head_d": None}),
     "test_print": (test_print, "Thread and snap test print", {"size": "M8", "clearances": "0.1,0.15,0.2,0.25,0.3", "hooks": "0.6,1.0,1.4"}),
@@ -1327,7 +1357,9 @@ KIND_LABELS = {("knob", "height"): ("Height", "len"), ("knob", "grip"): ("Grip r
                ("grommet", "hole"): ("Panel hole", "len"), ("grommet", "panel"): ("Panel thickness", "len"),
                ("grommet", "cable_d"): ("Cable diameter", "len"), ("grommet", "flange"): ("Flange (each side of the hole)", "len"),
                ("grommet", "split"): ("Split down one side", "bool"), ("grommet", "membrane"): ("Membrane to pierce", "bool"),
-               ("dowel", "fit"): ("Fit", "select"), ("snap_ring", "size"): ("Shaft or bore", "select"),
+               ("dowel", "fit"): ("Fit", "select"), ("dowel", "chamfer"): ("Chamfer (blank: about 10% of Ø)", "len"),
+               ("dowel", "chamfer_angle"): ("Chamfer angle from the axis, ° (45 plain, 15 lead-in)", "num"),
+               ("dowel", "ends"): ("Chamfered ends", "select"), ("snap_ring", "size"): ("Shaft or bore", "select"),
                ("snap_ring", "type"): ("Type", "select"), ("thumbscrew", "style"): ("Head", "select"),
                ("thumbscrew", "head_d"): ("Head diameter (blank: standard)", "len"), ("test_print", "size"): ("Thread", "text")}
 
@@ -1345,7 +1377,7 @@ def catalog() -> dict:
         ("hinge", "pin"): ["filament", "M3"],
         ("wheel", "bore"): ["round", "d", "bearing"], ("wheel", "bearing"): list(BEARINGS),
         ("wheel", "set_screw"): ["", "M2", "M2.5", "M3", "M4"], ("wheel", "tread"): ["flat", "rounded", "o-ring", "v-groove"],
-        ("dowel", "fit"): ["press", "slip"], ("snap_ring", "type"): ["external", "internal"],
+        ("dowel", "fit"): ["press", "slip"], ("dowel", "ends"): ["both", "one", "none"], ("snap_ring", "type"): ["external", "internal"],
         ("snap_ring", "size"): sorted(set(RINGS_EXTERNAL) | set(RINGS_INTERNAL)),
         ("thumbscrew", "style"): ["knurled", "wing", "cap"],
     }
