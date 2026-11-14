@@ -1010,7 +1010,7 @@ const faceSel = (value) => h("select", { name: "face" }, FACES.map(([v, t]) => h
 // ---------- Row editors ----------
 function posLabels(item) {
   const face = item.querySelector("[name=face]").value;
-  const [a, b] = WALL.has(face) ? ["Along wall", "Up from floor"] : ["X", "Y"];
+  const [a, b] = WALL.has(face) ? ["Centre along wall", "Centre up from floor"] : ["Centre X", "Centre Y"];
   item.querySelector("[data-pos=a]").firstChild.textContent = a;
   item.querySelector("[data-pos=b]").firstChild.textContent = b;
 }
@@ -1313,8 +1313,14 @@ function makeView(data) {
       m.position.set(x - pb.min.x, -(pb.min.y + pb.max.y) / 2, -pb.min.z); x += pb.max.x - pb.min.x + 10; g.add(m);
     }
   }
+  // Screw-on parts (bar handles, knobs) shown where they go; the ones on the lid lift with it.
+  const onLid = [];
+  for (const mt of data.mounted || []) {
+    const m = mesh(mt.mesh, 0x9bbf8a); m.userData.noPick = true; g.add(m);
+    if (mt.host === "lid" && lid) onLid.push(m);
+  }
   const bb = new THREE.Box3().setFromObject(g);
-  return { group: g, lid, top: bb.max.z - bb.min.z, size: bb.getSize(new THREE.Vector3()), framed: false };
+  return { group: g, lid, onLid, top: bb.max.z - bb.min.z, size: bb.getSize(new THREE.Vector3()), framed: false };
 }
 function showView(v) {
   if (current) world.remove(current.group);
@@ -1327,7 +1333,11 @@ function showView(v) {
     camera.position.set(r * 1.2, r * 1.0, r * 1.4); controls.target.set(0, v.size.z / 2, 0); v.framed = true;
   }
 }
-function placeLid() { if (!current?.lid) return; current.lid.position.z = $("#explode").checked ? Math.max(15, current.top * 0.5) : 0; current.lid.visible = $("#showlid").checked; }
+function placeLid() {
+  if (!current?.lid) return;
+  const z = $("#explode").checked ? Math.max(15, current.top * 0.5) : 0, vis = $("#showlid").checked;
+  for (const m of [current.lid, ...(current.onLid || [])]) { m.position.z = z; m.visible = vis; }
+}
 $("#explode").onchange = placeLid; $("#showlid").onchange = placeLid;
 function empty(text) { $("#empty").hidden = !text; $("#empty").textContent = text || ""; }
 
@@ -2125,7 +2135,7 @@ function placeBtn(_, mode) {
     const r = renderer.domElement.getBoundingClientRect();
     ptr.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     ray.setFromCamera(ptr, camera);
-    const hit = ray.intersectObjects(current.group.children.filter(o => o.visible), false)[0];
+    const hit = ray.intersectObjects(current.group.children.filter(o => o.visible && !o.userData.noPick), false)[0];
     if (!hit) return;
     const onLid = hit.object === current.lid;
     const p = current.group.worldToLocal(hit.point.clone());

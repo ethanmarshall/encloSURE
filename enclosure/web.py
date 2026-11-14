@@ -479,7 +479,10 @@ def preview(body: dict):
     if made["lid"] is not None:
         out["lid"] = base64.b64encode(_stl(made["lid"])).decode()
     if made.get("extras"):
-        out["extras"] = [{"name": n, "mesh": base64.b64encode(_stl(e)).decode()} for n, e in made["extras"]]
+        on_box = {n for n, _, _ in made.get("mounted") or []}
+        out["extras"] = [{"name": n, "mesh": base64.b64encode(_stl(e)).decode()} for n, e in made["extras"] if n not in on_box]
+    if made.get("mounted"):
+        out["mounted"] = [{"name": n, "host": host, "mesh": base64.b64encode(_stl(e)).decode()} for n, e, host in made["mounted"]]
     out["screws"] = made.get("screws")
     from . import ratings
     out["ip"] = ratings.ip_guide(spec)

@@ -692,7 +692,8 @@ def _magnet(spec, m, i, base, lid, top, oL, oW, notes, checks):
 
 def _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks):
     """One handle: a part to screw on (bar, knob), a finger pocket in a wall (grip), or loops for a
-    strap (strap). Returns (extra parts, notes, base, lid)."""
+    strap (strap). Returns (extra parts, notes, base, lid, mounted), mounted being the screw-on parts placed where
+    they go on the box (for the preview), each with the body it rides on."""
     face = face_name(hd.get("face", "lid"))
     kind = hd.get("type", "bar")
     if kind not in HANDLE_TYPES:
@@ -712,6 +713,8 @@ def _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks):
     span = (oW if face in ("-X", "+X") else oL)
     length = float(hd.get("length") or (min((oL if on_lid else span) * 0.6, 120.0) if kind == "bar" else 60.0))
     name = f"handle_{i + 1}"
+    mounted = []
+    lid_top = top + spec.lid_thickness
 
     # Where things go on a wall: a point on its outside face, and the outward direction.
     def wall_point(u, z):
@@ -743,6 +746,12 @@ def _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks):
                 tool = Cylinder(clear / 2, spec.wall * 6, rotation=(90, 0, 0) if face in ("-Y", "+Y") else (0, 90, 0))
                 base -= Pos(x, y, z) * tool
         extras.append((name, Rot(90, 0, 0) * bar))
+        if on_lid:
+            mounted.append((name, Pos(a, b, lid_top) * bar, "lid"))
+        else:
+            (x, y, z), _ = wall_point(a, b)
+            mounted.append((name, Pos(x, y, z) * turn_to_wall(bar), "base"))
+        _span_check(spec, f"bar handle on {face}", face, a, b, hl, 6.0, checks)
         notes.append(f"bar handle on {face}: its own part, two M3 screws through the {'lid' if on_lid else 'wall'} into it, "
                      f"{hl - 10:g} mm apart; print it on its side")
     elif kind == "knob":
@@ -755,6 +764,12 @@ def _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks):
             (x, y, z), out = wall_point(a, b)
             base -= Pos(x, y, z) * Cylinder(clear / 2, spec.wall * 6, rotation=(90, 0, 0) if face in ("-Y", "+Y") else (0, 90, 0))
         extras.append((name, Rot(180, 0, 0) * knob))
+        if on_lid:
+            mounted.append((name, Pos(a, b, lid_top) * knob, "lid"))
+        else:
+            (x, y, z), _ = wall_point(a, b)
+            mounted.append((name, Pos(x, y, z) * turn_to_wall(knob), "base"))
+        _span_check(spec, f"knob on {face}", face, a, b, 6.0, 6.0, checks)
         notes.append(f"pull knob on {face}: its own part, one M3 screw through the {'lid' if on_lid else 'wall'} into it; print it top down")
     elif kind == "grip":
         # A finger pocket: the wall thickened inside behind it, the pocket cut from outside.
@@ -772,6 +787,7 @@ def _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks):
         notes.append(f"finger grip in the {face} wall: a {gl:g} x {gh:g} mm pocket {depth:g} mm deep, the wall thickened inside "
                      f"behind it ({inner:.1f} mm into the box)")
         checks.append(f"the grip on {face} takes {inner:.1f} mm of the inside behind it: check the board clears it")
+        _span_check(spec, f"grip on {face}", face, a, b, gl + 6, gh + 6, checks)
     else:  # strap loops, a pair on this wall
         sw = float(hd.get("strap_width", 25.0))
         slot_t = 3.5
@@ -787,11 +803,38 @@ def _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks):
             cy_ = y + out[1] * (loop_d / 2 - 0.01)
             base += Pos(cx_, cy_, z) * blk
             base -= Pos(x + out[0] * (1.5 + slot_t / 2), y + out[1] * (1.5 + slot_t / 2), z) * slot  # 1.5 mm of block on the wall side
+        _span_check(spec, f"strap loops on {face}", face, a, b, length + sw + 7, 12.0, checks, through=False)
         if length < sw + 9:
             checks.append(f"strap loops on {face}: {length:g} mm apart is less than their width; space them further")
         notes.append(f"strap loops on {face}: two, {length:g} mm apart, each with a {sw + 1:g} x {slot_t:g} mm slot standing up for a "
                      f"{sw:g} mm strap (thread it down through both)")
-    return extras, notes, base, lid
+    return extras, notes, base, lid, mounted
+
+
+def _span_check(spec, what: str, face: str, a: float, b: float, w: float, h: float, checks: list, through: bool = True) -> None:
+    """Flag a feature `w` wide and `h` tall, centred `a` along a wall and `b` up from the inside floor (or at
+    (a, b) on the lid or floor), that runs past the floor, the top or the wall's ends."""
+    L, W, H = spec.inner
+    if face in ("lid", "floor"):
+        for v, half, ax in ((a, L / 2, "X"), (b, W / 2, "Y")):
+            ext = (w if ax == "X" else h) / 2
+            if abs(v) + ext > half + 0.01:
+                checks.append(f"{what}: it runs {abs(v) + ext - half:.1f} mm past the inside edge in {ax} (keep its centre within "
+                              f"±{max(half - ext, 0):g} mm)")
+        return
+    half = (W if face in ("-X", "+X") else L) / 2
+    # Anything through the wall must stay under the lid's lip; something only on the outside, under the lid.
+    top_room = H - (spec.lip + 0.5 if through and spec.lid in PLATE_LIDS and spec.lip else 0.0)
+    lo, hi = b - h / 2, b + h / 2
+    if lo < -0.01:
+        checks.append(f"{what}: 'up from floor' is its centre, so at {b:g} mm its bottom edge is {-lo:.1f} mm below the inside "
+                      f"floor; set it to at least {h / 2:g} mm")
+    if hi > top_room + 0.01:
+        why = "into the lid's lip" if top_room < H else "above the top of the wall"
+        checks.append(f"{what}: its top edge is {hi - top_room:.1f} mm {why}; set 'up from floor' to at most {max(top_room - h / 2, 0):g} mm")
+    if abs(a) + w / 2 > half + 0.01:
+        checks.append(f"{what}: it runs {abs(a) + w / 2 - half:.1f} mm past the end of the wall (keep 'along wall' within "
+                      f"±{max(half - w / 2, 0):g} mm{', or shorten it' if w / 2 >= half else ''})")
 
 
 def build(spec: BoxSpec) -> dict:
@@ -1123,6 +1166,9 @@ def build(spec: BoxSpec) -> dict:
                 Pos(c.at[0], c.at[1], z) * _profile(c.shape, c.size, c.radius, 50.0))
         else:
             along, height = c.at
+            cw = c.size[0]
+            chh = c.size[1] if len(c.size) > 1 and c.shape != "round" else c.size[0]
+            _span_check(spec, f"{c.preset or c.shape} hole on {c.face}", c.face, along, height, cw, chh, checks)
             tool = _profile(c.shape, c.size, c.radius, spec.wall * 4, spec.teardrop and c.shape == "round")
             cut("base", _on_wall(tool, c.face, along, spec.floor + height, oL, oW))
             if c.preset in GLANDS:
@@ -1175,6 +1221,7 @@ def build(spec: BoxSpec) -> dict:
         (w, h), (a, b) = v["size"], v.get("at", [0, 0])
         if v.get("pattern") == "honeycomb":
             cells = _honeycomb(w, h, v.get("cell", 4.0), v.get("web", 1.2))
+            _span_check(spec, f"vent on {face}", face, a, b, w, h, checks)
             thick = 50.0 if face in ("lid", "floor") else spec.wall * 4
             hexagon = extrude(RegularPolygon(v.get("cell", 4.0) / 2, 6, major_radius=False), amount=thick / 2, both=True)
             tools = [Pos(a + cx, b + cy, 0) * hexagon for cx, cy in cells]
@@ -1191,6 +1238,7 @@ def build(spec: BoxSpec) -> dict:
                          f"{v.get('web', 1.2):g} mm between them, {_hex_area(v.get('cell', 4.0)) * len(cells):.0f} mm² open")
             continue
         slot, pitch = v.get("slot", 2.0), v.get("pitch", 4.0)
+        _span_check(spec, f"vent on {face}", face, a, b, w, h, checks)
         n = max(1, int((w - slot) // pitch) + 1)
         start = a - (n - 1) * pitch / 2
         for i in range(n):
@@ -1544,8 +1592,10 @@ def build(spec: BoxSpec) -> dict:
         extras.append(("belt_clip", clip))
         notes.append(f"belt clip: its own part, two M3 screws through the floor {cl / 2:g} mm apart (nuts inside); print it on its side")
     handles = list(spec.handles) + ([{"face": "lid", "type": "bar"}] if spec.handle else [])
+    mounted = []  # screw-on parts where they go, for the preview
     for i, hd in enumerate(handles):
-        extras_h, notes_h, base, lid = _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks)
+        extras_h, notes_h, base, lid, mounted_h = _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks)
+        mounted += mounted_h
         extras += extras_h
         notes += notes_h
 
@@ -1687,7 +1737,7 @@ def build(spec: BoxSpec) -> dict:
     for role, row in screws.items():
         notes.append(f"{role} screws: {row['screw']}x{row['length']:g} ({'your length' if getattr(spec, role + '_screw_length') else 'stock length'}), "
                      f"{row['engaged']:g} mm of thread {'in the nut' if row['kind'] == 'clearance' else 'in the ' + ('insert' if row['kind'] == 'insert' else 'plastic')}")
-    return {"base": base, "lid": lid, "print_body": print_body, "extras": extras, "inlays": inlays, "notes": notes, "checks": checks, "estimate": estimate, "screws": screws,
+    return {"base": base, "lid": lid, "print_body": print_body, "extras": extras, "mounted": mounted, "inlays": inlays, "notes": notes, "checks": checks, "estimate": estimate, "screws": screws,
             "supports": placed, "print_plan": print_plan, "thermal": thermal,
             "inner": [round(v, 3) for v in spec.inner], "outer": [round(v, 3) for v in spec.outer]}
 

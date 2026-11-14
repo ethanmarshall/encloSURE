@@ -80,3 +80,19 @@ def test_dowel_chamfers():
         hw.make("dowel", chamfer=3)
     fields = {f["name"] for f in hw.catalog()["kinds"]["dowel"]["fields"]}
     assert {"chamfer", "chamfer_angle", "ends"} <= fields
+
+
+def test_heights_are_centres_and_flagged():
+    spec = box.BoxSpec(size=[100, 60, 40], lid="friction", standoffs=[],
+                       vents=[{"face": "+X", "size": [30, 20], "at": [0, 5]}],
+                       handles=[{"face": "-X", "type": "bar", "at": [0, 20]}, {"face": "lid", "type": "knob"},
+                                {"face": "-Y", "type": "bar", "at": [30, 20]}])
+    r = box.build(spec)
+    text = " ".join(r["checks"])
+    assert "vent on +X: 'up from floor' is its centre" in text and "past the end of the wall" in text
+    placed = {n: (sh.bounding_box(), host) for n, sh, host in r["mounted"]}
+    bb, host = placed["handle_1"]
+    assert host == "base" and bb.max.X <= -51.9 and (bb.min.Z + bb.max.Z) / 2 == pytest.approx(spec.floor + 20, abs=0.1)
+    assert placed["handle_2"][1] == "lid"
+    ok = box.build(box.BoxSpec(size=[100, 60, 40], vents=[{"face": "+X", "size": [30, 20], "at": [0, 15]}]))
+    assert not any("vent" in c for c in ok["checks"])
