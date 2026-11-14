@@ -196,6 +196,11 @@ class BoxSpec:
     shielding: bool = False  # notes on copper-tape shielding
     wall_bracket: bool = False  # a French-cleat rail on the floor and a bracket for the wall (its own part)
     stacking: bool = False  # pins on the lid and sockets under the floor so boxes stack in line
+    # Magnets: round pockets for disc magnets: [{face (lid, floor or a wall), at [a, b], d, t, side outside|inside,
+    # fit press|glue, hidden (sealed in, dropped in at a print pause: floor and lid only)}]
+    magnets: list[dict] = field(default_factory=list)
+    # A lid held shut by magnets: {d, t}: pockets in corner posts and matching ones under the lid
+    magnet_lid: dict | None = None
 
     # The box's dimensions
     @property
@@ -571,6 +576,120 @@ def living_print_body(spec: "BoxSpec", base, lid):
 HANDLE_TYPES = ("bar", "knob", "grip", "strap")
 
 
+MAGNET_SKIN = 0.6  # plastic left behind a blind magnet pocket
+MAGNET_FIT = {"press": 0.15, "glue": 0.3}  # added to the magnet's diameter
+
+
+def _magnet_hole(m: dict) -> tuple[float, float, float]:
+    """(magnet d, t, pocket diameter) from a magnet row, checked."""
+    d, t = float(m.get("d", 6.0)), float(m.get("t", 2.0))
+    if not 1 <= d <= 40 or not 0.5 <= t <= 20:
+        raise ValueError("magnet: diameter 1 to 40 mm, thickness 0.5 to 20 mm")
+    fit = m.get("fit", "press")
+    if fit not in MAGNET_FIT:
+        raise ValueError("magnet fit: press or glue")
+    return d, t, d + MAGNET_FIT[fit]
+
+
+def _magnet_lid(spec, m, base, lid, posts, top, notes, checks):
+    """A pocket in the top of each corner post, and one under the lid over it, for a pair of magnets.
+    A hinged lid only gets them at the front (the side away from the hinge)."""
+    d, t, hole = _magnet_hole(m)
+    depth = t + 0.1  # sit the magnet a hair under the surface so the lid closes flat
+    use = [(x, y) for x, y in posts if spec.lid not in ("hinge", "living") or y < 0]
+    pad = max(0.0, depth + MAGNET_SKIN - spec.lid_thickness)
+    lid_top = top + spec.lid_thickness
+    for x, y in use:
+        base -= Pos(x, y, top - depth) * Cylinder(hole / 2, depth + 0.01, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        if pad:
+            lid += Pos(x, y, lid_top) * Cylinder(hole / 2 + 1.6, pad, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        lid -= Pos(x, y, top - 0.01) * Cylinder(hole / 2, depth + 0.01, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    notes.append(f"magnet lid: {2 * len(use)} magnets Ø{d:g} x {t:g} mm, one in the top of each of {len(use)} corner "
+                 f"posts and one under the lid above it (pockets Ø{hole:g} x {depth:g} mm); check the poles attract before "
+                 "gluing the second set")
+    if pad:
+        notes.append(f"the lid is thinner than the magnets: a {pad:.1f} mm round pad on top over each one")
+    if d > 12:
+        checks.append("big magnets in the corner posts make them wide: they may crowd the board")
+    return base, lid
+
+
+def _magnet(spec, m, i, base, lid, top, oL, oW, notes, checks):
+    """A pocket for a disc magnet in the lid, floor or a wall, open to the outside or the inside, or sealed
+    in (hidden) for dropping in at a print pause. Where the panel is too thin, a round boss inside backs it."""
+    face = face_name(m.get("face", "floor"))
+    d, t, hole = _magnet_hole(m)
+    side = m.get("side", "outside")
+    if side not in ("outside", "inside"):
+        raise ValueError("magnet side: outside or inside")
+    hidden = bool(m.get("hidden"))
+    a, b = (list(m.get("at") or [0, 0]) + [0])[:2]
+    a, b = float(a or 0), float(b or 0)
+    if face == "lid" and lid is None:
+        raise ValueError("a magnet in the lid needs a lid")
+    if face not in ("lid", "floor") + WALLS:
+        raise ValueError("magnets go in the lid, the floor or a wall")
+    if hidden and face not in ("lid", "floor"):
+        raise ValueError("hidden magnets go in the floor or lid (a print pause drops them into a flat pocket)")
+    depth = t + 0.1
+    # How thick the panel must be, and how thick it is.
+    need = depth + (2 * MAGNET_SKIN if hidden else MAGNET_SKIN)
+    have = spec.lid_thickness if face == "lid" else spec.floor if face == "floor" else spec.wall
+    boss = max(0.0, need - have)
+    bd = hole + 2 * 1.6
+    # Work in a frame where z = 0 is the outside face and +z points into the box, then place it.
+    shape_boss = Pos(0, 0, have) * Cylinder(bd / 2, boss, align=(Align.CENTER, Align.CENTER, Align.MIN)) if boss else None
+    if hidden:
+        z0 = MAGNET_SKIN
+    elif side == "outside":
+        z0 = -0.01
+    else:
+        z0 = have + boss - depth
+    pocket = Pos(0, 0, z0) * Cylinder(hole / 2, depth + 0.01, align=(Align.CENTER, Align.CENTER, Align.MIN))
+
+    if face == "floor":
+        def place(s):
+            return Pos(a, b, 0) * s
+    elif face == "lid":
+        lid_top = top + spec.lid_thickness
+
+        def place(s):
+            return Pos(a, b, lid_top) * (Rot(180, 0, 0) * s)
+    else:
+        out = {"-Y": (0, -1), "+Y": (0, 1), "-X": (-1, 0), "+X": (1, 0)}[face]
+        half = (oL / 2) if face in ("-X", "+X") else (oW / 2)
+        along = (1, 0) if face in ("-Y", "+Y") else (0, 1)
+        rot = {"-Y": Rot(-90, 0, 0), "+Y": Rot(90, 0, 0), "-X": Rot(0, 90, 0), "+X": Rot(0, -90, 0)}[face]
+        x, y = out[0] * half + along[0] * a, out[1] * half + along[1] * a
+
+        def place(s):
+            return Pos(x, y, spec.floor + b) * (rot * s)
+    host_is_lid = face == "lid"
+    if shape_boss is not None:
+        if host_is_lid:
+            lid += place(shape_boss)
+        else:
+            base += place(shape_boss)
+    if host_is_lid:
+        lid -= place(pocket)
+    else:
+        base -= place(pocket)
+    where = {"lid": "lid", "floor": "floor"}.get(face, f"{face} wall")
+    how = ("sealed inside" if hidden else f"open to the {side}")
+    note = f"magnet {i + 1}: Ø{d:g} x {t:g} mm in the {where}, {how}, pocket Ø{hole:g} x {depth:g} mm"
+    if boss:
+        note += f", a Ø{bd:g} mm boss {boss:.1f} mm thick inside behind it"
+    if hidden:
+        # The floor prints bottom down; the lid prints top down: either way the pocket's top is this high.
+        note += f"; pause the print at {MAGNET_SKIN + depth:.2f} mm (the layer that closes over it) and drop the magnet in"
+    elif m.get("fit", "press") == "press":
+        note += "; press it in (a drop of CA glue if it's loose)"
+    else:
+        note += "; glue it in (CA or epoxy)"
+    notes.append(note)
+    return base, lid
+
+
 def _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks):
     """One handle: a part to screw on (bar, knob), a finger pocket in a wall (grip), or loops for a
     strap (strap). Returns (extra parts, notes, base, lid)."""
@@ -700,9 +819,14 @@ def build(spec: BoxSpec) -> dict:
     # Corner posts for the lid screws, tucked into the inside corners.
     posts, post_holes = [], []
     post_boss = 0.0
-    if spec.lid == "screw":
+    mag_lid = spec.magnet_lid if spec.magnet_lid and spec.lid in PLATE_LIDS and spec.lid != "screw" else None
+    if spec.magnet_lid and not mag_lid:
+        raise ValueError("a magnet lid needs a friction, snap, hinge or living-hinge lid (a screw lid has its screws)")
+    if spec.lid == "screw" or mag_lid:
         d, depth = spec.hole(spec.lid_screw, spec.lid_screw_hole)
         post_boss = boss = _post_boss(spec, d)
+        if mag_lid:
+            post_boss = boss = max(boss, float(mag_lid.get("d", 6.0)) + 0.3 + 2 * 1.6)
         inset = boss / 2
         for sx in (-1, 1):
             for sy in (-1, 1):
@@ -711,11 +835,13 @@ def build(spec: BoxSpec) -> dict:
                 post = Cylinder(boss / 2, h).locate(Location((x, y, spec.floor + h / 2)))
                 post += Box(boss / 2, boss / 2, h).locate(Location((x + sx * boss / 4, y + sy * boss / 4, spec.floor + h / 2)))
                 base += post
-                hole_depth = depth or (h - 1.0)
-                post_holes.append(Cylinder(d / 2, hole_depth).locate(Location((x, y, top - hole_depth / 2))))
+                if not mag_lid:
+                    hole_depth = depth or (h - 1.0)
+                    post_holes.append(Cylinder(d / 2, hole_depth).locate(Location((x, y, top - hole_depth / 2))))
                 posts.append((x, y))
                 keep_out.append((x, y, boss / 2))
-        notes.append(f"lid: {spec.lid_screw} screws into {len(posts)} corner posts ({spec.lid_screw_hole} holes Ø{d:g})")
+        if not mag_lid:
+            notes.append(f"lid: {spec.lid_screw} screws into {len(posts)} corner posts ({spec.lid_screw_hole} holes Ø{d:g})")
 
     # Board standoffs on the floor, with gussets at their feet.
     if spec.standoffs:
@@ -1422,6 +1548,12 @@ def build(spec: BoxSpec) -> dict:
         extras_h, notes_h, base, lid = _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks)
         extras += extras_h
         notes += notes_h
+
+    # Magnets: a lid held shut by them, and pockets wherever asked.
+    if mag_lid:
+        base, lid = _magnet_lid(spec, mag_lid, base, lid, posts, top, notes, checks)
+    for i, mg in enumerate(spec.magnets):
+        base, lid = _magnet(spec, mg, i, base, lid, top, oL, oW, notes, checks)
 
     # Grounding: a boss for a ground lug, and where copper tape would shield the inside.
     if spec.ground_lug:

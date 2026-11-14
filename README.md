@@ -288,6 +288,16 @@ Each part comes as STEP and STL with a notes file, and the page's Parts tab draw
 - **Knobs and caps**: knobs for 6 mm D-shafts (4.5 mm flat), round shafts with a set screw, or
   knurled shafts; button caps for tactile switches that report the panel hole to cut.
 - **Hinges and latches**: a two-leaf hinge with a filament or M3 pin, and a snap latch with its keeper.
+- **Wheels**: a round or D bore (with a hub and set screw), or pockets for 623, 625, 688, 608, 6000,
+  6001 or 6200 bearings (one each side when wide enough); a flat, rounded, O-ring tyre or V-groove
+  tread, and lightening holes. The O-ring tread reports the O-ring size to buy.
+- **Grommets**: for a round panel hole, with a groove the panel's thickness; split down one side to
+  slide onto a wired cable, or with a membrane to pierce. Print in TPU, or buy the rubber one.
+- **Dowel pins**: ISO 8734 reference pins with the hole to make, or printed pins lying on a flat.
+- **Snap rings**: DIN 471 (shaft) and DIN 472 (bore) retaining rings with the groove's diameter and
+  width (rounded from the standards: check your supplier's table).
+- **Thumb screws**: a knurled head (like DIN 464), wings (like DIN 316), or a printed cap a socket
+  head screw presses into.
 - **Test print** (`test_print`): a strip of threaded holes at several clearances with a bolt for each,
   and snap hooks of three undercuts with a plate to push them through. Print it once; the clearance
   that turns by hand is the one to use.
@@ -348,6 +358,9 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   "Place on the model" then a tap on the 3D view sets the face and position.
 - **Handles** on the lid or any wall: a bar handle or pull knob (their own parts, screwed on), a
   finger grip pocket in a wall, or strap loops for a webbing strap.
+- **Magnets**: round pockets for disc magnets in the floor, lid or a wall, open to the outside or the
+  inside, or sealed in with the print-pause height given; thin panels get a boss behind the pocket.
+  A friction, snap or hinged lid can be held shut by magnet pairs in the corner posts and the lid.
 - **Look**: icons beside panel holes (USB, power, antenna, fan, DC, fuse, LAN, I/O), engraved or
   raised; with two colours on, labels and icons are their own bodies in the 3MF for the AMS. Window
   panels can print as their own part in clear filament.

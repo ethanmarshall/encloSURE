@@ -326,6 +326,16 @@
   </fieldset>
 
   <fieldset>
+    <legend>Magnets</legend>
+    <label class="check"><input type="checkbox" id="ml_on"> Hold the lid shut with magnets (friction, snap or hinged lid)</label>
+    <div class="grid g2"><label class="f">Magnet diameter<span class="unit" data-unit="mm"><input name="ml_d" type="number" step="0.5" min="2" value="6"></span></label>
+      <label class="f">Magnet thickness<span class="unit" data-unit="mm"><input name="ml_t" type="number" step="0.5" min="0.5" value="2"></span></label></div>
+    <div class="rows" id="mag_rows"></div>
+    <button type="button" class="add" data-add="mag">+ Magnet pocket</button>
+    <p class="hint">Round pockets for disc magnets: in the floor to stick the box to steel, or on a wall or the lid to hold things. Open to the outside or the inside, or sealed in (floor and lid: pause the print and drop it in). A thin panel gets a boss inside behind the pocket. Press fit adds 0.15 mm to the diameter, glue fit 0.3 mm.</p>
+  </fieldset>
+
+  <fieldset>
     <legend>Sections</legend>
     <p class="hint">Dividers split the inside into compartments. "Across the length" puts a wall across the box at that X (from the centre); "across the width" at that Y. Height blank runs it up to just under the lid. Removable ones slide into rails and print as their own part.</p>
     <div class="grid" style="align-items:end">
@@ -663,7 +673,7 @@
 </form>
 
 <form id="partform" autocomplete="off" novalidate hidden>
-  <p class="intro">Screws, nuts, washers, spacers, springs and clips. Reference parts are the standard part at its standard size, to drop into an assembly; parts for printing have their threads modelled with clearance, so a printed bolt goes into a printed nut.</p>
+  <p class="intro">Screws, nuts, washers, spacers, springs, clips, wheels, grommets, dowels, snap rings, thumb screws and more. Reference parts are the standard part at its standard size, to drop into an assembly; parts for printing have their threads modelled with clearance, so a printed bolt goes into a printed nut.</p>
   <fieldset class="first">
     <legend>Part</legend>
     <div class="grid g2">
@@ -1196,7 +1206,7 @@ const readDiv = it => {
   if (t) d.thickness = t; if (hh) d.height = hh; if (notch) d.notch = notch;
   return d;
 };
-const ROWS = { art: ["#art_rows", artRow], handle: ["#handle_rows", handleRow], div: ["#div_rows", divRow], sr: ["#sr_rows", srRow], lp: ["#lp_rows", lpRow], lso: ["#lso_rows", xyRow], bat: ["#bat_rows", batRow], tie: ["#tie_rows", xyRow], notch: ["#notch_rows", notchRow],
+const ROWS = { mag: ["#mag_rows", magRow], art: ["#art_rows", artRow], handle: ["#handle_rows", handleRow], div: ["#div_rows", divRow], sr: ["#sr_rows", srRow], lp: ["#lp_rows", lpRow], lso: ["#lso_rows", xyRow], bat: ["#bat_rows", batRow], tie: ["#tie_rows", xyRow], notch: ["#notch_rows", notchRow],
   card: ["#card_rows", cardRow], win: ["#win_rows", winRow], cut: ["#cut_rows", holeRow], vent: ["#vent_rows", ventRow], label: ["#label_rows", labelRow], so: ["#so_rows", soRow], stock: ["#stock_rows", holeRow] };
 function addRow(kind, opts) {
   const [sel, make] = ROWS[kind];
@@ -1387,6 +1397,7 @@ function boxBody() {
     strain_reliefs: $$("#sr_rows .item").map(readSr),
     dividers: $$("#div_rows .item").map(readDiv),
     art: $$("#art_rows .item").map(readArt).filter(Boolean), handles: $$("#handle_rows .item").map(readHandle),
+    magnets: $$("#mag_rows .item").map(readMag), magnet_lid: $("#ml_on").checked ? { d: len(e.ml_d), t: len(e.ml_t) } : null,
     icons: e.icons.checked, icon_style: e.icon_style.value, two_color: e.two_color.checked,
     lanyard: e.lanyard.checked, belt_clip: e.belt_clip.checked, shielding: e.shielding.checked,
     ground_lug: $("#gl_on").checked ? [len(e.gl_x), len(e.gl_y)] : null, fan_flow_cfm: num(e.fan_flow_cfm.value) || 0,
@@ -1447,7 +1458,7 @@ const FACE_OF = { "-X": "left", "+X": "right", "-Y": "front", "+Y": "back", lid:
 function applySpec(sp) {
   const LEN = new Set(["L", "W", "H", "wall", "floor", "corner_radius", "lid_thickness", "lip", "fit_clearance", "standoff_height",
     "flange", "feet", "feet_depth", "bottom_chamfer", "gasket", "so_x", "so_y", "board_thickness", "lid_standoff_height",
-    "bd_w", "bd_l", "bd_x", "bd_y", "gl_x", "gl_y"]);
+    "bd_w", "bd_l", "bd_x", "bd_y", "gl_x", "gl_y", "ml_d", "ml_t"]);
   const e = boxform.elements, set = (n, v) => {
     if (v === undefined || v === null || !e[n]) return;
     if (LEN.has(n) && typeof v === "number") { e[n].value = show(v); e[n].dataset.mm = String(v); } else e[n].value = v;
@@ -1464,6 +1475,8 @@ function applySpec(sp) {
   if (sp.icon_style) e.icon_style.value = sp.icon_style;
   set("fan_flow_cfm", sp.fan_flow_cfm);
   $("#gl_on").checked = !!sp.ground_lug; if (sp.ground_lug) { set("gl_x", sp.ground_lug[0]); set("gl_y", sp.ground_lug[1]); }
+  $("#ml_on").checked = !!sp.magnet_lid; if (sp.magnet_lid) { set("ml_d", sp.magnet_lid.d); set("ml_t", sp.magnet_lid.t); }
+  $("#mag_rows").replaceChildren(); for (const m of sp.magnets || []) addRow("mag", { ...m, face: FACE_OF[m.face] || m.face, a: (m.at || [0, 0])[0], b: (m.at || [0, 0])[1] });
   $("#bd_on").checked = !!sp.battery_door;
   if (sp.battery_door) { set("bd_w", sp.battery_door.size[0]); set("bd_l", sp.battery_door.size[1]); set("bd_x", (sp.battery_door.at || [0, 0])[0]);
     set("bd_y", (sp.battery_door.at || [0, 0])[1]); e.bd_screw.value = sp.battery_door.screw || "M2"; }
@@ -2059,6 +2072,29 @@ function handleRow(o = {}) {
   item._sync = () => posLabels(item);
   return item;
 }
+function magRow(o = {}) {
+  const sel = (name, opts, v) => h("select", { name }, opts.map(([k, t]) => h("option", { value: k, selected: k === v }, t)));
+  const item = h("div", { class: "item" },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
+    h("div", { class: "grid g2 head" }, field("Face", faceSel(o.face || "floor")),
+      field("Opens to", sel("side", [["outside", "Outside"], ["inside", "Inside"], ["hidden", "Sealed in (print pause)"]], o.hidden ? "hidden" : (o.side || "outside")))),
+    h("div", { class: "grid" },
+      h("label", { class: "f", "data-pos": "a" }, "X", h("span", { class: "unit", "data-unit": UNIT() }, lenIn("a", o.a ?? 0))),
+      h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": UNIT() }, lenIn("b", o.b ?? 0))),
+      field("Fit", sel("fit", [["press", "Press"], ["glue", "Glue"]], o.fit || "press"))),
+    h("div", { class: "grid g2" },
+      field("Magnet diameter", lenIn("d", o.d ?? 6, "0.5", "1"), UNIT()),
+      field("Magnet thickness", lenIn("t", o.t ?? 2, "0.5", "0.5"), UNIT())),
+    placeBtn(it => it, "mag"));
+  item.addEventListener("change", () => posLabels(item));
+  item._sync = () => posLabels(item);
+  return item;
+}
+function readMag(it) {
+  const el = n => $(`[name=${n}]`, it), side = el("side").value;
+  return { face: el("face").value, at: [len(el("a")), len(el("b"))], d: len(el("d")), t: len(el("t")), fit: el("fit").value,
+           side: side === "hidden" ? "outside" : side, hidden: side === "hidden" };
+}
 function readHandle(it) {
   const el = n => $(`[name=${n}]`, it);
   const d = { face: el("face").value, type: el("type").value, at: [len(el("a")), el("b").value === "" ? null : len(el("b"))] };
@@ -2099,8 +2135,9 @@ function placeBtn(_, mode) {
     let face, a, b;
     const floor = len(boxform.elements.floor);
     if (az >= ax && az >= ay) {
-      if (n.z < 0) return;  // the underside: not a place for these
-      face = "lid"; a = p.x; b = p.y;
+      const isFloor = !onLid && (n.z < 0 || p.z < floor + 0.5);
+      if (isFloor && placing.mode !== "mag") return;  // the floor: only magnets go there
+      face = isFloor ? "floor" : "lid"; a = p.x; b = p.y;
     } else if (ax > ay) {
       face = n.x > 0 ? "right" : "left";
       a = placing.mode === "label" ? (n.x > 0 ? p.y : -p.y) : p.y; b = p.z - floor;

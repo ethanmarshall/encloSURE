@@ -853,6 +853,339 @@ def test_print(size="M8", clearances="0.1,0.15,0.2,0.25,0.3", hooks="0.6,1.0,1.4
     return {"shape": shape, "checks": [], "notes": notes, "info": {"clearances": cs, "hook_undercuts": us}, "buy": None}
 
 
+# ---------- Wheels, grommets, dowels, snap rings, thumbscrews ----------
+
+# Ball bearings: name -> (bore, outside, width) mm.
+BEARINGS = {"623": (3, 10, 4), "625": (5, 16, 5), "688": (8, 16, 5), "608": (8, 22, 7), "6000": (10, 26, 8),
+            "6001": (12, 28, 8), "6200": (10, 30, 9)}
+
+
+def wheel(diameter=40.0, width=12.0, bore="round", bore_d=5.0, bearing="608", hub=0.0, set_screw=None,
+          tread="flat", o_ring=3.0, holes=0, clearance=0.15):
+    """A wheel lying on z = 0: a plain bore (round or D) for an axle, or pockets for ball bearings (one each
+    side when it is wide enough). The tread is flat, rounded at the edges, grooved for an O-ring tyre, or a
+    V-groove to run on a rail or a rope. Lightening holes round it, and a hub with a set screw if you like."""
+    from build123d import revolve
+    R = diameter / 2
+    if not 8 <= diameter <= 300 or not 3 <= width <= 100:
+        raise ValueError("wheel: diameter 8 to 300 mm, width 3 to 100 mm")
+    w = Cylinder(R, width, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    notes, checks, info = [], [], {"diameter": diameter, "width": width}
+    if tread == "rounded":
+        try:
+            w = fillet(w.edges().filter_by(lambda e: abs(e.radius - R) < 1e-6 if hasattr(e, "radius") else False),
+                       min(width * 0.3, R * 0.2))
+        except Exception:
+            try:
+                w = fillet(w.edges(), min(width * 0.3, R * 0.2) * 0.95)
+            except Exception:
+                pass
+    elif tread == "o-ring":
+        cs = float(o_ring)
+        if cs * 1.2 > width or cs > R / 3:
+            raise ValueError("the O-ring is too thick for this wheel")
+        depth = 0.75 * cs  # about 25% of the cord stands proud
+        rc = R - depth + cs / 2
+        tool = revolve(Plane.XZ * Pos(rc, width / 2) * Circle(cs * 0.55), axis=Axis.Z)
+        w -= tool
+        groove_d = 2 * (R - depth)
+        info["groove_d"] = round(groove_d, 2)
+        info["o_ring_id"] = round(groove_d * 0.95, 1)
+        notes.append(f"O-ring tyre: cord {cs:g} mm in a groove {depth:.2f} mm deep (Ø{groove_d:.1f} mm at its bottom); "
+                     f"an O-ring about {groove_d * 0.95:.0f} x {cs:g} mm stretches on snug (5%)")
+    elif tread == "v-groove":
+        dv = min(width * 0.4, R * 0.25)
+        tri = Plane.XZ * Polygon((R - dv, width / 2), (R + 1, width / 2 + dv + 1), (R + 1, width / 2 - dv - 1), align=None)
+        w -= revolve(tri, axis=Axis.Z)
+        info["groove_bottom_d"] = round(2 * (R - dv), 2)
+        notes.append(f"90° V-groove {dv:.1f} mm deep (Ø{2 * (R - dv):.1f} mm at its bottom), to run on a rail, rod or rope")
+    elif tread != "flat":
+        raise ValueError("tread: flat, rounded, o-ring or v-groove")
+    total = width
+    if bore == "bearing":
+        if bearing not in BEARINGS:
+            raise ValueError(f"bearing: one of {', '.join(BEARINGS)}")
+        bi, bo, bw = BEARINGS[bearing]
+        if bo + 4 > diameter:
+            raise ValueError(f"a {bearing} bearing (Ø{bo}) needs a wheel at least Ø{bo + 4} mm")
+        pocket = Cylinder(bo / 2 + 0.05, bw + 0.01, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        w -= Cylinder(bi / 2 + 1.5, width * 3)  # clears the axle and the bearings' inner races
+        if width >= 2 * bw + 1:
+            w -= Pos(0, 0, -0.01) * pocket
+            w -= Pos(0, 0, width - bw) * pocket
+            n_b = 2
+        elif width >= bw + 1:
+            w -= Pos(0, 0, width - bw) * pocket
+            n_b = 1
+            checks.append("one bearing only (the wheel is narrower than two plus a 1 mm shoulder): it may wobble")
+        else:
+            raise ValueError(f"a {bearing} bearing is {bw} mm wide: the wheel must be at least {bw + 1} mm")
+        notes.append(f"{n_b} x {bearing} bearing ({bi} x {bo} x {bw} mm) pressed in, pockets Ø{bo + 0.1:g} mm; "
+                     f"a Ø{bi} mm axle")
+        info["bearing"] = bearing
+        buy = f"{n_b} x {bearing} ball bearing ({bi} x {bo} x {bw} mm)"
+    else:
+        if hub > 0:
+            hub_d = max(bore_d * 2.2, bore_d + 8)
+            w += Pos(0, 0, width) * Cylinder(hub_d / 2, hub, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            total += hub
+        w = _bore(w, total + 2, bore, bore_d + 2 * clearance, None)
+        if set_screw:
+            c = SCREWS[set_screw][1] if set_screw in SCREWS else 2.5
+            zc = width + hub / 2 if hub > 0 else width / 2
+            w -= Pos(0, -R, zc) * Cylinder(c / 2, diameter, rotation=(90, 0, 0))
+            if hub <= 0 and diameter > 30:
+                checks.append("the set screw runs through the whole radius: a hub keeps it short")
+        notes.append(f"{bore} bore for a Ø{bore_d:g} mm axle (Ø{bore_d + 2 * clearance:g} printed)"
+                     + (f", a {hub:g} mm hub" if hub > 0 else "") + (f", {set_screw} set screw (tap size hole)" if set_screw else ""))
+        buy = None
+    if holes:
+        n = int(holes)
+        hub_r = (BEARINGS[bearing][1] / 2 + 2 if bore == "bearing" else bore_d / 2 + 3)
+        rim_r = R - (0.75 * float(o_ring) if tread == "o-ring" else 0) - 3
+        span = rim_r - hub_r
+        if span < 4 or n < 3:
+            checks.append("no room for lightening holes between the hub and the rim")
+        else:
+            rm = (hub_r + rim_r) / 2
+            hd = min(span * 0.85, 2 * math.pi * rm / n * 0.6)
+            for i in range(n):
+                w -= Rot(0, 0, 360 * i / n) * Pos(rm, 0, 0) * Cylinder(hd / 2, width * 3)
+            notes.append(f"{n} lightening holes Ø{hd:.1f} mm")
+    notes.insert(0, f"wheel Ø{diameter:g} x {width:g} mm, {tread} tread; print it lying flat")
+    if tread == "flat":
+        notes.append("for grip, print it in TPU, or wrap it in a rubber band or an O-ring groove instead")
+    return {"shape": w, "notes": notes, "checks": checks, "info": info, "buy": buy}
+
+
+def grommet(hole=12.0, panel=2.0, cable_d=6.0, flange=2.5, split=False, membrane=False, mode="print", clearance=0.2):
+    """A cable grommet for a round hole in a panel: a tube the panel's thickness long with a flange each
+    side. Print it in TPU so it squeezes in; `split` cuts it down one side so it slides onto a cable
+    that's already wired (and lets a stiff plastic one spring in); `membrane` closes the middle with a
+    thin skin you pierce."""
+    if not 3 <= hole <= 60 or not 0.5 <= panel <= 10:
+        raise ValueError("grommet: hole 3 to 60 mm, panel 0.5 to 10 mm")
+    if cable_d >= hole - 1.2:
+        raise ValueError("the cable is nearly the hole's size: there's no room for the grommet's wall")
+    groove = panel + (clearance if mode == "print" else 0.0)
+    ft = max(1.2, min(2.5, hole * 0.12))
+    od = hole + 2 * flange
+    body = Cylinder(hole / 2, groove, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    body += Pos(0, 0, -ft) * Cylinder(od / 2, ft, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    body += Pos(0, 0, groove) * Cylinder(od / 2 - 0.5, ft, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    try:
+        body = chamfer(body.edges().sort_by(Axis.Z)[-1], min(0.8, flange * 0.4))  # a lead-in to push it through
+    except Exception:
+        pass
+    bore = cable_d + (0.3 if not membrane else 0.0)
+    body -= Cylinder(bore / 2, 100)
+    if membrane:
+        body += Pos(0, 0, groove / 2 - 0.3) * (Cylinder(bore / 2 + 0.01, 0.6, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                                               - Cylinder(0.75, 2))
+    if split:
+        body -= Pos(0, od / 2, groove / 2) * Box(0.6, od, 100)
+    shape = Pos(0, 0, ft) * body  # sit it on z = 0
+    notes = [f"grommet for a Ø{hole:g} mm hole in a {panel:g} mm panel: flanges Ø{od:g} mm, Ø{bore:g} mm through for a "
+             f"Ø{cable_d:g} mm cable" + (", split down one side" if split else "") + (", a 0.6 mm membrane to pierce" if membrane else "")]
+    checks = []
+    if mode == "print":
+        notes.append("print it in TPU (95A) so it squeezes through the hole; in PETG or PLA give it the split")
+        if (hole - bore) / 2 < 1.2:
+            checks.append("under 1.2 mm of wall round the cable: thin for TPU")
+        buy = None
+    else:
+        buy = f"rubber grommet for a Ø{hole:g} mm hole, {panel:g} mm panel, Ø{cable_d:g} mm inside"
+    return {"shape": shape, "notes": notes, "checks": checks,
+            "info": {"panel_hole": hole, "bore": round(bore, 2), "flange_d": od, "groove": round(groove, 2)}, "buy": buy}
+
+
+def dowel(diameter=4.0, length=20.0, fit="press", mode="reference", clearance=0.2):
+    """A dowel pin standing on z = 0. Reference: a hardened ISO 8734 (m6) pin. Print: lying on its side
+    with a small flat so it stays on the bed (round enough, and much stronger than printed upright), its
+    diameter taken down by `clearance` for a slip fit."""
+    d, L = float(diameter), float(length)
+    if not 1 <= d <= 25 or not 2 <= L <= 200:
+        raise ValueError("dowel: diameter 1 to 25 mm, length 2 to 200 mm")
+    if fit not in ("press", "slip"):
+        raise ValueError("fit: press or slip")
+    notes, checks = [], []
+    if mode == "reference":
+        pin = Cylinder(d / 2, L, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        try:
+            pin = chamfer(pin.edges().sort_by(Axis.Z)[0:1] + pin.edges().sort_by(Axis.Z)[-1:], min(0.1 * d + 0.1, L / 6))
+        except Exception:
+            pass
+        hole = (f"reamed Ø{d:g} H7 for a light press; in a printed part print the hole Ø{d:g} and drive it in"
+                if fit == "press" else f"Ø{d + 0.02:g} G7 to slide; in a printed part print it Ø{d + 0.25:g}")
+        notes.append(f"dowel pin Ø{d:g} x {L:g} mm, ISO 8734 (hardened, m6); hole: {hole}")
+        std = [3, 4, 5, 6, 8, 10, 12, 14, 16, 18, 20, 24, 25, 28, 30, 32, 35, 40, 45, 50, 55, 60, 70, 80, 90, 100]
+        if int(L) not in std or L != int(L):
+            checks.append(f"{L:g} mm isn't a stock length; near ones are {', '.join(str(x) for x in std if abs(x - L) <= 6)}")
+        return {"shape": pin, "notes": notes, "checks": checks,
+                "info": {"diameter": d, "length": L, "standard": "ISO 8734 m6"}, "buy": f"Ø{d:g} x {L:g} mm dowel pin, ISO 8734"}
+    dp = d - (clearance if fit == "slip" else 0.0)
+    pin = Cylinder(dp / 2, L, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    try:
+        pin = chamfer(pin.edges().sort_by(Axis.Z)[0:1] + pin.edges().sort_by(Axis.Z)[-1:], min(0.4, dp * 0.1))
+    except Exception:
+        pass
+    flat = max(0.2, dp * 0.08)
+    pin -= Pos(0, -dp / 2, L / 2) * Box(dp * 2, 2 * flat, L * 2)
+    notes.append(f"printed dowel Ø{dp:g} x {L:g} mm with a {flat:.2f} mm flat to lie on; print it on its side "
+                 + ("(sand it to fit if it's tight)" if fit == "press" else f"({clearance:g} mm under for a slip fit)"))
+    if dp < 3:
+        checks.append("printed pins under Ø3 mm are weak: use a steel pin or a length of filament")
+    return {"shape": pin, "notes": notes, "checks": checks, "info": {"diameter": round(dp, 3), "length": L}, "buy": None}
+
+
+# Retaining rings (circlips): nominal -> (thickness s, free diameter d3, groove diameter d2, lug height a, lug hole d5).
+# From DIN 471 (on a shaft) and DIN 472 (in a bore), rounded: check your supplier's table before machining a groove.
+RINGS_EXTERNAL = {3: (0.4, 2.7, 2.8, 1.9, 1.0), 4: (0.4, 3.7, 3.8, 2.2, 1.0), 5: (0.6, 4.7, 4.8, 2.5, 1.0),
+                  6: (0.7, 5.6, 5.7, 2.7, 1.2), 7: (0.8, 6.5, 6.7, 3.1, 1.2), 8: (0.8, 7.4, 7.6, 3.2, 1.2),
+                  10: (1.0, 9.3, 9.6, 3.3, 1.5), 12: (1.0, 11.0, 11.5, 3.3, 1.7), 15: (1.0, 13.8, 14.3, 3.6, 1.7),
+                  17: (1.0, 15.7, 16.2, 3.8, 1.7), 20: (1.2, 18.5, 19.0, 4.0, 2.0), 25: (1.2, 23.2, 23.9, 4.4, 2.0)}
+RINGS_INTERNAL = {8: (0.8, 8.7, 8.4, 2.4, 1.0), 10: (1.0, 10.8, 10.4, 3.2, 1.2), 12: (1.0, 13.0, 12.5, 3.4, 1.5),
+                  15: (1.0, 16.2, 15.7, 3.7, 1.7), 16: (1.0, 17.3, 16.8, 3.8, 1.7), 19: (1.0, 20.5, 20.0, 4.1, 2.0),
+                  20: (1.0, 21.5, 21.0, 4.1, 2.0), 22: (1.0, 23.5, 23.0, 4.2, 2.0), 24: (1.2, 25.9, 25.2, 4.4, 2.0),
+                  26: (1.2, 27.9, 27.2, 4.7, 2.0)}
+
+
+def snap_ring(size=10.0, type="external", mode="reference"):
+    """A retaining ring (circlip) lying on z = 0, for a shaft (external, DIN 471) or a bore (internal,
+    DIN 472), with its groove's size. Print mode makes it thicker (printed rings are for trying a fit,
+    not for holding a load)."""
+    table = RINGS_EXTERNAL if type == "external" else RINGS_INTERNAL if type == "internal" else None
+    if table is None:
+        raise ValueError("snap ring type: external (on a shaft) or internal (in a bore)")
+    n = float(size)
+    if n not in table:
+        raise ValueError(f"{type} ring sizes: {', '.join(f'{k:g}' for k in table)} mm")
+    s_, d3, d2, a, d5 = table[n]
+    t = max(s_, 1.2) if mode == "print" else s_
+    groove_w = round(t + (0.1 if s_ < 1 else 0.15), 2)
+    band = max(0.8, a * 0.45)
+    gap_deg = 40.0
+    from build123d import revolve
+    if type == "external":
+        r_in, r_out = d3 / 2, d3 / 2 + band
+    else:
+        r_in, r_out = d3 / 2 - band, d3 / 2
+    ring = Cylinder(r_out, t, align=(Align.CENTER, Align.CENTER, Align.MIN)) - Cylinder(r_in, t * 3)
+    # The gap, at +Y.
+    gx = r_out * 2
+    wedge = Polygon((0, 0), (gx * math.sin(math.radians(gap_deg / 2)), gx * math.cos(math.radians(gap_deg / 2))),
+                    (-gx * math.sin(math.radians(gap_deg / 2)), gx * math.cos(math.radians(gap_deg / 2))), align=None)
+    ring -= Pos(0, 0, -1) * extrude(wedge, amount=t + 2)
+    # Lugs with holes for the pliers, each side of the gap.
+    for sx in (-1, 1):
+        ang = math.radians(gap_deg / 2 + 12)
+        rm = (r_in + r_out) / 2 + (a - band) / 2 * (1 if type == "external" else -1)
+        cx, cy = sx * rm * math.sin(ang), rm * math.cos(ang)
+        lug = Pos(cx, cy, 0) * Cylinder(max(a / 2, d5 / 2 + 0.6), t, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        lug -= Pos(cx, cy, 0) * Cylinder(d5 / 2, t * 3)
+        ring += lug
+    if type == "external":
+        ring -= Cylinder(r_in, t * 3)  # keep the bore clear of the lugs
+    else:
+        ring -= (Cylinder(r_out + 10, t * 3) - Cylinder(r_out, t * 3))  # nothing outside the bore
+    where = "shaft" if type == "external" else "bore"
+    notes = [f"{'DIN 471 external' if type == 'external' else 'DIN 472 internal'} retaining ring for a Ø{n:g} mm {where}: "
+             f"{t:g} mm thick; cut the groove Ø{d2:g} mm, {groove_w:g} mm wide, at least "
+             f"{max(1.0, 3 * abs(n - d2) / 2):.1f} mm from the end"]
+    checks = []
+    if mode == "print":
+        notes.append("printed: thickened to 1.2 mm (widen the groove to match); for trying a fit, not for a load")
+        buy = None
+    else:
+        buy = f"Ø{n:g} mm {'DIN 471 external' if type == 'external' else 'DIN 472 internal'} retaining ring"
+    return {"shape": ring, "notes": notes, "checks": checks,
+            "info": {"groove_d": d2, "groove_w": groove_w, "thickness": t, "free_d": d3}, "buy": buy}
+
+
+# Socket head cap screw heads (diameter, height), for the printed thumb cap.
+SHCS_HEAD = {2: (3.8, 2.0), 2.5: (4.5, 2.5), 3: (5.5, 3.0), 4: (7.0, 4.0), 5: (8.5, 5.0), 6: (10.0, 6.0), 8: (13.0, 8.0)}
+
+
+def thumbscrew(size="M3", length=10.0, style="knurled", mode="reference", threads=False, clearance=0.2, head_d=None):
+    """A screw to turn by hand, its head above z = 0 and its shank down to -length: a knurled head
+    (like DIN 464), wings (like DIN 316), or a printed cap that a socket head screw presses into (style
+    cap: no printed thread to strip)."""
+    tsize, d, p, system = thread_size(size)
+    if not 2 <= length <= 150:
+        raise ValueError("length: 2 to 150 mm")
+    notes, checks = [], []
+    dk = float(head_d) if head_d else max(7.0, round(4 * d))
+    k = max(4.5, min(2 * d + 1.5, 16.0))
+    if style == "cap":
+        hd, hh = SHCS_HEAD.get(d, (1.6 * d, d))
+        dk = float(head_d) if head_d else max(dk, hd + 6)
+        k = max(k, hh + 2.0)
+        cap = Cylinder(dk / 2, k, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        for i in range(int(dk * 2.2)):
+            cap -= Rot(0, 0, 360 * i / int(dk * 2.2)) * Pos(dk / 2 + 0.25, 0, 0) * Cylinder(0.7, k * 3)
+        try:
+            cap = chamfer(cap.edges().sort_by(Axis.Z)[-1], 0.8)
+        except Exception:
+            pass
+        # The screw goes in from the top: its head in a snug pocket, the shank out of the bottom.
+        cap -= Pos(0, 0, k - hh - 0.01) * Cylinder(hd / 2 + 0.05, hh + 0.02, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        cap -= Cylinder((d + 0.4) / 2, k * 3)
+        notes.append(f"printed thumb cap Ø{dk:g} x {k:g} mm for an {tsize} socket head cap screw: press the head into "
+                     f"the Ø{hd + 0.1:g} mm pocket (a drop of CA glue holds it); the screw's own thread does the work")
+        return {"shape": cap, "notes": notes, "checks": checks,
+                "info": {"head_d": dk, "head_h": k, "pocket": hd + 0.1},
+                "buy": f"{tsize} x {length:g} socket head cap screw (ISO 4762)"}
+    # The head.
+    if style == "knurled":
+        collar_d, collar_h = round(dk * 0.5, 1), max(1.5, 0.3 * k)  # the shoulder under the knurl
+        head = Cylinder(dk / 2, k - collar_h, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        n = int(dk * 2.2)
+        for i in range(n):
+            head -= Rot(0, 0, 360 * i / n) * Pos(dk / 2 + 0.25, 0, 0) * Cylinder(0.6, k * 3)
+        head = Pos(0, 0, collar_h) * head + Cylinder(collar_d / 2, collar_h + 0.01, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        try:
+            head = chamfer(head.edges().sort_by(Axis.Z)[-1], min(0.8, k / 8))
+        except Exception:
+            pass
+        label, std = "knurled thumb screw", "DIN 464"
+    elif style == "wing":
+        span = max(16.0, 5.0 * d)
+        hub_d = max(d * 2.0, 6.0)
+        wt = max(2.0, 0.6 * d)
+        wh = max(k * 1.3, 8.0)
+        head = Cylinder(hub_d / 2, wh * 0.8, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        hw_ = span / 2
+        prof = Polygon((0, 0), (hw_ * 0.75, wh * 0.3), (hw_, wh * 0.75), (hw_ * 0.9, wh), (hw_ * 0.5, wh * 0.95), (0, wh * 0.8),
+                       align=None)
+        wing = extrude(Plane.XZ * prof, amount=wt / 2, both=True)
+        head += wing + Rot(0, 0, 180) * wing
+        dk = span
+        label, std = "wing screw", "DIN 316"
+    else:
+        raise ValueError("thumb screw style: knurled, wing or cap")
+    # The shank.
+    if mode == "print":
+        th = _thread(d, p, length, True, clearance, ("chamfer", "square"))
+        core = Cylinder(th.root_radius + 0.01, length, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        shank = Pos(0, 0, -length) * (core + th)
+        _printed_thread_checks(d, p, checks)
+        notes.append(f"printed {label} {d:g} x {p:g} x {length:g} mm, head Ø{dk:g} mm, threads {clearance:g} mm undersize; "
+                     "print it standing on its head")
+        buy = None
+    else:
+        if threads:
+            th = _thread(d, p, length, True, 0.0, ("chamfer", "square"))
+            core = Cylinder(th.root_radius + 0.01, length, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            shank = Pos(0, 0, -length) * (core + th)
+        else:
+            shank = Pos(0, 0, -length) * Cylinder(d / 2, length, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        notes.append(f"{tsize} x {length:g} {label} (like {std}), head Ø{dk:g} mm" + ("" if threads else ", threads shown plain"))
+        buy = f"{tsize} x {length:g} {label}, {std}"
+    shape = head + shank
+    return {"shape": shape, "notes": notes, "checks": checks,
+            "info": {"major_d": d, "pitch": p, "length": length, "head_d": dk}, "buy": buy}
+
+
 # ---------- Registry ----------
 
 KINDS = {
@@ -880,15 +1213,21 @@ KINDS = {
     "button_cap": (button_cap, "Button cap", {"diameter": 10.0, "height": 6.0, "stem_d": 3.5, "stem_depth": 2.5, "panel": 2.0}),
     "hinge": (hinge, "Hinge", {"length": 40.0, "leaf_width": 15.0, "thickness": 2.5, "knuckles": 5, "pin": "filament", "screw": "M3"}),
     "latch": (latch, "Latch with keeper", {"width": 10.0, "reach": 8.0, "undercut": 1.2, "thickness": 1.8}),
+    "wheel": (wheel, "Wheel", {"diameter": 40.0, "width": 12.0, "bore": "round", "bore_d": 5.0, "bearing": "608", "hub": 0.0,
+                               "set_screw": None, "tread": "flat", "o_ring": 3.0, "holes": 0}),
+    "grommet": (grommet, "Grommet", {"hole": 12.0, "panel": 2.0, "cable_d": 6.0, "flange": 2.5, "split": False, "membrane": False}),
+    "dowel": (dowel, "Dowel pin", {"diameter": 4.0, "length": 20.0, "fit": "press"}),
+    "snap_ring": (snap_ring, "Snap ring (circlip)", {"size": 10.0, "type": "external"}),
+    "thumbscrew": (thumbscrew, "Thumb screw", {"size": "M3", "length": 10.0, "style": "knurled", "threads": False, "head_d": None}),
     "test_print": (test_print, "Thread and snap test print", {"size": "M8", "clearances": "0.1,0.15,0.2,0.25,0.3", "hooks": "0.6,1.0,1.4"}),
 }
 # How each part sits on the print bed: a turn (x, y, z degrees) from how it is modelled.
 PRINT_ROTATION = {"screw": (180, 0, 0), "snap_hook": (90, 0, 0), "din_clip": (180, 0, 0), "knob": (180, 0, 0),
                   "button_cap": (180, 0, 0), "latch": (90, 0, 0),
-                  "extension_spring": (0, 0, 0), "torsion_spring": (0, 0, 0)}
+                  "extension_spring": (0, 0, 0), "torsion_spring": (0, 0, 0), "thumbscrew": (180, 0, 0), "dowel": (90, 0, 0)}
 # Parts that are always printed (no bought version): mode is ignored, and material matters.
 PRINTED_ONLY = {"snap_hook", "cable_clip", "tie_mount", "board_clip", "din_clip", "spur_gear", "gt2_pulley", "knob",
-                "button_cap", "hinge", "latch", "test_print"}
+                "button_cap", "hinge", "latch", "test_print", "wheel"}
 
 
 _CACHE: dict = {}
@@ -981,7 +1320,16 @@ LABELS = {
 # Where one setting name means something else for a part.
 KIND_LABELS = {("knob", "height"): ("Height", "len"), ("knob", "grip"): ("Grip ridges (0 for none)", "num"),
                ("button_cap", "height"): ("Height", "len"), ("button_cap", "diameter"): ("Cap diameter", "len"),
-               ("spacer", "od"): ("Across (blank for stock)", "len"), ("test_print", "size"): ("Thread", "text")}
+               ("spacer", "od"): ("Across (blank for stock)", "len"),
+               ("wheel", "bore_d"): ("Axle diameter", "len"), ("wheel", "hub"): ("Hub length (0 for none)", "len"),
+               ("wheel", "o_ring"): ("O-ring cord", "len"), ("wheel", "holes"): ("Lightening holes (0 for none)", "num"),
+               ("wheel", "bore"): ("Bore", "select"), ("wheel", "bearing"): ("Bearing", "select"), ("wheel", "tread"): ("Tread", "select"),
+               ("grommet", "hole"): ("Panel hole", "len"), ("grommet", "panel"): ("Panel thickness", "len"),
+               ("grommet", "cable_d"): ("Cable diameter", "len"), ("grommet", "flange"): ("Flange (each side of the hole)", "len"),
+               ("grommet", "split"): ("Split down one side", "bool"), ("grommet", "membrane"): ("Membrane to pierce", "bool"),
+               ("dowel", "fit"): ("Fit", "select"), ("snap_ring", "size"): ("Shaft or bore", "select"),
+               ("snap_ring", "type"): ("Type", "select"), ("thumbscrew", "style"): ("Head", "select"),
+               ("thumbscrew", "head_d"): ("Head diameter (blank: standard)", "len"), ("test_print", "size"): ("Thread", "text")}
 
 
 def catalog() -> dict:
@@ -995,6 +1343,11 @@ def catalog() -> dict:
         ("spur_gear", "set_screw"): ["", "M2", "M2.5", "M3", "M4"], ("gt2_pulley", "set_screw"): ["", "M2", "M2.5", "M3", "M4"],
         ("knob", "set_screw"): ["", "M2", "M2.5", "M3"], ("knob", "shaft"): ["d", "round", "knurled"],
         ("hinge", "pin"): ["filament", "M3"],
+        ("wheel", "bore"): ["round", "d", "bearing"], ("wheel", "bearing"): list(BEARINGS),
+        ("wheel", "set_screw"): ["", "M2", "M2.5", "M3", "M4"], ("wheel", "tread"): ["flat", "rounded", "o-ring", "v-groove"],
+        ("dowel", "fit"): ["press", "slip"], ("snap_ring", "type"): ["external", "internal"],
+        ("snap_ring", "size"): sorted(set(RINGS_EXTERNAL) | set(RINGS_INTERNAL)),
+        ("thumbscrew", "style"): ["knurled", "wing", "cap"],
     }
     out = {}
     for kind, (fn, label, defaults) in KINDS.items():
@@ -1009,7 +1362,7 @@ def catalog() -> dict:
             f = {"name": name, "label": lab, "type": "select" if opts else typ, "default": default}
             if opts:
                 f["options"] = opts
-            if name == "size":
+            if name == "size" and kind != "snap_ring":
                 f["options"] = SIZES_METRIC + SIZES_INCH
                 f["type"] = "text"
             if typ == "text" and name != "size":
