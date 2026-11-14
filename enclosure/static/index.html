@@ -422,6 +422,13 @@
     <label class="check"><input type="checkbox" name="din_rail"> DIN rail clip (35 mm rail) under the floor</label>
     <label class="check"><input type="checkbox" name="wall_bracket"> Wall bracket: a French cleat under the floor and a bracket to screw to the wall</label>
     <label class="check"><input type="checkbox" name="stacking"> Stacking: pins on the lid, sockets under the floor</label>
+    <label class="check"><input type="checkbox" id="gf_on"> Gridfinity feet, so it sits in a Gridfinity baseplate</label>
+    <div class="grid g2" id="gf_opts">
+      <label class="check"><input type="checkbox" id="gf_mag"> Magnet holes under the feet</label>
+      <label class="check"><input type="checkbox" id="gf_screw"> M3 screw holes</label>
+    </div>
+    <button type="button" class="add" id="gf_snap">Fit the outside to the grid (42 mm units)</button>
+    <p class="hint">The feet sit on a slab as big as the 42 mm grid the box needs, adding 5.95 mm under the floor. The report says how many grid and height (7 mm) units it takes. Gridfinity bins and baseplates are on the Parts tab.</p>
     <label class="check"><input type="checkbox" name="lanyard"> Lanyard loop</label>
     <label class="check"><input type="checkbox" name="belt_clip"> Belt clip (its own part, screws to the floor)</label>
   </fieldset>
@@ -673,7 +680,7 @@
 </form>
 
 <form id="partform" autocomplete="off" novalidate hidden>
-  <p class="intro">Screws, nuts, washers, spacers, springs, clips, wheels, grommets, dowels, snap rings, thumb screws and more. Reference parts are the standard part at its standard size, to drop into an assembly; parts for printing have their threads modelled with clearance, so a printed bolt goes into a printed nut.</p>
+  <p class="intro">Screws, nuts, washers, spacers, springs, clips, wheels, grommets, dowels, snap rings, thumb screws, Gridfinity bins and baseplates and more. Reference parts are the standard part at its standard size, to drop into an assembly; parts for printing have their threads modelled with clearance, so a printed bolt goes into a printed nut.</p>
   <fieldset class="first">
     <legend>Part</legend>
     <div class="grid g2">
@@ -1272,6 +1279,18 @@ function sync() {
 }
 boxform.addEventListener("change", sync); fitform.addEventListener("change", sync);
 
+// Gridfinity: grow the footprint to fill whole 42 mm units (less the 0.5 mm the grid leaves).
+$("#gf_snap")?.addEventListener("click", () => {
+  const e = boxform.elements, inner = e.size_is.value !== "outer", wall = len(e.wall);
+  for (const n of ["L", "W"]) {
+    const outer = len(e[n]) + (inner ? 2 * wall : 0);
+    const u = Math.max(1, Math.ceil((outer + 0.49) / 42)), want = u * 42 - 0.5 - (inner ? 2 * wall : 0);
+    e[n].value = show(want); e[n].dataset.mm = String(want);
+  }
+  $("#gf_on").checked = true;
+  e.L.dispatchEvent(new Event("change", { bubbles: true }));
+});
+
 // ---------- The viewer (Z up in our frame; three.js is Y up) ----------
 const host = $("#canvas");
 const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -1403,6 +1422,7 @@ function boxBody() {
     flange: len(e.flange), feet: len(e.feet), feet_depth: len(e.feet_depth), keyholes: e.keyholes.value || null,
     din_rail: e.din_rail.checked, bottom_chamfer: len(e.bottom_chamfer), teardrop: e.teardrop.checked,
     wall_bracket: e.wall_bracket.checked, stacking: e.stacking.checked,
+    gridfinity: $("#gf_on").checked ? { magnets: $("#gf_mag").checked, screws: $("#gf_screw").checked } : null,
     battery_door: $("#bd_on").checked ? { size: [len(e.bd_w), len(e.bd_l)], at: [len(e.bd_x), len(e.bd_y)], screw: e.bd_screw.value } : null,
     strain_reliefs: $$("#sr_rows .item").map(readSr),
     dividers: $$("#div_rows .item").map(readDiv),
@@ -1485,6 +1505,7 @@ function applySpec(sp) {
   if (sp.icon_style) e.icon_style.value = sp.icon_style;
   set("fan_flow_cfm", sp.fan_flow_cfm);
   $("#gl_on").checked = !!sp.ground_lug; if (sp.ground_lug) { set("gl_x", sp.ground_lug[0]); set("gl_y", sp.ground_lug[1]); }
+  $("#gf_on").checked = !!sp.gridfinity; $("#gf_mag").checked = !!sp.gridfinity?.magnets; $("#gf_screw").checked = !!sp.gridfinity?.screws;
   $("#ml_on").checked = !!sp.magnet_lid; if (sp.magnet_lid) { set("ml_d", sp.magnet_lid.d); set("ml_t", sp.magnet_lid.t); }
   $("#mag_rows").replaceChildren(); for (const m of sp.magnets || []) addRow("mag", { ...m, face: FACE_OF[m.face] || m.face, a: (m.at || [0, 0])[0], b: (m.at || [0, 0])[1] });
   $("#bd_on").checked = !!sp.battery_door;
@@ -2393,6 +2414,7 @@ function whichJump() {
 }
 window.addEventListener("scroll", whichJump, { passive: true }); whichJump();
 if ("serviceWorker" in navigator) navigator.serviceWorker.register("sw.js").catch(() => {});
+
 </script>
 </body>
 </html>

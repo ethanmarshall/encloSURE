@@ -196,6 +196,8 @@ class BoxSpec:
     shielding: bool = False  # notes on copper-tape shielding
     wall_bracket: bool = False  # a French-cleat rail on the floor and a bracket for the wall (its own part)
     stacking: bool = False  # pins on the lid and sockets under the floor so boxes stack in line
+    # Gridfinity feet under the floor so the box sits in a Gridfinity baseplate: {magnets, screws}
+    gridfinity: dict | None = None
     # Magnets: round pockets for disc magnets: [{face (lid, floor or a wall), at [a, b], d, t, side outside|inside,
     # fit press|glue, hidden (sealed in, dropped in at a print pause: floor and lid only)}]
     magnets: list[dict] = field(default_factory=list)
@@ -1715,6 +1717,29 @@ def build(spec: BoxSpec) -> dict:
                                                        align=(Align.CENTER, Align.CENTER, Align.MIN))
         notes.append(f"stacking: four pins on the lid and sockets under the floor, {2 * ix:g} x {2 * iy:g} mm apart, so the same "
                      "boxes stack in line")
+
+    # Gridfinity: feet on a slab under the floor, as big as the grid the box needs.
+    if spec.gridfinity is not None and spec.gridfinity is not False:
+        from . import gridfinity as gf
+        clash = [n for n, on in (("a DIN rail clip", spec.din_rail), ("a wall bracket", spec.wall_bracket),
+                                 ("stacking sockets", spec.stacking), ("rubber feet", spec.feet),
+                                 ("keyholes", getattr(spec, "keyholes", None)), ("a belt clip", getattr(spec, "belt_clip", False)))
+                 if on]
+        if clash:
+            raise ValueError(f"Gridfinity feet take the underside: leave off {', '.join(clash)}")
+        g = spec.gridfinity if isinstance(spec.gridfinity, dict) else {}
+        feet_, (gx, gy), added, gnotes = gf.box_base(oL, oW, bool(g.get("magnets")), bool(g.get("screws")))
+        base = base.fuse(feet_)
+        notes += gnotes
+        total = top + (spec.lid_thickness if lid is not None else 0.0) + added
+        u = total / gf.HEIGHT_UNIT
+        notes.append(f"with the feet it stands {total:.1f} mm tall, {u:.1f} Gridfinity height units"
+                     + (f"; {math.ceil(u) * gf.HEIGHT_UNIT - total:.1f} mm more makes it a whole {math.ceil(u)}"
+                        if u - math.floor(u) > 0.05 else ""))
+        if any((c.get("face") if isinstance(c, dict) else c.face) in ("-Z", "floor") for c in spec.cutouts) or any(face_name(v.get("face", "")) == "floor" for v in spec.vents) \
+                or any(face_name(m.get("face", "")) == "floor" and m.get("side", "outside") == "outside" and not m.get("hidden")
+                       for m in spec.magnets):
+            checks.append("Gridfinity: holes, vents or magnets open under the floor are covered by the feet's slab")
 
     # Weight and print time, roughly.
     vol = base.volume + (lid.volume if lid is not None else 0.0) + sum(e.volume for _, e in extras)

@@ -1215,6 +1215,56 @@ def thumbscrew(size="M3", length=10.0, style="knurled", mode="reference", thread
             "info": {"major_d": d, "pitch": p, "length": length, "head_d": dk}, "buy": buy}
 
 
+
+# ---------- Gridfinity ----------
+
+def gridfinity_bin(units_x=1, units_y=1, height=3, wall=1.2, div_x=0, div_y=0, lip=True, magnets=False, screws=False,
+                   label=False):
+    """A Gridfinity bin: 42 mm grid units, 7 mm height units, feet that drop into any Gridfinity baseplate, and a
+    stacking lip so another bin sits on top."""
+    from . import gridfinity as gf
+    nx, ny, hu = int(units_x), int(units_y), int(height)
+    if not (1 <= nx <= 8 and 1 <= ny <= 8 and 2 <= hu <= 20):
+        raise ValueError("Gridfinity bin: 1 to 8 units each way, 2 to 20 height units")
+    if not 0.8 <= wall <= 3:
+        raise ValueError("wall: 0.8 to 3 mm")
+    shape = gf.bin_(nx, ny, hu, wall, int(div_x), int(div_y), lip, magnets, screws, label)
+    W, L = nx * gf.GRID - gf.GAP, ny * gf.GRID - gf.GAP
+    H = hu * gf.HEIGHT_UNIT
+    notes = [f"Gridfinity bin {nx} x {ny} x {hu}: {W:g} x {L:g} x {H:g} mm"
+             + (f" plus a {gf.LIP[-1][0]:g} mm stacking lip" if lip else "")
+             + f", walls {wall:g} mm, inside floor {gf.HEIGHT_UNIT:g} mm up"]
+    if div_x or div_y:
+        notes.append(f"{(int(div_x) + 1) * (int(div_y) + 1)} pockets")
+    if magnets:
+        notes.append("6 x 2 mm magnets press into the holes under each foot (four a unit)")
+    if label:
+        notes.append("a 45° label tab along the back wall, 12 mm deep")
+    notes.append("print it standing on its feet, no supports")
+    checks = []
+    if wall < 1.0:
+        checks.append("walls under 1 mm: two perimeters of a 0.4 mm nozzle at most")
+    return {"shape": shape, "notes": notes, "checks": checks,
+            "info": {"outside": [W, L, H], "units": [nx, ny, hu]}, "buy": None}
+
+
+def gridfinity_baseplate(units_x=3, units_y=2, magnets=False):
+    """A Gridfinity baseplate for bins (and boxes with Gridfinity feet) to drop into: open-bottom, or with a
+    floor and magnet holes."""
+    from . import gridfinity as gf
+    nx, ny = int(units_x), int(units_y)
+    if not (1 <= nx <= 10 and 1 <= ny <= 10):
+        raise ValueError("Gridfinity baseplate: 1 to 10 units each way")
+    shape = gf.baseplate(nx, ny, magnets)
+    W, L = nx * gf.GRID, ny * gf.GRID
+    bb = shape.bounding_box()
+    notes = [f"Gridfinity baseplate {nx} x {ny}: {W:g} x {L:g} x {bb.size.Z:.2f} mm"
+             + (", with a floor and 6 x 2 mm magnet holes" if magnets else ", open bottom (the lightest kind)")]
+    checks = []
+    if W > 256 or L > 256:
+        checks.append("bigger than most beds: print it in pieces (a few units each) and lay them side by side")
+    return {"shape": shape, "notes": notes, "checks": checks, "info": {"outside": [W, L, round(bb.size.Z, 2)]}, "buy": None}
+
 # ---------- Registry ----------
 
 KINDS = {
@@ -1249,6 +1299,9 @@ KINDS = {
                                    "ends": "both"}),
     "snap_ring": (snap_ring, "Snap ring (circlip)", {"size": 10.0, "type": "external"}),
     "thumbscrew": (thumbscrew, "Thumb screw", {"size": "M3", "length": 10.0, "style": "knurled", "threads": False, "head_d": None}),
+    "gridfinity_bin": (gridfinity_bin, "Gridfinity bin", {"units_x": 1, "units_y": 1, "height": 3, "wall": 1.2, "div_x": 0,
+                                                          "div_y": 0, "lip": True, "magnets": False, "screws": False, "label": False}),
+    "gridfinity_baseplate": (gridfinity_baseplate, "Gridfinity baseplate", {"units_x": 3, "units_y": 2, "magnets": False}),
     "test_print": (test_print, "Thread and snap test print", {"size": "M8", "clearances": "0.1,0.15,0.2,0.25,0.3", "hooks": "0.6,1.0,1.4"}),
 }
 # How each part sits on the print bed: a turn (x, y, z degrees) from how it is modelled.
@@ -1257,7 +1310,7 @@ PRINT_ROTATION = {"screw": (180, 0, 0), "snap_hook": (90, 0, 0), "din_clip": (18
                   "extension_spring": (0, 0, 0), "torsion_spring": (0, 0, 0), "thumbscrew": (180, 0, 0), "dowel": (90, 0, 0)}
 # Parts that are always printed (no bought version): mode is ignored, and material matters.
 PRINTED_ONLY = {"snap_hook", "cable_clip", "tie_mount", "board_clip", "din_clip", "spur_gear", "gt2_pulley", "knob",
-                "button_cap", "hinge", "latch", "test_print", "wheel"}
+                "button_cap", "hinge", "latch", "test_print", "wheel", "gridfinity_bin", "gridfinity_baseplate"}
 
 
 _CACHE: dict = {}
@@ -1351,6 +1404,15 @@ LABELS = {
 KIND_LABELS = {("knob", "height"): ("Height", "len"), ("knob", "grip"): ("Grip ridges (0 for none)", "num"),
                ("button_cap", "height"): ("Height", "len"), ("button_cap", "diameter"): ("Cap diameter", "len"),
                ("spacer", "od"): ("Across (blank for stock)", "len"),
+               ("gridfinity_bin", "units_x"): ("Grid units across (42 mm)", "num"),
+               ("gridfinity_bin", "units_y"): ("Grid units deep (42 mm)", "num"),
+               ("gridfinity_bin", "height"): ("Height units (7 mm)", "num"), ("gridfinity_bin", "wall"): ("Wall", "len"),
+               ("gridfinity_bin", "div_x"): ("Dividers across", "num"), ("gridfinity_bin", "div_y"): ("Dividers front to back", "num"),
+               ("gridfinity_bin", "lip"): ("Stacking lip", "bool"), ("gridfinity_bin", "magnets"): ("Magnet holes (6 x 2)", "bool"),
+               ("gridfinity_bin", "screws"): ("M3 screw holes", "bool"), ("gridfinity_bin", "label"): ("Label tab", "bool"),
+               ("gridfinity_baseplate", "units_x"): ("Grid units across (42 mm)", "num"),
+               ("gridfinity_baseplate", "units_y"): ("Grid units deep (42 mm)", "num"),
+               ("gridfinity_baseplate", "magnets"): ("Floor with magnet holes", "bool"),
                ("wheel", "bore_d"): ("Axle diameter", "len"), ("wheel", "hub"): ("Hub length (0 for none)", "len"),
                ("wheel", "o_ring"): ("O-ring cord", "len"), ("wheel", "holes"): ("Lightening holes (0 for none)", "num"),
                ("wheel", "bore"): ("Bore", "select"), ("wheel", "bearing"): ("Bearing", "select"), ("wheel", "tread"): ("Tread", "select"),

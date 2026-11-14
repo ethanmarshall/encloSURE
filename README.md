@@ -288,6 +288,8 @@ Each part comes as STEP and STL with a notes file, and the page's Parts tab draw
 - **Knobs and caps**: knobs for 6 mm D-shafts (4.5 mm flat), round shafts with a set screw, or
   knurled shafts; button caps for tactile switches that report the panel hole to cut.
 - **Hinges and latches**: a two-leaf hinge with a filament or M3 pin, and a snap latch with its keeper.
+- **Gridfinity bins and baseplates**: bins in whole 42 mm grid and 7 mm height units with a stacking
+  lip, dividers, a label tab, and magnet or M3 screw holes; open-bottom or magnet baseplates.
 - **Wheels**: a round or D bore (with a hub and set screw), or pockets for 623, 625, 688, 608, 6000,
   6001 or 6200 bearings (one each side when wide enough); a flat, rounded, O-ring tyre or V-groove
   tread, and lightening holes. The O-ring tread reports the O-ring size to buy.
@@ -358,6 +360,8 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   "Place on the model" then a tap on the 3D view sets the face and position.
 - **Handles** on the lid or any wall: a bar handle or pull knob (their own parts, screwed on), a
   finger grip pocket in a wall, or strap loops for a webbing strap.
+- **Gridfinity feet**: a Quick box can stand on Gridfinity feet (with magnet or screw holes) so it
+  drops into a Gridfinity baseplate; one button grows its footprint to fill whole grid units.
 - **Magnets**: round pockets for disc magnets in the floor, lid or a wall, open to the outside or the
   inside, or sealed in with the print-pause height given; thin panels get a boss behind the pocket.
   A friction, snap or hinged lid can be held shut by magnet pairs in the corner posts and the lid.
