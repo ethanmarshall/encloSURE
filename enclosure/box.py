@@ -582,7 +582,9 @@ def _handle(spec, hd, i, base, lid, top, oL, oW, base_h, checks):
     m = "M3"
     clear, pilot = SCREWS[m][0], SCREWS[m][1]
     extras, notes = [], []
-    a, b = hd.get("at", [0, 0 if face == "lid" else H * 0.7])
+    a, b = (list(hd.get("at") or [0, None]) + [None])[:2]
+    a = float(a or 0)
+    b = (0.0 if face == "lid" else H * 0.7) if b is None else float(b)
     on_lid = face == "lid"
     if on_lid and lid is None:
         raise ValueError("a handle on the lid needs a lid")

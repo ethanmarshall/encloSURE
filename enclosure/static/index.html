@@ -320,8 +320,9 @@
   <fieldset>
     <legend>Handles</legend>
     <div class="rows" id="handle_rows"></div>
-    <button type="button" class="add" data-add="handle">+ Add a handle</button>
-    <p class="hint">Bar and knob handles print as their own parts and screw on; a grip is a finger pocket in a wall; strap loops take a webbing strap.</p>
+    <button type="button" class="add" data-add="handle" data-face="lid">+ Handle on the lid</button>
+    <button type="button" class="add" data-add="handle" data-face="left">+ Handle on a side</button>
+    <p class="hint">Each handle row has a Face menu: pick the lid or any of the four walls (left, right, front, back), then the type. Bar and knob handles print as their own parts and screw on; a grip is a finger pocket in a wall; strap loops take a webbing strap. You can add as many as you like, or tap Place and then tap the model to put one there.</p>
   </fieldset>
 
   <fieldset>
@@ -1205,7 +1206,7 @@ function addRow(kind, opts) {
   item._sync();
   return item;
 }
-for (const b of $$("[data-add]")) b.onclick = () => { const it = addRow(b.dataset.add); changed(it); it.querySelector("select, input")?.focus(); };
+for (const b of $$("[data-add]")) b.onclick = () => { const it = addRow(b.dataset.add, b.dataset.face ? { face: b.dataset.face } : undefined); changed(it); it.querySelector("select, input")?.focus(); };
 function changed(el) { if (boxform.contains(el) || el.closest?.("#boxform") || !el.isConnected) later(); }
 
 function setUnits(next) {
@@ -2051,7 +2052,7 @@ function handleRow(o = {}) {
         .map(([v, t]) => h("option", { value: v, selected: v === (o.type || "bar") }, t))))),
     h("div", { class: "grid" },
       h("label", { class: "f", "data-pos": "a" }, "X", h("span", { class: "unit", "data-unit": UNIT() }, lenIn("a", o.a ?? 0))),
-      h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": UNIT() }, lenIn("b", o.b ?? 0))),
+      h("label", { class: "f", "data-pos": "b" }, "Y", h("span", { class: "unit", "data-unit": UNIT() }, (() => { const x = lenIn("b", o.b ?? 0); if (o.b == null) { x.value = ""; x.placeholder = "auto"; delete x.dataset.mm; } return x; })())),
       field("Length (blank: auto)", (() => o.length ? lenIn("length", o.length, "1", "10") : h("input", { type: "number", name: "length", min: "10", step: "1" }))(), UNIT())),
     placeBtn(it => it, "hole"));
   item.addEventListener("change", () => posLabels(item));
@@ -2060,7 +2061,7 @@ function handleRow(o = {}) {
 }
 function readHandle(it) {
   const el = n => $(`[name=${n}]`, it);
-  const d = { face: el("face").value, type: el("type").value, at: [len(el("a")), len(el("b"))] };
+  const d = { face: el("face").value, type: el("type").value, at: [len(el("a")), el("b").value === "" ? null : len(el("b"))] };
   if (el("length").value !== "") d.length = len(el("length"));
   return d;
 }
