@@ -360,6 +360,10 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   "Place on the model" then a tap on the 3D view sets the face and position.
 - **Handles** on the lid or any wall: a bar handle or pull knob (their own parts, screwed on), a
   finger grip pocket in a wall, or strap loops for a webbing strap.
+- **Hinged case with snap latches** (Other shapes tab): a parts-organiser style case. A tray with a
+  lip, a lid that snaps onto ball-and-socket hinges and opens right over, and separate latch tabs
+  that pivot on the lid and click onto the tray on sprung arms. Dividers in the tray with matching
+  ribs under the lid. Hinges and latches are counted from the length, or set by hand.
 - **Gridfinity feet**: a Quick box can stand on Gridfinity feet (with magnet or screw holes) so it
   drops into a Gridfinity baseplate; one button grows its footprint to fill whole grid units.
 - **Magnets**: round pockets for disc magnets in the floor, lid or a wall, open to the outside or the

@@ -724,8 +724,27 @@
 </form>
 
 <form id="shapeform" autocomplete="off" novalidate hidden>
-  <p class="intro">Boxes that aren't rectangles: a round box with a screw-on cap, or a box shaped to an outline you draw.</p>
+  <p class="intro">Other kinds of box: a hinged case with snap latches, a round box with a screw-on cap, or a box shaped to an outline you draw.</p>
   <fieldset class="first">
+    <legend>Hinged case, snap latches</legend>
+    <p class="hint">A parts-organiser style case: a tray, a lid that snaps onto hinges along the back, and separate latch tabs that pivot on the lid and click onto the tray. Every joint is a printed ball in a printed socket, so there's nothing to buy.</p>
+    <div class="grid">
+      <label class="f">Inside length<span class="unit" data-unit="mm"><input name="cs_l" type="number" min="45" step="1" value="160"></span></label>
+      <label class="f">Inside width<span class="unit" data-unit="mm"><input name="cs_w" type="number" min="30" step="1" value="100"></span></label>
+      <label class="f">Inside height<span class="unit" data-unit="mm"><input name="cs_h" type="number" min="15" step="1" value="30"></span></label>
+      <label class="f">Of that, in the lid<span class="unit" data-unit="mm"><input name="cs_lid" type="number" min="3" step="0.5" value="6"></span></label>
+      <label class="f">Wall<span class="unit" data-unit="mm"><input name="cs_wall" type="number" min="2.4" step="0.1" value="3.2"></span></label>
+      <label class="f">Floor and lid top<span class="unit" data-unit="mm"><input name="cs_floor" type="number" min="1.2" step="0.1" value="2.4"></span></label>
+      <label class="f">Corner radius<span class="unit" data-unit="mm"><input name="cs_r" type="number" min="0.6" step="0.5" value="3"></span></label>
+      <label class="f">Hinges (0: automatic)<input name="cs_hinges" type="number" min="0" max="6" step="1" value="0"></label>
+      <label class="f">Latches (0: automatic)<input name="cs_latches" type="number" min="0" max="6" step="1" value="0"></label>
+      <label class="f">Dividers across the length<input name="cs_dx" type="number" min="0" max="12" step="1" value="0"></label>
+      <label class="f">Dividers across the width<input name="cs_dy" type="number" min="0" max="12" step="1" value="0"></label>
+    </div>
+    <label class="check"><input type="checkbox" name="cs_ribs" checked> Ribs under the lid over the dividers (keeps small parts in their pockets)</label>
+    <div class="links"><button class="plain" type="button" id="csshow">Show it</button><button class="go" type="button" id="csdl">Download STEP + STL</button></div>
+  </fieldset>
+  <fieldset>
     <legend>Round box, screw-on cap</legend>
     <div class="grid">
       <label class="f">Inside diameter<span class="unit" data-unit="mm"><input name="rb_d" type="number" min="20" step="1" value="70"></span></label>
@@ -2018,8 +2037,25 @@ function roundBody() {
 function showShape(d, title) {
   views.shapes = makeView(d); empty(""); showView(views.shapes);
   report.replaceChildren(h("div", { class: "dims" }, title, d.outer ? h("span", { class: "hint" }, ` · outside ${d.outer.map(v => +(v / U).toFixed(2)).join(" × ")} ${UNIT()}`) : null),
-    h("ul", { class: "notes" }, d.notes.map(n => h("li", {}, inUnits(n)))));
+    h("ul", { class: "notes" }, d.notes.map(n => h("li", {}, inUnits(n)))),
+    ...(d.checks || []).map(c => msg("warn", inUnits(c))));
 }
+function caseBody() {
+  const e = shapeform.elements, n = k => Math.round(num(e[k].value) || 0);
+  return { size: [len(e.cs_l), len(e.cs_w), len(e.cs_h)], lid_depth: len(e.cs_lid), wall: len(e.cs_wall), floor: len(e.cs_floor),
+    corner_radius: len(e.cs_r), hinges: n("cs_hinges"), latches: n("cs_latches"), dividers_x: n("cs_dx"), dividers_y: n("cs_dy"),
+    lid_ribs: e.cs_ribs.checked };
+}
+$("#csshow").onclick = () => busy($("#csshow"), "Making...", async () => {
+  const res = await fetch("api/case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ case: caseBody(), preview: true }) });
+  if (!res.ok) { report.replaceChildren(msg("err", await errorOf(res))); return; }
+  const d = await res.json();
+  showShape(d, `Hinged case: inside ${d.inner.map(v => +(v / U).toFixed(2)).join(" × ")} ${UNIT()}`);
+});
+$("#csdl").onclick = () => busy($("#csdl"), "Making...", async () => {
+  const r = await download(await fetch("api/case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ case: caseBody() }) }), "hinged_case.zip");
+  if (r.error) report.replaceChildren(msg("err", r.error));
+});
 $("#rbshow").onclick = () => busy($("#rbshow"), "Making...", async () => {
   let body; try { body = { round: roundBody(), preview: true }; } catch (err) { report.replaceChildren(msg("err", err.message)); return; }
   const res = await fetch("api/roundbox", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
@@ -2379,7 +2415,7 @@ function selectTab(name) {
     if (!$("#fitview").srcdoc) { showView(views.fit); empty(views.fit ? "" : "Read an enclosure to see it here."); }
     else showFitView(true);
     if (!views.fit && !$("#fitview").srcdoc) report.replaceChildren(h("div", { class: "hint" }, "Step 1: pick the enclosure and read it."));
-  } else if (name === "shapes") { empty(views.shapes ? "" : "Show a round box or an outline box here."); showView(views.shapes); report.replaceChildren(); }
+  } else if (name === "shapes") { empty(views.shapes ? "" : "Show a hinged case, a round box or an outline box here."); showView(views.shapes); report.replaceChildren(); }
   else if (name === "guide") { report.replaceChildren(); }
   else if (name === "parts") { empty(views.parts ? "" : "Pick a part."); showView(views.parts); partReport(); }
   else { showView(null); empty("Your bought box's holes come back as STEP and a drilling template PDF."); report.replaceChildren(); }

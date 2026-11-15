@@ -441,6 +441,27 @@ def round_box(body: dict):
         _bad(e)
 
 
+@app.post("/api/case")
+def hinged_case(body: dict):
+    """A hinged case with snap latch tabs: preview, or STEP and STL."""
+    from . import case
+    try:
+        fields_ = case.Case.__dataclass_fields__
+        c = case.Case(**{k: v for k, v in (body.get("case") or {}).items() if k in fields_})
+        with _PART_LOCK:
+            if body.get("preview"):
+                m = case.build(c)
+                enc = lambda sh: base64.b64encode(_stl(sh)).decode()  # noqa: E731
+                return {"notes": m["notes"], "checks": m["checks"], "base": enc(m["base"]), "lid": enc(m["lid"]),
+                        "mounted": [{"name": f"latch_tab_{i + 1}", "host": "lid", "mesh": enc(t)} for i, t in enumerate(m["tabs"])],
+                        "inner": m["inner"], "outer": m["outer"]}
+            with tempfile.TemporaryDirectory() as d:
+                case.write(c, Path(d) / "case")
+                return _zip(Path(d) / "case", "hinged_case")
+    except (ValueError, RuntimeError, TypeError) as e:
+        _bad(e)
+
+
 @app.post("/api/outline")
 async def outline_box(dxf: UploadFile = File(...), height: float = Form(30.0), wall: float = Form(2.0),
                       floor: float = Form(2.0), lip: float = Form(3.0), standoff_height: float = Form(5.0),
