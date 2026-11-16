@@ -1083,7 +1083,13 @@ for (const [name, first] of [["lid_screw", "M3"], ["standoff_screw", "M3"], ["li
   for (const s of SCREWS) boxform.elements[name].add(new Option(s, s, false, s === first));
 for (const s of ["M3", "M4"]) boxform.elements.keyholes.add(new Option(`${s} screws`, s));
 
-const num = v => { const n = parseFloat(v); return Number.isFinite(n) ? n : 0; };
+// A typed number: 0.016, .016, 0,016 (a comma for the point), or a fraction such as 1/64 or 1 1/2.
+const num = v => {
+  const t = String(v ?? "").trim().replace(",", ".");
+  const fr = t.match(/^(?:(\d+)[\s-]+)?(\d+)\s*\/\s*(\d+)$/);
+  if (fr && +fr[3]) return (+fr[1] || 0) + fr[2] / fr[3];
+  const n = parseFloat(t.startsWith(".") ? "0" + t : t); return Number.isFinite(n) ? n : 0;
+};
 const field = (label, input, unit) => h("label", { class: "f" }, label, unit ? h("span", { class: "unit", "data-unit": unit }, input) : input);
 const numIn = (name, value, step = "0.5", min) => h("input", { type: "number", name, value, step, min });
 // Units: everything is millimetres inside; the form shows and takes mm or inches.
@@ -2434,7 +2440,8 @@ function partFields() {
     if (f.type === "len") {
       const el = f.default === null ? h("input", { type: "number", name: "p_" + f.name, step: U === 1 ? "0.1" : "0.01", min: "0" }) : lenIn("p_" + f.name, f.default, "0.1", 0);
       el.dataset.mmstep = "0.1";
-      if (f.name === "bottom_chamfer" && U !== 1) el.step = "0.001";   // a chamfer this small is thousandths of an inch
+      // A plain text box with the decimal keypad: some browsers' number boxes refuse a point or a comma as it is typed.
+      el.type = "text"; el.inputMode = "decimal"; el.autocomplete = "off"; el.removeAttribute("step"); el.removeAttribute("min");
       return field(f.label, el, UNIT());
     }
     return field(f.label, h("input", { type: "number", name: "p_" + f.name, value: f.default ?? "", step: "any" }));
