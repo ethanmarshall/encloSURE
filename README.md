@@ -360,6 +360,11 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   "Place on the model" then a tap on the 3D view sets the face and position.
 - **Handles** on the lid or any wall: a bar handle or pull knob (their own parts, screwed on), a
   finger grip pocket in a wall, or strap loops for a webbing strap.
+- **Print folder**: one zip per design with the plate as 3MF (every part turned to print), each part
+  as STL and STEP, an assembly STEP, pictures of the 3D view, and a README with sizes, settings,
+  time and filament. For a Bambu bed it also carries `slice_with_bambu_studio.py`, which slices the
+  plate with the Bambu Studio on your computer (it writes complete presets from the app's own
+  profiles first, as its command line needs) and opens the plate in the app if that fails.
 - **Hinged case with snap latches** (Other shapes tab): a parts-organiser style case. A tray with a
   lip, a lid that snaps onto ball-and-socket hinges and opens right over, and separate latch tabs
   that pivot on the lid and click onto the tray on sprung arms. Dividers in the tray with matching

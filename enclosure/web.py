@@ -184,6 +184,7 @@ def _part_params(body: dict) -> tuple[str, dict]:
 
 
 import threading  # noqa: E402
+import time  # noqa: E402
 
 _PART_LOCK = threading.Lock()
 _PART_LATEST: dict[str, int] = {}  # each page's newest preview request
@@ -301,6 +302,96 @@ def print_plate_download(body: dict):
         with tempfile.TemporaryDirectory() as d:
             r = plate.write(_plate_items(body), Path(d) / "plate", _bed(body), str(body.get("material") or "PETG"), slice_it=False)
             return _zip(Path(d) / "plate", "print_plate")
+    except (ValueError, RuntimeError, TypeError) as e:
+        _bad(e)
+
+
+def _zip_tree(folder: Path, name: str) -> Response:
+    """A folder and everything under it as a zip, inside one top folder; scripts keep their run permission."""
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        for p in sorted(folder.rglob("*")):
+            if not p.is_file():
+                continue
+            info = zipfile.ZipInfo(f"{name}/{p.relative_to(folder).as_posix()}", date_time=time.localtime()[:6])
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = (0o755 if p.suffix in (".command", ".py") else 0o644) << 16
+            z.writestr(info, p.read_bytes())
+    return Response(buf.getvalue(), media_type="application/zip",
+                    headers={"Content-Disposition": f'attachment; filename="{name}.zip"'})
+
+
+def _kit_images(body: dict) -> list:
+    out = []
+    for im in (body.get("images") or [])[:8]:
+        data = str(im.get("data") or "")
+        if "," in data[:40]:
+            data = data.split(",", 1)[1]
+        try:
+            out.append((str(im.get("name") or "view"), base64.b64decode(data)))
+        except (ValueError, TypeError):
+            continue
+    return out
+
+
+@app.post("/api/kit")
+def print_folder(body: dict):
+    """A print folder for one design: the plate as 3MF (sliced here for time and grams), each part as STL
+    and STEP, pictures, a README, and for Bambu printers a script that slices it in Bambu Studio."""
+    from build123d import Rot, Pos
+    from . import hardware, kit, plate
+    try:
+        bed = _bed(body)
+        printer = body.get("bed") if isinstance(body.get("bed"), str) else None
+        material = str(body.get("material") or "PETG")
+        groups, designed, notes, checks, assembly, about = [], [], [], [], None, ""
+        with _PART_LOCK, tempfile.TemporaryDirectory() as d:
+            if body.get("case") is not None:
+                from . import case
+                c = case.Case(**{k: v for k, v in body["case"].items() if k in case.Case.__dataclass_fields__})
+                m = case.build(c)
+                title = "Hinged case with snap latches"
+                groups = [("tray", m["base"], 1), ("lid", Pos(0, 0, m["top"]) * (Rot(180, 0, 0) * m["lid"]), 1),
+                          ("latch_tab", m["tab"], m["n_tabs"])]
+                designed = [("tray", m["base"]), ("lid", m["lid"]), ("latch_tab", m["tab"])]
+                assembly = [m["base"], m["lid"], *m["tabs"]]
+                notes, checks = m["notes"], m["checks"]
+            else:
+                names = []
+                if body.get("box"):
+                    spec = spec_from(body["box"])
+                    made = boxmod.build(spec)
+                    for n, sh in plate.box_items(spec, made):
+                        groups.append((n, sh, 1))
+                    designed += [("base", made["base"])] + ([("lid", made["lid"])] if made.get("lid") is not None else [])
+                    designed += [(n, e) for n, e in (made.get("extras") or [])]
+                    together = [made["base"]] + ([made["lid"]] if made.get("lid") is not None else []) + \
+                               [e for _, e, _ in (made.get("mounted") or [])]
+                    assembly = together if len(together) > 1 else None
+                    notes += [n for n in made["notes"] if "rough, a slicer knows better" not in n]
+                    checks += made["checks"]
+                    L, W, H = spec.inner
+                    names.append(f"Box {L:g} x {W:g} x {H:g} mm inside")
+                for i, p in enumerate(body.get("parts") or []):
+                    kind, params = _part_params(p)
+                    qty = int(p.get("qty") or 1)
+                    if not 1 <= qty <= 50:
+                        raise ValueError("qty: 1 to 50 of each part")
+                    r = hardware.make(kind, **params)
+                    name = kind if sum(1 for q in body["parts"] if q.get("kind") == kind) == 1 else f"{kind}_{i + 1}"
+                    groups.append((name, plate.part_item(kind, r["shape"])[1], qty))
+                    designed.append((name, r["shape"]))
+                    notes += [f"{name}: {n}" for n in r["notes"]]
+                    checks += [f"{name}: {c}" for c in r["checks"]]
+                    names.append(hardware.KINDS[kind][1] if kind in hardware.KINDS else kind)
+                if not groups:
+                    raise ValueError("nothing to print: add the box or some parts")
+                title = names[0] if len(names) == 1 else (names[0] + " and " + (names[1] if len(names) == 2 else f"{len(names) - 1} more parts"))
+            title = str(body.get("title") or title)[:120]
+            name = kit.slug(title)
+            kit.write(Path(d) / name, title, groups, designed, assembly, notes, checks, str(body.get("about") or "")[:2000],
+                      bed, printer, material, _kit_images(body))
+            return _zip_tree(Path(d) / name, name)
     except (ValueError, RuntimeError, TypeError) as e:
         _bad(e)
 

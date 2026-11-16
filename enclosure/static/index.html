@@ -547,7 +547,7 @@
       <input type="radio" name="format" id="f-sw" value="solidworks"><label for="f-sw" title="STEP plus a SolidWorks macro that builds the box as editable features">+ SolidWorks</label>
     </div>
     <label class="check" style="margin:0"><input name="stl" type="checkbox" checked> STL</label>
-    <button class="go" type="submit">Download</button>
+    <button class="go" type="submit">Download</button><button class="plain" type="button" id="boxkit" title="Plate 3MF, STLs, STEP, pictures and a README in one folder">Print folder</button>
     <div class="links small" style="width:100%;margin:0">
       <button class="plain" type="button" id="tofit">Fit a board in it</button>
       <button class="plain" type="button" id="toonshape" hidden>Send to Onshape</button>
@@ -699,7 +699,7 @@
       <label class="f" id="pmat-wrap">Plastic<select name="pmaterial"></select></label>
     </div>
   </fieldset>
-  <div class="actions"><button class="go" type="submit">Download STEP + STL</button><button class="plain" type="button" id="padd">Add to print plate</button><button class="plain" type="button" id="pos" hidden>Send to Onshape</button><span class="hint" id="pstate"></span></div>
+  <div class="actions"><button class="go" type="submit">Download STEP + STL</button><button class="plain" type="button" id="partkit" title="Plate 3MF, STL, STEP, pictures and a README in one folder">Print folder</button><button class="plain" type="button" id="padd">Add to print plate</button><button class="plain" type="button" id="pos" hidden>Send to Onshape</button><span class="hint" id="pstate"></span></div>
   <details id="plib" hidden>
     <summary>Team library: saved parts</summary>
     <div class="grid g2" style="margin-top:6px"><label class="f">Name<input id="plib_name" maxlength="80" placeholder="M3 printed knob"></label>
@@ -719,7 +719,8 @@
         <option value="prusa-xl">Prusa XL (360 x 360)</option><option value="voron-350">Voron 350</option></select></label>
       <label class="f">Plastic<select name="plate_mat"><option>PETG</option><option>PLA</option><option>ABS</option><option>ASA</option></select></label>
     </div>
-    <div class="links"><button class="plain" type="button" id="plateshow">Lay it out</button><button class="go" type="button" id="platedl">Download 3MF</button></div>
+    <div class="links"><button class="plain" type="button" id="plateshow">Lay it out</button><button class="go" type="button" id="platedl">Download 3MF</button><button class="plain" type="button" id="platekit">Print folder</button></div>
+    <p class="hint">A print folder is everything for one design in one zip: the plate as 3MF with every part turned to print, each part as STL and STEP, pictures of the 3D view, a README with sizes, print settings, time and filament, and for a Bambu bed a script that slices the plate in your Bambu Studio. It uses the bed and plastic chosen here.</p>
   </fieldset>
 </form>
 
@@ -742,7 +743,7 @@
       <label class="f">Dividers across the width<input name="cs_dy" type="number" min="0" max="12" step="1" value="0"></label>
     </div>
     <label class="check"><input type="checkbox" name="cs_ribs" checked> Ribs under the lid over the dividers (keeps small parts in their pockets)</label>
-    <div class="links"><button class="plain" type="button" id="csshow">Show it</button><button class="go" type="button" id="csdl">Download STEP + STL</button></div>
+    <div class="links"><button class="plain" type="button" id="csshow">Show it</button><button class="go" type="button" id="csdl">Download STEP + STL</button><button class="plain" type="button" id="cskit">Print folder</button></div>
   </fieldset>
   <fieldset>
     <legend>Round box, screw-on cap</legend>
@@ -2388,6 +2389,33 @@ $("#plateshow").onclick = async () => {
       h("div", { class: "hint" }, d.parts.map((p, i) => `Plate ${i + 1}: ${p.join(", ")}`).join(" · ")));
   });
 };
+// A print folder: the design's plate, STLs, STEP, pictures and README in one zip.
+function shots() {
+  // The 3D view as it is now, then from the other side and from one end.
+  const out = [], p0 = camera.position.clone(), up = new THREE.Vector3(0, 1, 0);
+  try {
+    for (const [name, ang] of [["view", 0], ["other_side", Math.PI], ["end", Math.PI / 2]]) {
+      camera.position.copy(controls.target).add(p0.clone().sub(controls.target).applyAxisAngle(up, ang));
+      camera.lookAt(controls.target);
+      renderer.render(scene, camera);
+      out.push({ name, data: renderer.domElement.toDataURL("image/png") });
+    }
+  } catch {}
+  camera.position.copy(p0); camera.lookAt(controls.target);
+  return out.filter(s => s.data.length < 3.5e6);
+}
+async function printFolder(btn, body, fail) {
+  await busy(btn, "Making...", async () => {
+    const e = partform.elements;
+    const full = { ...body, bed: e.plate_bed.value, material: e.plate_mat.value, images: current ? shots() : [] };
+    const r = await download(await fetch("api/kit", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(full) }), "print_folder.zip");
+    if (r.error) fail(r.error);
+  });
+}
+$("#platekit").onclick = () => { const b = plateBody(); printFolder($("#platekit"), { box: b.box, parts: b.parts }, err => { partData = { error: err }; partReport(); }); };
+$("#partkit").onclick = () => printFolder($("#partkit"), { parts: [{ ...partBody(), qty: 1 }] }, err => { partData = { error: err }; partReport(); });
+$("#boxkit").onclick = () => printFolder($("#boxkit"), { box: boxBody(), parts: [] }, err => boxReport(null, err));
+$("#cskit").onclick = () => printFolder($("#cskit"), { case: caseBody() }, err => report.replaceChildren(msg("err", err)));
 $("#platedl").onclick = async () => {
   await busy($("#platedl"), "Making...", async () => {
     const r = await download(await fetch("api/plate/download", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(plateBody()) }), "print_plate.zip");
