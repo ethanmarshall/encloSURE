@@ -1313,6 +1313,45 @@ PRINTED_ONLY = {"snap_hook", "cable_clip", "tie_mount", "board_clip", "din_clip"
                 "button_cap", "hinge", "latch", "test_print", "wheel", "gridfinity_bin", "gridfinity_baseplate"}
 
 
+# The useful printed things (brackets, clamps, holders, repair parts, fan parts) join the same list.
+from . import useful as _useful  # noqa: E402
+
+KINDS.update(_useful.KINDS)
+PRINTED_ONLY |= set(_useful.KINDS)
+
+# What each part is filed under on the page, and other words people look for it by.
+GROUPS = {
+    "Fasteners": ["screw", "nut", "washer", "spacer", "insert", "thumbscrew", "dowel", "snap_ring"],
+    "Springs": ["compression_spring", "extension_spring", "torsion_spring"],
+    "Mounts and brackets": ["shelf_bracket", "corner_brace", "pipe_clamp", "pegboard_hook", "wall_pocket", "din_clip"],
+    "Cable management": ["cable_clip", "tie_mount", "cable_comb", "raceway", "desk_grommet", "grommet"],
+    "Workshop": ["bit_holder", "tool_rack", "sanding_block", "drill_guide"],
+    "Storage": ["gridfinity_bin", "gridfinity_baseplate", "drawer_organizer", "battery_caddy"],
+    "Repairs": ["knob", "foot", "end_cap", "shim", "hole_plug", "button_cap"],
+    "Hinges, latches and clips": ["hinge", "latch", "snap_hook", "board_clip"],
+    "Motion": ["spur_gear", "gt2_pulley", "wheel"],
+    "Fans": ["fan_guard", "fan_adapter"],
+    "Test prints": ["test_print"],
+}
+WORDS = {
+    "screw": "bolt machine screw cap screw fastener", "nut": "hex nut square nut", "washer": "fender penny", "spacer": "standoff",
+    "insert": "heat set threaded brass", "thumbscrew": "thumb knob wing screw", "dowel": "pin peg", "snap_ring": "circlip retaining ring e-clip",
+    "shelf_bracket": "shelf support angle", "corner_brace": "angle bracket l bracket", "pipe_clamp": "conduit tube saddle strap p-clip",
+    "pegboard_hook": "peg board hanger", "wall_pocket": "phone holder remote holder wall mount cradle dock",
+    "din_clip": "din rail mount ts35", "cable_clip": "wire clip cord", "tie_mount": "zip tie cable tie anchor",
+    "cable_comb": "wire organiser organizer", "raceway": "cable channel trunking duct cover", "desk_grommet": "cable hole cover pass through",
+    "grommet": "rubber bushing strain", "bit_holder": "drill bit screwdriver bit stand pen holder", "tool_rack": "screwdriver holder wall tool holder",
+    "sanding_block": "sandpaper", "drill_guide": "drill jig bushing", "gridfinity_bin": "bin organiser organizer", "gridfinity_baseplate": "grid base",
+    "drawer_organizer": "tray divider organiser bin", "battery_caddy": "battery holder aa aaa 18650 storage", "knob": "dial handle",
+    "foot": "feet leg pad bumper riser", "end_cap": "tube plug cap chair leg extrusion", "shim": "spacer wedge packer", "hole_plug": "blanking plug cover",
+    "button_cap": "switch cap", "hinge": "leaf hinge", "latch": "catch", "snap_hook": "snap fit cantilever", "board_clip": "pcb clip",
+    "spur_gear": "gear cog", "gt2_pulley": "belt pulley timing", "wheel": "roller caster bearing", "fan_guard": "fan grill grille cover",
+    "fan_adapter": "fan duct reducer", "compression_spring": "coil spring", "extension_spring": "tension spring", "torsion_spring": "",
+    "test_print": "tolerance calibration",
+}
+GROUP_OF = {k: g for g, ks in GROUPS.items() for k in ks}
+
+
 _CACHE: dict = {}
 
 
@@ -1442,12 +1481,13 @@ def catalog() -> dict:
         ("dowel", "fit"): ["press", "slip"], ("dowel", "ends"): ["both", "one", "none"], ("snap_ring", "type"): ["external", "internal"],
         ("snap_ring", "size"): sorted(set(RINGS_EXTERNAL) | set(RINGS_INTERNAL)),
         ("thumbscrew", "style"): ["knurled", "wing", "cap"],
+        **_useful.CHOICES,
     }
     out = {}
     for kind, (fn, label, defaults) in KINDS.items():
         fields = []
         for name, default in defaults.items():
-            lab, typ = KIND_LABELS.get((kind, name)) or LABELS.get(name, (name.replace("_", " ").capitalize(), "len"))
+            lab, typ = KIND_LABELS.get((kind, name)) or _useful.KIND_LABELS.get((kind, name)) or LABELS.get(name, (name.replace("_", " ").capitalize(), "len"))
             opts = choices.get((kind, name))
             if name == "wire":
                 opts = list(WIRE)
@@ -1468,5 +1508,6 @@ def catalog() -> dict:
         params = inspect.signature(fn).parameters
         out[kind] = {"label": label, "fields": fields, "printed_only": kind in PRINTED_ONLY,
                      "modes": "mode" in params, "material": "material" in params,
-                     "doc": (fn.__doc__ or "").strip().split("\n\n")[0].replace("\n", " ")}
-    return {"kinds": out, "materials": list(PLASTIC), "wires": {k: v["name"] for k, v in WIRE.items()}}
+                     "doc": " ".join((fn.__doc__ or "").strip().split("\n\n")[0].split()),
+                     "group": GROUP_OF.get(kind, "Other"), "words": WORDS.get(kind, "")}
+    return {"kinds": out, "groups": list(GROUPS), "materials": list(PLASTIC), "wires": {k: v["name"] for k, v in WIRE.items()}}

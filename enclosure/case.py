@@ -55,6 +55,15 @@ class Case:
     dividers_x: int = 0        # walls across the tray, splitting its length
     dividers_y: int = 0        # walls along the tray, splitting its width
     lid_ribs: bool = True      # ribs under the lid over the dividers, so small parts stay in their pockets
+    # Loose bins that lift out, on a grid of cells inside the tray (instead of fixed dividers).
+    insert_cols: int = 0       # cells along the length; 0 for no inserts
+    insert_rows: int = 0       # cells across the width
+    insert_bins: str = ""      # bigger bins as "cells along x cells across: how many", e.g. "2x1:2, 2x2:1"
+    insert_fill: bool = True   # fill what's left with one-cell bins
+    insert_layers: int = 1     # 2 stacks two half-height layers
+    insert_wall: float = 1.2
+    insert_scoop: bool = False  # a rounded front inside each bin, to slide small parts out
+    insert_label: bool = False  # a label tab along the back of each bin
 
     def check(self) -> None:
         L, W, H = self.size
@@ -73,6 +82,18 @@ class Case:
                 raise ValueError(f"{what}: 0 (automatic) to 6")
         if not (0 <= int(self.dividers_x) <= 12 and 0 <= int(self.dividers_y) <= 12):
             raise ValueError("dividers: 0 to 12 each way")
+        ic, ir = int(self.insert_cols), int(self.insert_rows)
+        if (ic > 0) != (ir > 0):
+            raise ValueError("inserts: set the cells both ways (along the length and across the width), or neither")
+        if ic:
+            if not (1 <= ic <= 12 and 1 <= ir <= 12):
+                raise ValueError("inserts: 1 to 12 cells each way")
+            if int(self.dividers_x) or int(self.dividers_y):
+                raise ValueError("fixed dividers or lift-out inserts, not both: set the dividers to 0")
+            if int(self.insert_layers) not in (1, 2, 3):
+                raise ValueError("insert layers: 1, 2 or 3")
+            if not 0.8 <= float(self.insert_wall) <= 3:
+                raise ValueError("insert wall: 0.8 to 3 mm")
 
 
 def _spread(n: int, span: float, unit: float, margin: float) -> list[float]:
@@ -118,6 +139,78 @@ def _socket(x_face: float, into: int, y: float, z: float, ball):
     R, p = ball
     # The ball's face is SIDE back from this one; its sphere's centre is R - p behind that.
     return Pos(x_face - into * (SIDE + R - p), y, z) * _ball(R + SOCKET_EXTRA)
+
+
+INSERT_EDGE = 0.15   # play between the outer bins and the tray's wall
+INSERT_GAP = 0.3     # between one bin and the next
+
+
+def parse_bins(text: str) -> list[tuple[int, int, int]]:
+    """'2x1:2, 2x2' -> [(2, 1, 2), (2, 2, 1)]: cells along the length x cells across the width, and how many."""
+    out = []
+    for part in str(text or "").replace(";", ",").split(","):
+        part = part.strip().lower().replace("×", "x").replace(" ", "")
+        if not part:
+            continue
+        size, _, count = part.partition(":")
+        a, _, b = size.partition("x")
+        try:
+            cw, ch, n = int(a), int(b), int(count) if count else 1
+        except ValueError:
+            raise ValueError(f"bins: write each as cells x cells : how many, like 2x1:2 (got '{part}')")
+        if cw < 1 or ch < 1 or not 1 <= n <= 144:
+            raise ValueError(f"bins: '{part}' needs at least 1 cell each way and a count of 1 or more")
+        out.append((cw, ch, n))
+    return out
+
+
+def lay_out(cols: int, rows: int, bins: list[tuple[int, int, int]], fill: bool = True) -> list[tuple[int, int, int, int]]:
+    """Place the bins on the grid, biggest first, turning one where that makes it fit. Returns
+    [(cells along, cells across, column, row)]; with `fill`, one-cell bins take what's left."""
+    used = [[False] * cols for _ in range(rows)]
+    placed = []
+
+    def fits(cw, ch, c0, r0):
+        return c0 + cw <= cols and r0 + ch <= rows and not any(used[r][c] for r in range(r0, r0 + ch) for c in range(c0, c0 + cw))
+
+    todo = sorted(((cw, ch) for cw, ch, n in bins for _ in range(n)), key=lambda b: (-b[0] * b[1], -max(b)))
+    for cw, ch in todo:
+        spot = next(((a, b, c0, r0) for r0 in range(rows) for c0 in range(cols) for a, b in ((cw, ch), (ch, cw)) if fits(a, b, c0, r0)), None)
+        if spot is None:
+            raise ValueError(f"the bins don't fit a {cols} x {rows} grid: no room left for a {cw}x{ch} "
+                             f"({sum(a * b for a, b in todo)} cells asked for, {cols * rows} in the grid)")
+        a, b, c0, r0 = spot
+        for r in range(r0, r0 + b):
+            for c in range(c0, c0 + a):
+                used[r][c] = True
+        placed.append((a, b, c0, r0))
+    if fill:
+        placed += [(1, 1, c, r) for r in range(rows) for c in range(cols) if not used[r][c]]
+    return placed
+
+
+def insert_bin(w: float, d: float, h: float, wall: float = 1.2, scoop: bool = False, label: bool = False):
+    """A lift-out bin w x d x h, centred on the origin, standing on z = 0: thin walls, a 1 mm floor,
+    its front (-Y) rounded inside for scooping parts out, and a label tab along the back, if asked."""
+    floor = 1.0
+    r = min(1.5, w / 4, d / 4)
+    body = extrude(RectangleRounded(w, d, r), amount=h)
+    body = chamfer(body.edges().group_by(Axis.Z)[0], 0.5)
+    iw, idp = w - 2 * wall, d - 2 * wall
+    if iw < 3 or idp < 3:
+        raise ValueError(f"a bin {w:.1f} x {d:.1f} mm is too small for {wall:g} mm walls: fewer cells, or thinner walls")
+    body -= Pos(0, 0, floor) * extrude(RectangleRounded(iw, idp, max(0.3, r - wall)), amount=h)
+    if scoop:
+        R = min(0.6 * (h - floor), 0.45 * idp, 14.0)
+        if R >= 2:
+            fill_ = Pos(0, -idp / 2 + R / 2, floor + R / 2) * Box(iw + 0.02, R, R)
+            fill_ -= Pos(0, -idp / 2 + R, floor + R) * Cylinder(R, iw + 2, rotation=(0, 90, 0))
+            body += fill_
+    if label:
+        tabd = min(9.0, 0.35 * idp)
+        if tabd >= 3 and h - floor > tabd + 3:
+            body += _prism_yz([(idp / 2 + 0.01, h), (idp / 2 - tabd, h), (idp / 2 + 0.01, h - tabd)], -iw / 2 - 0.01, iw / 2 + 0.01)
+    return body.clean()
 
 
 def tab(catch: float = CATCH_MIN):
@@ -274,6 +367,39 @@ def build(c: Case) -> dict:
                  f"between two cheeks on the lid and clicks onto two posts on the tray ({CATCH_BALL[1] - SIDE:g} mm catch on "
                  f"sprung arms, set {PRELOAD:g} mm tight so it pulls the lid down)")
 
+    # ----- Lift-out bins on a grid -----
+    inserts, insert_placed = [], []
+    ic, ir = int(c.insert_cols), int(c.insert_rows)
+    if ic and ir:
+        layers = int(c.insert_layers)
+        px, py = (L - 2 * INSERT_EDGE) / ic, (W - 2 * INSERT_EDGE) / ir
+        bh = round((H - 0.8) / layers, 2)
+        spots = lay_out(ic, ir, parse_bins(c.insert_bins), bool(c.insert_fill))
+        shapes: dict = {}
+        count: dict = {}
+        for a, b, c0, r0 in spots:
+            key = (a, b)
+            if key not in shapes:
+                shapes[key] = insert_bin(a * px - INSERT_GAP, b * py - INSERT_GAP, bh, float(c.insert_wall), bool(c.insert_scoop), bool(c.insert_label))
+            count[key] = count.get(key, 0) + layers
+            x = -L / 2 + INSERT_EDGE + (c0 + a / 2) * px
+            y = -W / 2 + INSERT_EDGE + (r0 + b / 2) * py
+            for k in range(layers):
+                insert_placed.append(Pos(x, y, fl + 0.1 + k * bh) * shapes[key])
+        for (a, b), sh in sorted(shapes.items()):
+            inserts.append({"name": f"bin_{a}x{b}", "shape": sh, "count": count[(a, b)],
+                            "size": [round(a * px - INSERT_GAP, 2), round(b * py - INSERT_GAP, 2), bh]})
+        empty = ic * ir - sum(a * b for a, b, _, _ in spots)
+        notes.append(f"lift-out bins on a {ic} x {ir} grid of {px:.1f} x {py:.1f} mm cells"
+                     + (f", in {layers} layers" if layers > 1 else "") + f", each {bh:g} mm tall (the lid holds them down): "
+                     + ", ".join(f"{i['count']} x {i['name'][4:]} ({i['size'][0]:g} x {i['size'][1]:g} mm)" for i in inserts)
+                     + f"; walls {float(c.insert_wall):g} mm"
+                     + (", rounded fronts for scooping" if c.insert_scoop else "") + (", label tabs" if c.insert_label else ""))
+        if empty:
+            notes.append(f"{empty} cell{'s' if empty > 1 else ''} of the grid left empty")
+        if bh < 8:
+            checks.append(f"the bins are only {bh:g} mm tall: fewer layers, or a taller case")
+
     out_h = top
     notes.insert(0, f"hinged case: inside {L:g} x {W:g} x {H:g} mm ({H - c.lid_depth:g} in the tray to the parting line, "
                     f"{c.lid_depth:g} in the lid), outside {oL:g} x {oW + HINGE_E + HINGE_R + POST_D:.1f} x {out_h:g} mm with "
@@ -288,6 +414,7 @@ def build(c: Case) -> dict:
     checks.append("the snap joints are modelled on a printed case that works, but this one hasn't been printed: print one "
                   "tab and try it on the lid before printing a set")
     return {"base": tray.clean(), "lid": lid.clean(), "tab": one, "tabs": mounted, "n_tabs": n_l, "n_hinges": n_h, "notes": notes,
+            "inserts": inserts, "insert_placed": insert_placed,
             "checks": checks, "inner": [L, W, H], "outer": [round(oL, 2), round(oW + HINGE_E + HINGE_R + POST_D, 2), round(out_h, 2)],
             "parting": Hs, "top": top}
 
@@ -303,9 +430,13 @@ def write(c: Case, folder) -> dict:
     export_stl(m["base"], str(folder / "case_tray.stl"))
     export_stl(Pos(0, 0, m["top"]) * (Rot(180, 0, 0) * m["lid"]), str(folder / "case_lid.stl"))  # top down, on the bed
     export_stl(m["tab"], str(folder / "case_latch_tab.stl"))
+    for i in m["inserts"]:
+        export_stl(i["shape"], str(folder / f"case_{i['name']}.stl"))
+        export_step(i["shape"], str(folder / f"case_{i['name']}.step"))
     from build123d import Compound
-    export_step(Compound(children=[m["base"], m["lid"], *m["tabs"]]), str(folder / "case_assembly.step"))
+    export_step(Compound(children=[m["base"], m["lid"], *m["tabs"], *m["insert_placed"]]), str(folder / "case_assembly.step"))
     text = "# Hinged case\n\n" + "\n".join(f"- {n}" for n in m["notes"]) + \
-           f"\n\nPrint {m['n_tabs']} of case_latch_tab.stl.\n\n## Check\n\n" + "\n".join(f"- {n}" for n in m["checks"]) + "\n"
+           f"\n\nPrint {m['n_tabs']} of case_latch_tab.stl." + \
+           "".join(f"\nPrint {i['count']} of case_{i['name']}.stl." for i in m["inserts"]) + "\n\n## Check\n\n" + "\n".join(f"- {n}" for n in m["checks"]) + "\n"
     (folder / "notes.md").write_text(text, encoding="utf-8")
     return m

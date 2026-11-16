@@ -137,6 +137,21 @@
     font: inherit; font-size: 13px; box-shadow: 0 2px 8px rgba(0,0,0,.15); }
   #guide { grid-column: 1 / -1; overflow: auto; padding: 18px 28px 40px; max-width: 980px; }
   #guide h2 { margin: 4px 0 6px; font-size: 20px; }
+  #make { grid-column: 1 / -1; overflow: auto; padding: 18px 28px 40px; }
+  #make h2 { margin: 4px 0 4px; font-size: 20px; }
+  #make h3 { margin: 20px 0 8px; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); }
+  #make .lead { color: var(--muted); font-size: 13.5px; margin: 0 0 12px; max-width: 760px; }
+  #makeq { max-width: 460px; font-size: 16px; padding: 9px 12px; }
+  .cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(215px, 1fr)); gap: 10px; }
+  .card { text-align: left; border: 1px solid var(--line); background: var(--panel); color: var(--ink); border-radius: 8px; padding: 10px 12px; cursor: pointer; font: inherit; display: flex; flex-direction: column; gap: 4px; min-height: 74px; }
+  .card:hover, .card:focus-visible { border-color: var(--accent, #2f6fde); }
+  .card b { font-size: 14px; }
+  .card span { font-size: 12px; color: var(--muted); line-height: 1.35; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { display: inline-flex; align-items: center; border: 1px solid var(--line); border-radius: 999px; background: var(--panel); overflow: hidden; }
+  .chip button { border: none; background: none; color: var(--ink); font: inherit; font-size: 13px; padding: 5px 10px; cursor: pointer; }
+  .chip button.x { color: var(--muted); padding: 5px 9px 5px 2px; }
+  @media (max-width: 760px) { #make { padding: 14px 16px 40px; } .cards { grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); } }
   #guide h3 { margin: 22px 0 6px; font-size: 15px; }
   #guide .lead { color: var(--muted); font-size: 13.5px; max-width: 760px; }
   #guide li, #guide p { font-size: 13.5px; line-height: 1.5; }
@@ -155,6 +170,7 @@
     <input type="radio" name="units" id="u-in" value="in"><label for="u-in">inches</label>
   </div>
   <div class="tabs" role="tablist" style="margin-left:0">
+    <button role="tab" aria-selected="false" data-tab="make">Make</button>
     <button role="tab" aria-selected="true" data-tab="box">Quick box</button>
     <button role="tab" aria-selected="false" data-tab="fit">Fit a board</button>
     <button role="tab" aria-selected="false" data-tab="stock">Bought box</button>
@@ -700,6 +716,13 @@
     </div>
   </fieldset>
   <div class="actions"><button class="go" type="submit">Download STEP + STL</button><button class="plain" type="button" id="partkit" title="Plate 3MF, STL, STEP, pictures and a README in one folder">Print folder</button><button class="plain" type="button" id="padd">Add to print plate</button><button class="plain" type="button" id="pos" hidden>Send to Onshape</button><span class="hint" id="pstate"></span></div>
+  <details id="mypresets">
+    <summary>My presets: sizes you use again</summary>
+    <div class="links" style="align-items:end;margin-top:6px"><label class="f" style="flex:1">Name<input id="preset_name" maxlength="60" placeholder="Garage shelf bracket"></label>
+      <button class="plain" type="button" id="presetsave">Save these settings</button></div>
+    <div class="chips" id="presetlist" style="margin-top:8px"></div>
+    <p class="hint">Kept in this browser. They also show on the Make page.</p>
+  </details>
   <details id="plib" hidden>
     <summary>Team library: saved parts</summary>
     <div class="grid g2" style="margin-top:6px"><label class="f">Name<input id="plib_name" maxlength="80" placeholder="M3 printed knob"></label>
@@ -743,7 +766,20 @@
       <label class="f">Dividers across the width<input name="cs_dy" type="number" min="0" max="12" step="1" value="0"></label>
     </div>
     <label class="check"><input type="checkbox" name="cs_ribs" checked> Ribs under the lid over the dividers (keeps small parts in their pockets)</label>
-    <div class="links"><button class="plain" type="button" id="csshow">Show it</button><button class="go" type="button" id="csdl">Download STEP + STL</button><button class="plain" type="button" id="cskit">Print folder</button></div>
+    <p class="hint" style="margin-top:10px"><b>Lift-out inserts</b> (instead of dividers): loose bins on a grid of cells that fill the tray. They stand the full inside height, so the lid holds them and their contents down.</p>
+    <div class="grid">
+      <label class="f">Cells along the length (0: none)<input name="cs_ic" type="number" min="0" max="12" step="1" value="0"></label>
+      <label class="f">Cells across the width<input name="cs_ir" type="number" min="0" max="12" step="1" value="0"></label>
+      <label class="f">Layers<select name="cs_il"><option value="1">1 (full height)</option><option value="2">2 (stacked)</option><option value="3">3 (stacked)</option></select></label>
+      <label class="f">Bin wall<span class="unit" data-unit="mm"><input name="cs_iw" type="number" min="0.8" max="3" step="0.1" value="1.2"></span></label>
+    </div>
+    <label class="f">Bigger bins (cells along x cells across : how many)<input name="cs_ibins" type="text" placeholder="2x1:2, 2x2:1" autocomplete="off"></label>
+    <div class="grid g2">
+      <label class="check"><input type="checkbox" name="cs_ifill" checked> Fill the rest with one-cell bins</label>
+      <label class="check"><input type="checkbox" name="cs_iscoop"> Rounded front inside (scoop)</label>
+      <label class="check"><input type="checkbox" name="cs_ilabel"> Label tab along the back</label>
+    </div>
+    <div class="links"><button class="plain" type="button" id="csshow">Show it</button><button class="go" type="button" id="csdl">Download STEP + STL</button><button class="plain" type="button" id="cskit">Print folder</button><button class="plain" type="button" id="cspreset">Save as my preset</button></div>
   </fieldset>
   <fieldset>
     <legend>Round box, screw-on cap</legend>
@@ -783,6 +819,13 @@
   </div>
   <div class="report" id="report"></div>
 </section>
+<article id="make" hidden>
+  <h2>What do you want to make?</h2>
+  <p class="lead">Pick a thing, type its sizes, and download it as STL and STEP, or as a print folder with the plate laid out. Everything here prints without supports.</p>
+  <input id="makeq" type="search" placeholder="Search: bracket, cable, knob, bin, fan..." aria-label="Search the things to make" autocomplete="off">
+  <div id="makepresets"></div>
+  <div id="makelist"></div>
+</article>
 <article id="guide" hidden>
   <h2>Designing a box from scratch</h2>
   <p class="lead">Rules of thumb for drawing your own enclosure in Onshape or SolidWorks and printing it on an FDM printer with a 0.4 mm nozzle. They're the same numbers EncloSURE uses, so a box you draw this way will pass its Fit check. They're starting points: print the fit test (Parts tab, "Thread and snap test print") once, and adjust to what your printer does.</p>
@@ -1716,17 +1759,91 @@ function showPartLibrary(d) {
     h("button", { class: "plain", type: "button", onclick: async () => {
       const g = await fetch(`api/library/${it.id}`); if (!g.ok) return;
       const doc = await g.json();
-      partform.elements.kind.value = doc.part.kind; partKind = null; partFields();
-      const k = PARTS.kinds[doc.part.kind];
-      for (const f of k.fields) {
-        const el = partform.elements["p_" + f.name], v = doc.part.params[f.name]; if (!el || v === undefined) continue;
-        if (f.type === "bool") el.checked = !!v; else if (f.type === "len" && typeof v === "number") { el.value = show(v); el.dataset.mm = String(v); } else el.value = v;
-      }
-      if (doc.part.params.mode) { partform.elements.pmode.value = doc.part.params.mode; partKind = doc.part.kind; partFields(); }
-      partPreview(); } }, "Open"),
+      openPart(doc.part); } }, "Open"),
     h("button", { class: "plain", type: "button", "aria-label": `Remove ${it.name}`, onclick: async () => {
       await fetch(`api/library/${it.id}`, { method: "DELETE" }); loadLibrary(); } }, "Remove"))));
 }
+// Put a saved part's kind and sizes into the Parts form and show it.
+function openPart(part) {
+  if (!PARTS?.kinds[part.kind]) return;
+  const params = part.params || {};
+  partform.elements.kind.value = part.kind; partKind = null;
+  if (params.mode && PARTS.kinds[part.kind].modes) partform.elements.pmode.value = params.mode;
+  partFields();
+  for (const f of PARTS.kinds[part.kind].fields) {
+    const el = partform.elements["p_" + f.name], v = params[f.name]; if (!el || v === undefined || v === null) continue;
+    if (f.type === "bool") el.checked = !!v; else if (f.type === "len" && typeof v === "number") { el.value = show(v); el.dataset.mm = String(v); } else el.value = v;
+  }
+  partPreview();
+}
+// ---------- My presets (this browser) ----------
+const MY_PRESETS = "enclosure.presets";
+function presets() { try { return JSON.parse(localStorage.getItem(MY_PRESETS) || "[]"); } catch { return []; } }
+function keepPresets(list) { try { localStorage.setItem(MY_PRESETS, JSON.stringify(list.slice(0, 60))); } catch {} showPresets(); }
+function savePreset(p) { keepPresets([p, ...presets().filter(q => q.name !== p.name)]); }
+function openPreset(p) {
+  if (p.type === "case") { applyCase(p.case); selectTab("shapes"); $("#csshow").click(); }
+  else { selectTab("parts"); openPart(p.part); }
+}
+function presetChips() {
+  return presets().map((p, i) => h("span", { class: "chip" },
+    h("button", { type: "button", title: p.type === "case" ? "Hinged case" : (PARTS?.kinds[p.part.kind]?.label || p.part.kind), onclick: () => openPreset(p) }, p.name),
+    h("button", { type: "button", class: "x", "aria-label": `Remove ${p.name}`, onclick: () => keepPresets(presets().filter((_, j) => j !== i)) }, "×")));
+}
+function showPresets() {
+  const list = presets();
+  $("#presetlist").replaceChildren(...presetChips());
+  $("#makepresets").replaceChildren(...(list.length ? [h("h3", {}, "Your presets"), h("div", { class: "chips" }, presetChips())] : []));
+}
+$("#presetsave").onclick = () => {
+  const name = $("#preset_name").value.trim();
+  if (!name) { $("#pstate").textContent = "Give the preset a name first."; return; }
+  savePreset({ name, type: "part", part: partBody() }); $("#preset_name").value = ""; $("#pstate").textContent = `Saved "${name}".`;
+};
+$("#cspreset").onclick = () => {
+  const b = caseBody(), name = `Case ${+(b.size[0] / U).toFixed(2)} × ${+(b.size[1] / U).toFixed(2)} × ${+(b.size[2] / U).toFixed(2)} ${UNIT()}` + (b.insert_cols ? `, ${b.insert_cols}×${b.insert_rows} bins` : "");
+  savePreset({ name, type: "case", case: b }); report.replaceChildren(msg("ok", `Saved as "${name}". It's on the Make page and under My presets on the Parts tab.`));
+};
+// The bed and the plastic are remembered too.
+function rememberPrinter() {
+  for (const n of ["plate_bed", "plate_mat"]) {
+    const el = partform.elements[n];
+    try { const v = localStorage.getItem("enclosure." + n); if (v && [...el.options].some(o => o.value === v)) el.value = v; } catch {}
+    el.addEventListener("change", () => { try { localStorage.setItem("enclosure." + n, el.value); } catch {} });
+  }
+}
+// ---------- The Make page: everything there is to make, searchable ----------
+const BOXES = [
+  ["Box to a size", "An enclosure from inside sizes: lid, holes, vents, text, handles, magnets, mounting, Gridfinity feet.", "enclosure case project box lid", () => selectTab("box")],
+  ["Box round a circuit board", "Fit an enclosure to a KiCad board or a board's size, with standoffs and connector openings.", "pcb kicad enclosure fit", () => selectTab("fit")],
+  ["Hinged case with snap latches", "A parts-organiser case: tray, hinged lid, latch tabs, with dividers or lift-out bins.", "organiser organizer storage case inserts bins latch", () => { selectTab("shapes"); $("[name=cs_l]").closest("fieldset").scrollIntoView({ block: "start" }); }],
+  ["Round box with a screw-on cap", "A threaded jar: a round body and a cap that screws on.", "jar container thread tube", () => { selectTab("shapes"); $("[name=rb_d]")?.closest("fieldset").scrollIntoView({ block: "start" }); }],
+  ["Box to an outline", "A box whose shape follows an outline you draw or import.", "custom shape dxf svg", () => { selectTab("shapes"); $("#olshow").closest("fieldset").scrollIntoView({ block: "start" }); }],
+  ["Fit a bought box", "Check a board against an off-the-shelf enclosure and get drilling templates.", "hammond stock enclosure template", () => selectTab("stock")],
+];
+let makeBest = null;
+function showMake() {
+  const q = $("#makeq").value.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const hit = (...texts) => { const t = texts.join(" ").toLowerCase(); return q.every(w => t.includes(w)); };
+  // Enter opens the best match: one whose name has the words, before one that only mentions them.
+  makeBest = null;
+  const card = (title, text, go) => {
+    const c = h("button", { type: "button", class: "card", onclick: go }, h("b", {}, title), h("span", {}, text));
+    if (q.length && !makeBest && q.every(w => title.toLowerCase().includes(w))) makeBest = c;
+    return c;
+  };
+  const out = [];
+  const boxes = BOXES.filter(([t, d, w]) => hit(t, d, w, "boxes cases"));
+  if (boxes.length) out.push(h("h3", {}, "Boxes and cases"), h("div", { class: "cards" }, boxes.map(([t, d, , go]) => card(t, d, go))));
+  if (PARTS) for (const g of [...PARTS.groups, "Other"]) {
+    const kinds = Object.entries(PARTS.kinds).filter(([k, v]) => v.group === g && hit(v.label, v.doc, v.words, g, k));
+    if (kinds.length) out.push(h("h3", {}, g), h("div", { class: "cards" }, kinds.map(([k, v]) => card(v.label, v.doc, () => { selectTab("parts"); openPart({ kind: k, params: {} }); }))));
+  }
+  if (!out.length) out.push(h("p", { class: "lead", style: "margin-top:16px" }, "Nothing by that name. Try another word, or clear the search."));
+  $("#makelist").replaceChildren(...out);
+}
+$("#makeq").addEventListener("input", showMake);
+$("#makeq").addEventListener("keydown", ev => { if (ev.key === "Enter") { ev.preventDefault(); (makeBest || $("#makelist .card"))?.click(); } });
 $("#plibsave").onclick = async () => {
   const name = $("#plib_name").value.trim();
   if (!name) { $("#pstate").textContent = "Give the part a name first."; return; }
@@ -2045,7 +2162,16 @@ function caseBody() {
   const e = shapeform.elements, n = k => Math.round(num(e[k].value) || 0);
   return { size: [len(e.cs_l), len(e.cs_w), len(e.cs_h)], lid_depth: len(e.cs_lid), wall: len(e.cs_wall), floor: len(e.cs_floor),
     corner_radius: len(e.cs_r), hinges: n("cs_hinges"), latches: n("cs_latches"), dividers_x: n("cs_dx"), dividers_y: n("cs_dy"),
-    lid_ribs: e.cs_ribs.checked };
+    lid_ribs: e.cs_ribs.checked, insert_cols: n("cs_ic"), insert_rows: n("cs_ir"), insert_layers: +e.cs_il.value, insert_wall: len(e.cs_iw),
+    insert_bins: e.cs_ibins.value.trim(), insert_fill: e.cs_ifill.checked, insert_scoop: e.cs_iscoop.checked, insert_label: e.cs_ilabel.checked };
+}
+function applyCase(b) {
+  const e = shapeform.elements, L = (k, v) => { if (v != null) { e[k].value = show(v); e[k].dataset.mm = String(v); } };
+  L("cs_l", b.size?.[0]); L("cs_w", b.size?.[1]); L("cs_h", b.size?.[2]); L("cs_lid", b.lid_depth); L("cs_wall", b.wall); L("cs_floor", b.floor);
+  L("cs_r", b.corner_radius); L("cs_iw", b.insert_wall);
+  for (const [k, f] of [["cs_hinges", "hinges"], ["cs_latches", "latches"], ["cs_dx", "dividers_x"], ["cs_dy", "dividers_y"], ["cs_ic", "insert_cols"],
+                        ["cs_ir", "insert_rows"], ["cs_il", "insert_layers"], ["cs_ibins", "insert_bins"]]) if (b[f] != null) e[k].value = b[f];
+  for (const [k, f] of [["cs_ribs", "lid_ribs"], ["cs_ifill", "insert_fill"], ["cs_iscoop", "insert_scoop"], ["cs_ilabel", "insert_label"]]) if (b[f] != null) e[k].checked = !!b[f];
 }
 $("#csshow").onclick = () => busy($("#csshow"), "Making...", async () => {
   const res = await fetch("api/case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ case: caseBody(), preview: true }) });
@@ -2425,7 +2551,10 @@ $("#platedl").onclick = async () => {
 showPlate();
 fetch("api/parts").then(r => r.json()).then(c => {
   PARTS = c;
-  partform.elements.kind.replaceChildren(...Object.entries(c.kinds).map(([k, v]) => h("option", { value: k }, v.label)));
+  partform.elements.kind.replaceChildren(...[...c.groups, "Other"].map(g => [g, Object.entries(c.kinds).filter(([, v]) => v.group === g)])
+    .filter(([, ks]) => ks.length).map(([g, ks]) => h("optgroup", { label: g }, ks.map(([k, v]) => h("option", { value: k }, v.label)))));
+  partform.elements.kind.value = "screw";
+  showPresets(); showMake();
   partform.elements.pmaterial.replaceChildren(...c.materials.map(m => h("option", { value: m, selected: m === "PETG" }, m)));
   partFields(); partPreview();
 }).catch(() => {});
@@ -2435,7 +2564,9 @@ function selectTab(name) {
   tab = name;
   for (const b of $$("[data-tab]")) b.setAttribute("aria-selected", b.dataset.tab === name);
   boxform.hidden = name !== "box"; fitform.hidden = name !== "fit"; stockform.hidden = name !== "stock"; partform.hidden = name !== "parts";
-  $("#shapeform").hidden = name !== "shapes"; $("#guide").hidden = name !== "guide"; $(".view").hidden = name === "guide";
+  $("#shapeform").hidden = name !== "shapes"; $("#guide").hidden = name !== "guide"; $("#make").hidden = name !== "make";
+  $(".view").hidden = name === "guide" || name === "make";
+  if (name === "make") { showMake(); if (matchMedia("(min-width: 761px)").matches) $("#makeq").focus(); }
   $("#status").textContent = "";
   if (name !== "fit") showFitView(false);
   if (name === "box") { empty(""); showView(views.box); boxData?.error ? boxReport(null, boxData.error) : boxData && boxReport(boxData); }
@@ -2444,7 +2575,7 @@ function selectTab(name) {
     else showFitView(true);
     if (!views.fit && !$("#fitview").srcdoc) report.replaceChildren(h("div", { class: "hint" }, "Step 1: pick the enclosure and read it."));
   } else if (name === "shapes") { empty(views.shapes ? "" : "Show a hinged case, a round box or an outline box here."); showView(views.shapes); report.replaceChildren(); }
-  else if (name === "guide") { report.replaceChildren(); }
+  else if (name === "guide" || name === "make") { report.replaceChildren(); }
   else if (name === "parts") { empty(views.parts ? "" : "Pick a part."); showView(views.parts); partReport(); }
   else { showView(null); empty("Your bought box's holes come back as STEP and a drilling template PDF."); report.replaceChildren(); }
 }
@@ -2462,12 +2593,14 @@ fetch("api/presets").then(r => r.json()).then(p => {
   }
 });
 sync();
+rememberPrinter(); showPresets();
+if (!/#d=/.test(location.hash)) selectTab("make");   // start on the list of things to make, unless a shared design was opened
 </script>
 <script>
 // On a phone: buttons to jump between the 3D view (at the top) and the settings under it.
 document.getElementById("jumpview").onclick = () => window.scrollTo({ top: 0, behavior: "smooth" });
 document.getElementById("jumpform").onclick = () => {
-  const f = [...document.querySelectorAll("main > form, #guide")].find(el => !el.hidden);
+  const f = [...document.querySelectorAll("main > form, #guide, #make")].find(el => !el.hidden);
   if (f) window.scrollTo({ top: f.getBoundingClientRect().top + window.scrollY - 100, behavior: "smooth" });
 };
 // Show just the button that goes somewhere else: "3D view" down in the settings, "Settings" up at the view.

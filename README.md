@@ -360,6 +360,19 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   "Place on the model" then a tap on the 3D view sets the face and position.
 - **Handles** on the lid or any wall: a bar handle or pull knob (their own parts, screwed on), a
   finger grip pocket in a wall, or strap loops for a webbing strap.
+- **Make page**: the front page lists everything there is to make, in groups, with a search box
+  (it knows other names: "zip tie", "phone holder", "circlip"). Pick one and you're at its sizes.
+- **My presets**: save a part's or a hinged case's settings under a name in the browser; they show
+  on the Make page. The printer bed and plastic are remembered too. Asking the server for the same
+  thing twice is answered from memory.
+- **Useful printed things** (Parts tab): shelf bracket, corner brace, pipe clamp, pegboard hook,
+  wall holder with a pocket to size, cable comb, raceway with a snap-on lid, desk grommet, bit
+  holder, tool rack, sanding block, drill guide, foot, tube end cap, shim or wedge, hole plug,
+  drawer organiser, battery storage block, fan guard and fan size adapter. Each is built the way
+  it prints, without supports.
+- **Lift-out bins for the hinged case**: a grid of cells inside the tray, bigger bins by cells
+  ("2x1:2, 2x2:1"), the rest filled with one-cell bins, one to three layers, with a scoop front and
+  a label tab if wanted. They show in the tray and come out in the downloads and the print folder.
 - **Print folder**: one zip per design with the plate as 3MF (every part turned to print), each part
   as STL and STEP, an assembly STEP, pictures of the 3D view, and a README with sizes, settings,
   time and filament. For a Bambu bed it also carries `slice_with_bambu_studio.py`, which slices the

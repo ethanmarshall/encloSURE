@@ -141,6 +141,49 @@ def _stl(shape) -> bytes:
         return p.read_bytes()
 
 
+# ---------- Repeats: the last answers, kept so asking for the same thing again is instant ----------
+_KEPT: dict = {}                     # key -> (kind, payload); newest last
+_KEPT_MAX, _KEPT_BYTES = 60, 90_000_000
+
+
+def _key(what: str, body: dict) -> str:
+    """One request's identity: what was asked, without the bits that don't change the answer."""
+    clean = {k: v for k, v in body.items() if k not in ("page", "seq", "images")}
+    return what + hashlib.sha256(json.dumps(clean, sort_keys=True, default=str).encode()).hexdigest()
+
+
+def _kept(key: str):
+    hit = _KEPT.get(key)
+    if hit is None:
+        return None
+    _KEPT[key] = _KEPT.pop(key)      # used: now the newest
+    kind, payload = hit
+    if kind == "json":
+        return payload
+    data, media, headers = payload
+    return Response(data, media_type=media, headers=dict(headers))
+
+
+def _keep(key: str, answer):
+    """Remember an answer (a dict, or a Response with a body) and hand it back."""
+    if isinstance(answer, Response):
+        entry, size = ("bytes", (answer.body, answer.media_type, {"Content-Disposition": answer.headers.get("content-disposition", "")})), len(answer.body)
+    else:
+        entry, size = ("json", answer), sum(len(v) for v in answer.values() if isinstance(v, str))
+    if size > _KEPT_BYTES // 4:
+        return answer
+    _KEPT[key] = entry
+    _KEPT_SIZE[key] = size
+    while len(_KEPT) > _KEPT_MAX or sum(_KEPT_SIZE.get(k, 0) for k in _KEPT) > _KEPT_BYTES:
+        old = next(iter(_KEPT))
+        _KEPT.pop(old)
+        _KEPT_SIZE.pop(old, None)
+    return answer
+
+
+_KEPT_SIZE: dict = {}
+
+
 def _bad(e: Exception):
     raise HTTPException(status_code=400, detail=str(e)) from None
 
@@ -183,6 +226,7 @@ def _part_params(body: dict) -> tuple[str, dict]:
     return kind, params
 
 
+import hashlib  # noqa: E402
 import threading  # noqa: E402
 import time  # noqa: E402
 
@@ -200,6 +244,10 @@ def part_preview(body: dict):
         _PART_LATEST[page_id] = max(_PART_LATEST.get(page_id, 0), seq)
         while len(_PART_LATEST) > 500:
             _PART_LATEST.pop(next(iter(_PART_LATEST)))
+    key = _key("part", body)
+    hit = _kept(key)
+    if hit is not None:
+        return hit
     with _PART_LOCK:
         if page_id and seq < _PART_LATEST.get(page_id, 0):
             return {"stale": True}
@@ -208,8 +256,8 @@ def part_preview(body: dict):
             r = hardware.make(kind, **params)
         except (ValueError, RuntimeError, TypeError) as e:
             _bad(e)
-    return {"label": r["label"], "notes": r["notes"], "checks": r["checks"], "info": r["info"], "size": r["size"],
-            "buy": r["buy"], "mesh": base64.b64encode(_stl(r["shape"])).decode()}
+    return _keep(key, {"label": r["label"], "notes": r["notes"], "checks": r["checks"], "info": r["info"], "size": r["size"],
+                       "buy": r["buy"], "mesh": base64.b64encode(_stl(r["shape"])).decode()})
 
 
 @app.post("/api/part/onshape")
@@ -231,11 +279,15 @@ def part_to_onshape(body: dict):
 def part_download(body: dict):
     """The part as STEP and STL, with a notes file."""
     from . import hardware
+    key = _key("partdl", body)
+    hit = _kept(key)
+    if hit is not None:
+        return hit
     try:
         kind, params = _part_params(body)
         with tempfile.TemporaryDirectory() as d:
             hardware.write(kind, Path(d) / "part", **params)
-            return _zip(Path(d) / "part", kind)
+            return _keep(key, _zip(Path(d) / "part", kind))
     except (ValueError, RuntimeError, TypeError) as e:
         _bad(e)
 
@@ -352,9 +404,9 @@ def print_folder(body: dict):
                 m = case.build(c)
                 title = "Hinged case with snap latches"
                 groups = [("tray", m["base"], 1), ("lid", Pos(0, 0, m["top"]) * (Rot(180, 0, 0) * m["lid"]), 1),
-                          ("latch_tab", m["tab"], m["n_tabs"])]
-                designed = [("tray", m["base"]), ("lid", m["lid"]), ("latch_tab", m["tab"])]
-                assembly = [m["base"], m["lid"], *m["tabs"]]
+                          ("latch_tab", m["tab"], m["n_tabs"])] + [(i["name"], i["shape"], i["count"]) for i in m["inserts"]]
+                designed = [("tray", m["base"]), ("lid", m["lid"]), ("latch_tab", m["tab"])] + [(i["name"], i["shape"]) for i in m["inserts"]]
+                assembly = [m["base"], m["lid"], *m["tabs"], *m["insert_placed"]]
                 notes, checks = m["notes"], m["checks"]
             else:
                 names = []
@@ -536,6 +588,10 @@ def round_box(body: dict):
 def hinged_case(body: dict):
     """A hinged case with snap latch tabs: preview, or STEP and STL."""
     from . import case
+    key = _key("case", body)
+    hit = _kept(key)
+    if hit is not None:
+        return hit
     try:
         fields_ = case.Case.__dataclass_fields__
         c = case.Case(**{k: v for k, v in (body.get("case") or {}).items() if k in fields_})
@@ -543,12 +599,14 @@ def hinged_case(body: dict):
             if body.get("preview"):
                 m = case.build(c)
                 enc = lambda sh: base64.b64encode(_stl(sh)).decode()  # noqa: E731
-                return {"notes": m["notes"], "checks": m["checks"], "base": enc(m["base"]), "lid": enc(m["lid"]),
-                        "mounted": [{"name": f"latch_tab_{i + 1}", "host": "lid", "mesh": enc(t)} for i, t in enumerate(m["tabs"])],
-                        "inner": m["inner"], "outer": m["outer"]}
+                return _keep(key, {"notes": m["notes"], "checks": m["checks"], "base": enc(m["base"]), "lid": enc(m["lid"]),
+                        "mounted": [{"name": f"latch_tab_{i + 1}", "host": "lid", "mesh": enc(t)} for i, t in enumerate(m["tabs"])]
+                        + [{"name": f"bin_{i + 1}", "host": "base", "mesh": enc(t)} for i, t in enumerate(m["insert_placed"])],
+                        "inserts": [{"name": i["name"], "count": i["count"], "size": i["size"]} for i in m["inserts"]],
+                        "inner": m["inner"], "outer": m["outer"]})
             with tempfile.TemporaryDirectory() as d:
                 case.write(c, Path(d) / "case")
-                return _zip(Path(d) / "case", "hinged_case")
+                return _keep(key, _zip(Path(d) / "case", "hinged_case"))
     except (ValueError, RuntimeError, TypeError) as e:
         _bad(e)
 
