@@ -20,6 +20,10 @@ VARIANTS = {
     "extrusion_cable_guide": [{}, {"profile": "3030 (30 mm)", "bundle_d": 40}],
     "extrusion_panel_clip": [{}, {"panel": 6}, {"panel": 1.5, "profile": "2020 (20 mm)"}],
     "extrusion_handle": [{}, {"profile": "4040 (40 mm)", "span": 200}],
+    "extrusion_offset_jig": [{}, {"profile": "1530 (80/20, 1.5 x 3 in)", "face": "wide face", "offsets": "19.05, 57.15", "hole": "hex key access"},
+                             {"profile": "2020 (20 mm)", "offsets": "10,30,50", "bushing_od": 8}],
+    "extrusion_freehand_jig": [{}, {"holes": 3, "profile": "2020 (20 mm)", "drill_d": 5}, {"profile": "1530 (80/20, 1.5 x 3 in)", "face": "wide face", "holes": 2}],
+    "extrusion_alignment_jig": [{}, {"profile": "4040 (40 mm)", "key": 0}],
     "shelf_pin_jig": [{}, {"lip": False, "holes": 3, "pitch": 25.4, "hole_d": 6.35}],
     "clamp_square": [{}, {"leg": 60, "width": 18}],
     "centre_finder": [{}, {"max_d": 40}],
@@ -122,3 +126,21 @@ def test_tray_shaped_to_an_outline(tmp_path):
     with open(tmp_path / "l.dxf", "rb") as f:
         r = c.post("/api/outline", files={"dxf": ("l.dxf", f, "application/dxf")}, data={"make": "tray"})
     assert r.status_code == 200 and "shaped_tray.zip" in r.headers["content-disposition"]
+
+
+def test_extrusion_drilling_jigs():
+    one = hw.make("extrusion_offset_jig")
+    assert one["info"] == {"drill": 8.4, "offsets": [19.05], "inside_width": 38.4}        # half a 1515, on its slot line
+    assert hw.make("extrusion_offset_jig", hole="hex key access")["info"]["drill"] == 7.14  # 80/20's .281 in
+    wide = hw.make("extrusion_offset_jig", profile="1530 (80/20, 1.5 x 3 in)", face="wide face", offsets="19.05, 57.15")
+    assert "4 holes" in wide["notes"][0] and wide["info"]["inside_width"] == pytest.approx(76.5)
+    plain = hw.make("extrusion_offset_jig", profile="2020 (20 mm)")["shape"].volume
+    bushed = hw.make("extrusion_offset_jig", profile="2020 (20 mm)", bushing_od=8)["shape"].volume
+    assert bushed < plain                                                                   # the bore for the bushing is bigger
+    free = hw.make("extrusion_freehand_jig", holes=3, profile="2020 (20 mm)")
+    assert free["info"]["hole_centres"] == [-20.0, 0.0, 20.0]
+    for kind, bad in [("extrusion_offset_jig", {"offsets": "1"}), ("extrusion_offset_jig", {"offsets": "x"}),
+                      ("extrusion_freehand_jig", {"bushing_od": 9}), ("extrusion_freehand_jig", {"hole": "big"}), ("extrusion_offset_jig", {"face": "top"})]:
+        with pytest.raises(ValueError):
+            hw.make(kind, **bad)
+    assert hw.catalog()["kinds"]["extrusion_offset_jig"]["group"] == "T-slot extrusion"

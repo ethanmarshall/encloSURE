@@ -378,6 +378,9 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   Pico), an Arduino (Uno, Mega, Nano), an ESP32 DevKit, or your own board's size and holes.
 - **T-slot extrusion kit**: end cap, corner bracket, cable guide, panel clip and handle for 80/20
   1010, 1515 and 1530 and metric 2020, 3030 and 4040.
+- **T-slot drilling and alignment jigs**: a jig that caps an extrusion's end and guides the drill at
+  set distances from it, one that sits anywhere along it with a sight gap for your mark, and a flat
+  L that holds a joint square; plain printed guide holes, or bored for steel drill bushings.
 - **Jigs**: shelf-pin drilling jig, clamping square, centre finder, setup blocks.
 - **Funnels and hose adapters**: a funnel to a neck size; an adapter between two hose or port sizes.
 - **Panels for trainers**: a labelled test-point or jack plate, a panel bezel, a terminal cover.

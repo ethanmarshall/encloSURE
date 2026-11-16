@@ -372,6 +372,167 @@ def extrusion_handle(profile="1515 (80/20, 1.5 in)", span=120.0, clearance=35.0,
                 {"bolt": bolt, "bolt_length_under_head": seat})
 
 
+# ---------- Drilling and alignment jigs for T-slot extrusion ----------
+
+# The hole a hex key reaches a hidden bolt through: 80/20's own jigs use .281 in on 15 series and .201 in on 10
+# series; the metric ones here are a size that clears the key for that bolt (4, 5 and 6 mm keys).
+ACCESS_HOLE = {"1515 (80/20, 1.5 in)": 7.14, "1530 (80/20, 1.5 x 3 in)": 7.14, "1010 (80/20, 1 in)": 5.1,
+               "2020 (20 mm)": 5.0, "3030 (30 mm)": 6.0, "4040 (40 mm)": 7.0}
+JIG_HOLES = ("bolt clearance", "hex key access")
+
+
+def _jig_drill(profile: str, hole: str, drill_d: float) -> tuple[float, str]:
+    side, slot, bolt, clear, nwide, wide = _profile(profile)
+    if hole not in JIG_HOLES:
+        raise ValueError(f"hole: one of {', '.join(JIG_HOLES)}")
+    if float(drill_d) > 0:
+        _rng("drill", float(drill_d), 2, 14)
+        return float(drill_d), f"a {float(drill_d):g} mm drill"
+    if hole == "bolt clearance":
+        return clear, f"a {clear:g} mm drill (clearance for a {bolt} bolt)"
+    return ACCESS_HOLE[profile], f"a {ACCESS_HOLE[profile]:g} mm drill (a hex key reaches a {bolt} bolt through it)"
+
+
+def _saddle(face_w: float, grip: float, length: float, top: float, wall: float, fit: float):
+    """A channel that sits over an extrusion, printed upside down: its top plate on z = 0 .. top, its two
+    side walls standing up from it, the extrusion's face on z = top, its length along X."""
+    iw = face_w + 2 * fit
+    body = Box(length, iw + 2 * wall, top + grip, align=MIN_)
+    body -= Pos(0, 0, top) * Box(length + 2, iw, grip + 1, align=MIN_)
+    return body, iw
+
+
+def _guide(body, x: float, y: float, d: float, top: float, bushing: float):
+    """A guide hole down through the top plate, for the drill or for a pressed-in steel bushing."""
+    hole = bushing if bushing > 0 else d + 0.25
+    return body - Pos(x, y, -1) * Cylinder(hole / 2, top + 2, align=MIN_)
+
+
+def _slot_lines(profile: str, face: str) -> tuple[float, float, list[float]]:
+    """(the face's width, the other side, where the slots run across that face)."""
+    side, slot, bolt, clear, nwide, wide = _profile(profile)
+    if face not in ("narrow face", "wide face"):
+        raise ValueError("face: narrow face or wide face")
+    if wide > side and face == "wide face":
+        return wide, side, ([-wide / 4, wide / 4] if nwide == 2 else [0.0])
+    return side, wide, [0.0]
+
+
+def extrusion_offset_jig(profile="1515 (80/20, 1.5 in)", offsets="", hole="bolt clearance", drill_d=0.0, bushing_od=0.0,
+                         face="narrow face", top=12.0, wall=4.0, fit=0.15):
+    """A drilling jig that caps the end of a T-slot extrusion and guides the drill at set distances
+    from the end, on the slot's centre line: the holes for a blind joint, where a bolt goes through
+    this extrusion into the tapped end of the one that butts against it."""
+    side, slot, bolt, clear, nwide, wide = _profile(profile)
+    fw, other, lines = _slot_lines(profile, face)
+    d, what = _jig_drill(profile, hole, drill_d)
+    tp, w, f, bo = float(top), float(wall), float(fit), float(bushing_od)
+    _rng("top thickness", tp, 6, 30); _rng("wall", w, 3, 10); _rng("fit", f, 0, 0.6)
+    if bo and bo < d + 2:
+        raise ValueError(f"a bushing for a {d:g} mm drill is at least {d + 2:g} mm outside")
+    if str(offsets).strip():
+        try:
+            offs = sorted(float(v) for v in str(offsets).replace(";", ",").split(",") if v.strip())
+        except ValueError:
+            raise ValueError("offsets: distances from the end in mm, with commas between (19.05, 57.15)") from None
+    else:
+        offs = [side / 2]                         # the centre of a same-size extrusion butted flush with the end
+    if not 1 <= len(offs) <= 6 or offs[0] < d / 2 + 1.5 or offs[-1] > 300:
+        raise ValueError(f"offsets: 1 to 6 of them, from {d / 2 + 1.5:g} to 300 mm from the end")
+    grip = min(other, max(18.0, side * 0.6))
+    ln = offs[-1] + max(d, bo) / 2 + 12.0
+    stop = 5.0
+    body, iw = _saddle(fw, grip, ln + stop, tp, w, f)
+    body = Pos((ln + stop) / 2 - stop, 0, 0) * body                   # x = 0 is the extrusion's end; the jig runs along +x
+    body += Pos(-stop / 2, 0, 0) * Box(stop, iw + 2 * w, tp + grip, align=MIN_)   # the end stop
+    for x in offs:
+        for y in lines:
+            body = _guide(body, x, y, d, tp, bo)
+        for sy in (-1, 1):                                             # a mark on each side at every hole
+            body -= Pos(x, sy * (iw / 2 + w), tp + grip) * Box(0.8, 1.6, 6, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    # A clamp bolt through one wall on the slot's line, past the last hole.
+    cz = tp + min(grip - clear / 2 - 3, other / 2 if grip >= other / 2 + clear / 2 + 3 else grip / 2)
+    body -= Pos(max(offs[-1] / 2, clear), iw / 2 - 1, cz) * (Rot(-90, 0, 0) * Cylinder(clear / 2, w + 2, align=MIN_))
+    notes = [f"offset drilling jig for {profile}, on its {fw:g} mm face: it caps the end and guides {what} at "
+             f"{', '.join(f'{x:g}' for x in offs)} mm from the end" + (f", on both slot lines ({len(lines) * len(offs)} holes)" if len(lines) > 1 else ", on the slot's centre line"),
+             f"the guide is {tp:g} mm deep" + (f", bored Ø{bo:g} mm for a steel drill bushing (press or glue it in)" if bo else
+                                              f", a plain Ø{d + 0.25:g} mm printed hole")
+             + f"; hold it with a clamp, or with a {bolt} bolt and T-nut through the hole in its side",
+             "print it top down as it lies (the open side up), 5 walls or more and 40% infill"]
+    checks = []
+    if not bo:
+        checks.append("a printed guide hole wears after a dozen or so holes in aluminium: for more, set a bushing diameter and fit a steel drill bushing")
+    if not str(offsets).strip():
+        notes.append(f"{offs[0]:g} mm is half this extrusion: the centre of one the same size butted flush with the end. For another size, or several holes, type the distances")
+    return _out(body, notes, checks, {"drill": d, "offsets": offs, "inside_width": round(iw, 2)})
+
+
+def extrusion_freehand_jig(profile="1515 (80/20, 1.5 in)", holes=1, pitch=0.0, hole="bolt clearance", drill_d=0.0, bushing_od=0.0,
+                           face="narrow face", top=12.0, wall=4.0, fit=0.15):
+    """A drilling jig that sits anywhere along a T-slot extrusion: line the gap in its side up with
+    your mark and it guides the drill on the slot's centre line. One hole, or two or three in a row
+    for joining to a double or triple extrusion."""
+    side, slot, bolt, clear, nwide, wide = _profile(profile)
+    fw, other, lines = _slot_lines(profile, face)
+    d, what = _jig_drill(profile, hole, drill_d)
+    n, tp, w, f, bo = int(holes), float(top), float(wall), float(fit), float(bushing_od)
+    _rng("holes", n, 1, 4, ""); _rng("top thickness", tp, 6, 30); _rng("wall", w, 3, 10); _rng("fit", f, 0, 0.6)
+    if bo and bo < d + 2:
+        raise ValueError(f"a bushing for a {d:g} mm drill is at least {d + 2:g} mm outside")
+    p = float(pitch) or side
+    _rng("spacing", p, max(d, bo) + 3, 150)
+    grip = min(other, max(18.0, side * 0.6))
+    ln = (n - 1) * p + max(d, bo) + 2 * (clear + 10)
+    body, iw = _saddle(fw, grip, ln, tp, w, f)
+    xs = [(i - (n - 1) / 2) * p for i in range(n)]
+    for x in xs:
+        for y in lines:
+            body = _guide(body, x, y, d, tp, bo)
+        for sy in (-1, 1):       # the gap: a slot down each wall at the hole's centre, to see your mark on the extrusion through
+            body -= Pos(x, sy * (iw / 2 + w / 2), tp + 3) * Box(2.0, w + 2, grip, align=MIN_)
+            body -= Pos(x, sy * (iw / 2 + w), tp / 2) * Box(0.8, 1.6, tp + 2, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+    cz = tp + min(grip - clear / 2 - 3, other / 2 if grip >= other / 2 + clear / 2 + 3 else grip / 2)
+    for sx in (-1, 1):           # a clamp bolt at each end, on the slot's line
+        body -= Pos(sx * (ln / 2 - clear / 2 - 4), iw / 2 - 1, cz) * (Rot(-90, 0, 0) * Cylinder(clear / 2, w + 2, align=MIN_))
+    notes = [f"freehand drilling jig for {profile}, on its {fw:g} mm face: {n} guide hole{'s' if n > 1 else ''} for {what}"
+             + (f", {p:g} mm apart" if n > 1 else "") + (" on both slot lines" if len(lines) > 1 else " on the slot's centre line"),
+             "mark where the hole goes on the extrusion's side, slide the jig along until the mark shows in the middle of the 2 mm gap in its wall, and clamp it; "
+             f"or fix it with {bolt} bolts and T-nuts through the holes in its side",
+             f"the guide is {tp:g} mm deep" + (f", bored Ø{bo:g} mm for a steel drill bushing" if bo else f", a plain Ø{d + 0.25:g} mm printed hole"),
+             "print it top down as it lies (the open side up), 5 walls or more and 40% infill"]
+    checks = ["a printed guide hole wears after a dozen or so holes in aluminium: for more, set a bushing diameter and fit a steel drill bushing"] if not bo else []
+    return _out(body, notes, checks, {"drill": d, "hole_centres": [round(x, 2) for x in xs], "length": round(ln, 1)})
+
+
+def extrusion_alignment_jig(profile="1515 (80/20, 1.5 in)", leg=0.0, thickness=8.0, key=1.6):
+    """A perpendicular alignment jig for T-slot extrusion: a flat L that bolts across a joint with a
+    key in each extrusion's slot, to hold the two flush and square while you tighten the joint. Print
+    a pair, one for each side."""
+    side, slot, bolt, clear, nwide, wide = _profile(profile)
+    t, k = float(thickness), float(key)
+    _rng("thickness", t, 5, 15); _rng("key depth", k, 0, 3)
+    Lg = float(leg) or round(side * 2.6)
+    _rng("leg", Lg, side * 1.8, 300)
+    body = _prism([(0, 0), (Lg, 0), (Lg, side), (side, side), (side, Lg), (0, Lg)], t)
+    kw = slot - 0.3
+    if k > 0:
+        # The keys stand up from the plate as it prints (they go down into the slots in use), clear of the corner.
+        body += Pos((side + Lg) / 2 + 2, side / 2, t - 0.01) * Box(Lg - side - 4, kw, k, align=MIN_)
+        body += Pos(side / 2, (side + Lg) / 2 + 2, t - 0.01) * Box(kw, Lg - side - 4, k, align=MIN_)
+    hp = [side + (Lg - side) * 0.3, side + (Lg - side) * 0.8]
+    for p_ in hp:
+        body -= Pos(p_, side / 2, -1) * Cylinder(clear / 2, t + k + 2, align=MIN_)
+        body -= Pos(side / 2, p_, -1) * Cylinder(clear / 2, t + k + 2, align=MIN_)
+    body -= Pos(side, side, -1) * Cylinder(3.0, t + 2, align=MIN_)        # relief at the inside corner
+    notes = [f"alignment jig for {profile}: a flat L with {Lg:g} mm legs {side:g} mm wide and {t:g} mm thick"
+             + (f", a {kw:g} x {k:g} mm key along each leg that sits in the slot" if k > 0 else "")
+             + f", two Ø{clear:g} mm holes on each leg for {bolt} bolts and T-nuts",
+             "bolt it across the joint with the keys in the slots, tighten the joint, then take it off; a pair, one each side, holds the faces flush too",
+             "print it flat as it lies, keys up"]
+    return _out(body, notes, ["it is as square as your printer: check a printed one against a square before trusting a frame to it"],
+                {"holes_from_corner": [round(v, 1) for v in hp]})
+
+
 # ---------- Shop jigs ----------
 
 def shelf_pin_jig(holes=6, pitch=32.0, setback=37.0, hole_d=5.0, thickness=8.0, lip=True):
@@ -633,6 +794,13 @@ KINDS = {
     "extrusion_cable_guide": (extrusion_cable_guide, "T-slot cable guide", {"profile": "1515 (80/20, 1.5 in)", "bundle_d": 15.0, "width": 12.0, "wall": 2.4}),
     "extrusion_panel_clip": (extrusion_panel_clip, "T-slot panel clip", {"profile": "1515 (80/20, 1.5 in)", "panel": 3.0, "width": 20.0, "reach": 12.0}),
     "extrusion_handle": (extrusion_handle, "T-slot handle", {"profile": "1515 (80/20, 1.5 in)", "span": 120.0, "clearance": 35.0, "width": 0.0, "grip": 14.0}),
+    "extrusion_offset_jig": (extrusion_offset_jig, "T-slot drilling jig: holes from the end", {
+        "profile": "1515 (80/20, 1.5 in)", "offsets": "", "hole": "bolt clearance", "drill_d": 0.0, "bushing_od": 0.0, "face": "narrow face",
+        "top": 12.0, "wall": 4.0, "fit": 0.15}),
+    "extrusion_freehand_jig": (extrusion_freehand_jig, "T-slot drilling jig: anywhere along", {
+        "profile": "1515 (80/20, 1.5 in)", "holes": 1, "pitch": 0.0, "hole": "bolt clearance", "drill_d": 0.0, "bushing_od": 0.0,
+        "face": "narrow face", "top": 12.0, "wall": 4.0, "fit": 0.15}),
+    "extrusion_alignment_jig": (extrusion_alignment_jig, "T-slot alignment jig", {"profile": "1515 (80/20, 1.5 in)", "leg": 0.0, "thickness": 8.0, "key": 1.6}),
     "shelf_pin_jig": (shelf_pin_jig, "Shelf-pin drilling jig", {"holes": 6, "pitch": 32.0, "setback": 37.0, "hole_d": 5.0, "thickness": 8.0, "lip": True}),
     "clamp_square": (clamp_square, "Clamping square", {"leg": 100.0, "width": 25.0, "thickness": 10.0}),
     "centre_finder": (centre_finder, "Centre finder", {"max_d": 100.0, "thickness": 4.0}),
@@ -648,7 +816,15 @@ KINDS = {
 _SCREW = ("Screw hole (4.5 suits a #8 or 4 mm screw)", "len")
 _PROFILE = ("Extrusion", "select")
 KIND_LABELS = {
-    **{(k, "profile"): _PROFILE for k in ("extrusion_end_cap", "extrusion_bracket", "extrusion_cable_guide", "extrusion_panel_clip", "extrusion_handle")},
+    **{(k, "profile"): _PROFILE for k in ("extrusion_end_cap", "extrusion_bracket", "extrusion_cable_guide", "extrusion_panel_clip", "extrusion_handle",
+                                          "extrusion_offset_jig", "extrusion_freehand_jig", "extrusion_alignment_jig")},
+    **{(k, f): lab for k in ("extrusion_offset_jig", "extrusion_freehand_jig") for f, lab in {
+        "hole": ("Hole for", "select"), "drill_d": ("Drill size (0: from the choice above)", "len"),
+        "bushing_od": ("Steel bushing outside diameter (0: plain printed hole)", "len"), "face": ("On the", "select"),
+        "top": ("Guide depth (top thickness)", "len"), "fit": ("Fit (added each side)", "len")}.items()},
+    ("extrusion_offset_jig", "offsets"): ("Distances from the end, mm (blank: half the extrusion)", "text"),
+    ("extrusion_freehand_jig", "holes"): ("Holes in a row", "num"), ("extrusion_freehand_jig", "pitch"): ("Hole spacing (0: the extrusion's size)", "len"),
+    ("extrusion_alignment_jig", "leg"): ("Leg length (0: to suit)", "len"), ("extrusion_alignment_jig", "key"): ("Slot key depth (0: none)", "len"),
     ("bushing", "od"): ("Outside diameter", "len"), ("bushing", "bore"): ("Bore (0: solid)", "len"),
     ("bushing", "flange_d"): ("Flange diameter (0: none)", "len"), ("bushing", "flange_t"): ("Flange thickness", "len"),
     ("flat_plate", "corner"): ("Corner radius", "len"), ("flat_plate", "holes"): ("Holes", "select"), ("flat_plate", "hole_d"): ("Hole diameter", "len"),
@@ -695,7 +871,10 @@ KIND_LABELS = {
 }
 _WAYS = ["inside the hose", "over the port"]
 CHOICES = {
-    **{(k, "profile"): list(PROFILES) for k in ("extrusion_end_cap", "extrusion_bracket", "extrusion_cable_guide", "extrusion_panel_clip", "extrusion_handle")},
+    **{(k, "profile"): list(PROFILES) for k in ("extrusion_end_cap", "extrusion_bracket", "extrusion_cable_guide", "extrusion_panel_clip", "extrusion_handle",
+                                                  "extrusion_offset_jig", "extrusion_freehand_jig", "extrusion_alignment_jig")},
+    **{(k, "hole"): list(JIG_HOLES) for k in ("extrusion_offset_jig", "extrusion_freehand_jig")},
+    **{(k, "face"): ["narrow face", "wide face"] for k in ("extrusion_offset_jig", "extrusion_freehand_jig")},
     ("flat_plate", "holes"): ["corners", "grid", "none"], ("slip_cap", "shape"): ["round", "square", "rectangle"],
     ("board_mount", "board"): list(BOARDS), ("board_mount", "style"): ["standoffs", "corner tray"], ("board_mount", "screw"): list(PILOT),
     ("extrusion_bracket", "holes"): [1, 2], ("hose_adapter", "a_fits"): _WAYS, ("hose_adapter", "b_fits"): _WAYS,
@@ -703,7 +882,8 @@ CHOICES = {
 GROUPS = {
     "Measure and replace": ["bushing", "flat_plate", "slip_cap", "edge_clip", "tool_clip"],
     "Circuit boards": ["board_mount"],
-    "T-slot extrusion": ["extrusion_end_cap", "extrusion_bracket", "extrusion_cable_guide", "extrusion_panel_clip", "extrusion_handle"],
+    "T-slot extrusion": ["extrusion_offset_jig", "extrusion_freehand_jig", "extrusion_alignment_jig", "extrusion_end_cap", "extrusion_bracket",
+                         "extrusion_cable_guide", "extrusion_panel_clip", "extrusion_handle"],
     "Jigs": ["shelf_pin_jig", "clamp_square", "centre_finder", "setup_blocks"],
     "Funnels and hoses": ["funnel", "hose_adapter"],
     "Panels and trainers": ["test_point_plate", "panel_bezel", "terminal_cover"],
@@ -711,6 +891,8 @@ GROUPS = {
 WORDS = {
     "bushing": "spacer sleeve collar washer round replace broken", "flat_plate": "cover patch adapter mounting plate blank", "tool_clip": "broom clip terry clip holder torch",
     "slip_cap": "chair leg cap ferrule post cap pipe cap cover", "edge_clip": "u clip shelf clip trim channel", "board_mount": "raspberry pi arduino esp32 pico pcb standoff tray",
+    "extrusion_offset_jig": "8020 80/20 1515 2020 aluminium aluminum drill jig blind joint access hole end", "extrusion_freehand_jig": "8020 80/20 1515 2020 aluminium aluminum drill jig blind joint access hole",
+    "extrusion_alignment_jig": "8020 80/20 1515 2020 aluminium aluminum square perpendicular jig",
     "extrusion_end_cap": "8020 80/20 1515 2020 aluminium aluminum profile cap", "extrusion_bracket": "8020 80/20 1515 2020 gusset angle corner",
     "extrusion_cable_guide": "8020 80/20 cable clip wire hook", "extrusion_panel_clip": "8020 80/20 acrylic panel holder", "extrusion_handle": "8020 80/20 cart pull grab",
     "shelf_pin_jig": "cabinet drilling 32 mm system", "clamp_square": "corner clamp square assembly woodworking", "centre_finder": "center finder round stock",
