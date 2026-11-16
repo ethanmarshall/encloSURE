@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import math
 
-from build123d import (Align, Axis, Box, Circle, Cone, Cylinder, Plane, Polygon, Pos, Rectangle, RectangleRounded, Rot,
+from build123d import (Align, Axis, Box, Circle, Compound, Cone, Cylinder, Plane, Polygon, Pos, Rectangle, RectangleRounded, Rot,
                        chamfer, extrude, fillet, loft, revolve)
 
 from . import sizes
@@ -861,6 +861,286 @@ def terminal_cover(length=80.0, width=25.0, height=18.0, wall=2.0, wire_slot=8.0
 
 # ---------- What the page needs to know ----------
 
+# ---------- Shafts and bearings ----------
+
+PINCH = {"M3": (3.4, 2.7, 5.8), "M4": (4.5, 3.6, 7.4), "M5": (5.5, 4.5, 8.9)}      # clearance, self-tapping hole, head
+COLLAR_STYLES = ("clamp (split, with a pinch screw)", "set screw")
+
+
+def _pinch(body, od: float, width: float, screw: str, z: float, x0: float):
+    """A slit along +X from the bore out, and a screw across it: clearance and a head pocket on one
+    side of the slit, a hole the screw threads into on the other."""
+    clear, tap, head = PINCH[screw]
+    body -= Pos(od / 2, 0, -1) * Box(od, 1.2, width + 2, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    body -= Pos(x0, 0, z) * (Rot(90, 0, 0) * Cylinder(tap / 2, od, align=(Align.CENTER, Align.CENTER, Align.CENTER)))
+    body -= Pos(x0, -0.6, z) * (Rot(90, 0, 0) * Cylinder(clear / 2, od, align=MIN_))
+    return body - Pos(x0, -(od / 2 * 0.52), z) * (Rot(90, 0, 0) * Cylinder(head / 2, od, align=MIN_))
+
+
+def shaft_collar(shaft_d=8.0, od=0.0, width=10.0, style=COLLAR_STYLES[0], screw="M3", fit=0.1):
+    """A shaft collar: a ring that locks onto a shaft to stop something sliding along it. Split with
+    a pinch screw (it grips all round and doesn't mark the shaft), or solid with a set screw."""
+    d, d_say = sizes.parse(shaft_d, "shaft")
+    w, f = float(width), float(fit)
+    if style not in COLLAR_STYLES or screw not in PINCH:
+        raise ValueError(f"style: one of {', '.join(COLLAR_STYLES)}; screw: one of {', '.join(PINCH)}")
+    clear, tap, head = PINCH[screw]
+    _rng("shaft", d, 3, 50); _rng("width", w, max(5.0, head + 2), 40); _rng("fit", f, 0, 0.4)
+    clamp = style == COLLAR_STYLES[0]
+    need = d + 2 * (head + 3.0 if clamp else 5.0)
+    OD = float(od) or math.ceil(need)
+    _rng("outside diameter", OD, need, 120)
+    body = _tube(OD / 2, d / 2 + f, w)
+    try:
+        body = chamfer(body.edges().filter_by(lambda e: abs(e.length - math.pi * OD) < 1e-3), 0.6)
+    except Exception:
+        pass
+    if clamp:
+        body = _pinch(body, OD, w, screw, w / 2, (d / 2 + f + OD / 2) / 2)
+        how = f"split, with an {screw} screw across the slit: its head sinks into one side and it cuts its thread in the other (or use a nut in a longer slot)"
+    else:
+        body -= Pos(0, 0, w / 2) * (Rot(0, 90, 0) * Cylinder(tap / 2, OD, align=MIN_))
+        how = f"with a Ø{tap:g} mm hole for an {screw} set screw to cut its thread in"
+    notes = [f"shaft collar for a {d_say} shaft: Ø{OD:g} x {w:g} mm, bore Ø{d + 2 * f:g} mm, {how}",
+             "print it flat as it lies, 4 walls or more so the screw has solid plastic to bite; PETG grips better than PLA"]
+    return _out(body, notes, [], {"od": OD, "bore": round(d + 2 * f, 3)})
+
+
+def shaft_coupler(shaft_a=5.0, shaft_b=8.0, od=0.0, length=25.0, screw="M3", fit=0.1):
+    """A rigid coupler to join two shafts end to end, the same size or different (a 5 mm motor shaft
+    to an 8 mm lead screw): split along one side, with a pinch screw over each shaft."""
+    a, a_say = sizes.parse(shaft_a, "first shaft")
+    b, b_say = sizes.parse(shaft_b, "second shaft")
+    ln, f = float(length), float(fit)
+    if screw not in PINCH:
+        raise ValueError(f"screw: one of {', '.join(PINCH)}")
+    clear, tap, head = PINCH[screw]
+    _rng("first shaft", a, 2, 30); _rng("second shaft", b, 2, 30); _rng("fit", f, 0, 0.4)
+    _rng("length", ln, max(14.0, 2 * head + 6), 80)
+    big = max(a, b)
+    need = big + 2 * (head + 3.0)
+    OD = float(od) or math.ceil(need)
+    _rng("outside diameter", OD, need, 80)
+    body = Cylinder(OD / 2, ln, align=MIN_)
+    try:
+        body = chamfer(body.edges().filter_by(lambda e: abs(e.length - math.pi * OD) < 1e-3), 0.6)
+    except Exception:
+        pass
+    body -= Pos(0, 0, -1) * Cylinder(a / 2 + f, ln / 2 + 1, align=MIN_)
+    body -= Pos(0, 0, ln / 2 - 0.01) * Cylinder(b / 2 + f, ln / 2 + 1, align=MIN_)
+    x0 = (big / 2 + f + OD / 2) / 2
+    body = _pinch(body, OD, ln, screw, ln / 4, x0)
+    body = _pinch(body, OD, ln, screw, ln * 3 / 4, x0)
+    notes = [f"rigid coupler joining a {a_say} shaft to a {b_say} shaft: Ø{OD:g} x {ln:g} mm, each bore {ln / 2:g} mm deep, split along one side with an {screw} pinch screw over each shaft",
+             "print it standing on end, the smaller bore down if they differ, 4 walls or more; no supports",
+             "it is rigid: the two shafts must line up. For shafts that are a little out of line, buy a flexible coupler"]
+    checks = [] if a <= b else ["the bigger bore is underneath, so the step between the bores bridges in mid-air: swap the two shaft sizes to print the smaller one down"]
+    return _out(body, notes, checks, {"od": OD})
+
+
+def bearing_block(bearing="608", centre_height=0.0, base_length=0.0, screw_d=4.5, fit=0.05):
+    """A pillow block: a foot that screws down and holds a ball bearing with its shaft level, a set
+    height above the surface. Printed lying on its face, so the bearing's seat is round and true."""
+    from .hardware import BEARINGS
+    if bearing not in BEARINGS:
+        raise ValueError(f"bearing: one of {', '.join(BEARINGS)}")
+    bi, bo, bw = BEARINGS[bearing]
+    sd, f = float(screw_d), float(fit)
+    _rng("screw hole", sd, 3, 8); _rng("fit", f, 0, 0.3)
+    wall = max(4.0, bo * 0.2)
+    ch = float(centre_height) or math.ceil(bo / 2 + wall + 2)
+    _rng("centre height", ch, bo / 2 + 3, 120)
+    base_t = max(6.0, sd + 3.0)
+    L = float(base_length) or math.ceil(bo + 2 * wall + 2 * (sd * 2.5 + 4))
+    _rng("base length", L, bo + 2 * wall + 2 * (sd + 6), 250)
+    T = bw + 2.0                                     # as deep as the bearing, with a 2 mm shoulder behind it
+    # Drawn as you look along the shaft, then pulled out to the block's depth; it prints lying like that.
+    prof = Pos(0, base_t / 2) * RectangleRounded(L, base_t, 1.5) + Pos(0, ch) * Circle(bo / 2 + wall) + Pos(0, ch / 2) * Rectangle(bo + 2 * wall, ch)
+    body = extrude(prof, amount=T, dir=(0, 0, 1))
+    body -= Pos(0, ch, 2.0) * Cylinder(bo / 2 + f, T, align=MIN_)
+    body -= Pos(0, ch, -1) * Cylinder(bo / 2 - max(1.5, (bo - bi) * 0.18), T + 2, align=MIN_)
+    xs = L / 2 - sd * 1.25 - 3
+    for sx in (-1, 1):
+        body -= Pos(sx * xs, -1, T / 2) * (Rot(-90, 0, 0) * Cylinder(sd / 2, base_t + 2, align=MIN_))
+    notes = [f"pillow block for a {bearing} bearing ({bi} x {bo} x {bw} mm): the shaft's centre is {ch:g} mm above the surface; base {L:g} x {T:g} mm, {base_t:g} mm thick, "
+             f"two Ø{sd:g} mm screw holes {2 * xs:.1f} mm apart",
+             f"the bearing presses into a Ø{bo + 2 * f:g} mm seat {bw:g} mm deep against a 2 mm shoulder; a Ø{bi} mm shaft passes through",
+             "print it lying on its face as shown, the bearing's seat opening upward, 4 walls and 40% infill; no supports. Use a pair, seats facing each other, to hold a shaft"]
+    return _out(body, notes, [], {"centre_height": ch, "hole_spacing": round(2 * xs, 2), "seat": round(bo + 2 * f, 3)}, f"{bearing} ball bearing ({bi} x {bo} x {bw} mm)")
+
+
+def extrusion_foot(profile="1515 (80/20, 1.5 in)", thickness=8.0, margin=4.0, keys=True):
+    """A foot for the end of a T-slot extrusion leg: a pad that bolts into the tapped hole in the
+    extrusion's end, the bolt's head sunk inside, with keys that sit in the slots so it can't turn."""
+    side, slot, bolt, clear, nwide, wide = _profile(profile)
+    t, m = float(thickness), float(margin)
+    _rng("thickness", t, 5, 25); _rng("margin", m, 0, 20)
+    body = extrude(RectangleRounded(wide + 2 * m, side + 2 * m, max(1.0, min(4.0, m + 1.5))), amount=t, dir=(0, 0, 1))
+    try:
+        body = chamfer(body.edges().group_by(Axis.Z)[0], min(1.2, t * 0.15))
+    except Exception:
+        pass
+    centres = [-wide / 4, wide / 4] if nwide == 2 else [0.0]
+    head_d, head_h = clear * 1.9, min(t - 3.0, clear * 1.1)
+    for x in centres:
+        body -= Pos(x, 0, -1) * Cylinder(clear / 2, t + 2, align=MIN_)
+        body -= Pos(x, 0, -0.01) * Cylinder(head_d / 2, head_h, align=MIN_)
+    if keys:
+        kw, kh = slot - 0.4, 2.0
+        for x in centres:
+            for a in (0, 90, 180, 270):
+                if nwide == 2 and ((a == 0 and x < 0) or (a == 180 and x > 0)):
+                    continue                          # no slot on the web between the two halves
+                key = Pos(side / 2 - 3.0, 0, t - 0.01) * Box(4.0, kw, kh, align=MIN_)
+                body += Pos(x, 0, 0) * (Rot(0, 0, a) * key)
+    notes = [f"foot for {profile}: a {wide + 2 * m:g} x {side + 2 * m:g} x {t:g} mm pad, " + ("two holes" if nwide == 2 else "a hole") + f" for a {bolt} bolt into the extrusion's tapped end, "
+             f"the head sunk {head_h:g} mm into the underside (Ø{head_d:.1f} mm pocket: a socket head or button head fits)"
+             + (f"; keys {slot - 0.4:g} mm wide stand 2 mm up into the slots to stop it turning" if keys else ""),
+             "the end of the extrusion must be tapped for the bolt; print it as it lies, the floor side on the bed, in PETG, or in TPU for a foot that grips and doesn't scratch"]
+    return _out(body, notes, [], {"bolt": bolt})
+
+
+def vise_jaws(jaw_width=100.0, jaw_height=20.0, jaw_thickness=12.0, face=5.0, magnet_d=10.0, magnet_t=3.0, grooves="horizontal V"):
+    """Soft jaws for a bench vise: a pad over each steel jaw so it holds work without marking it,
+    hung on the jaw by a lip and held there by magnets. With a V groove for round stock."""
+    W, H, JT, ft, md, mt = float(jaw_width), float(jaw_height), float(jaw_thickness), float(face), float(magnet_d), float(magnet_t)
+    if grooves not in VISE_GROOVES:
+        raise ValueError(f"grooves: one of {', '.join(VISE_GROOVES)}")
+    _rng("jaw width", W, 30, 250); _rng("jaw height", H, 8, 80); _rng("jaw thickness", JT, 4, 40); _rng("face thickness", ft, 3, 15)
+    if md:
+        _rng("magnet diameter", md, 3, min(20.0, H - 3)); _rng("magnet thickness", mt, 1, ft - 1.2)
+    lip = 3.0
+    # Built face up, then turned over at the end to print.
+    body = Box(W, H + lip, ft, align=(Align.CENTER, Align.MIN, Align.MIN))
+    body += Pos(0, H, -min(JT, 12.0)) * Box(W, lip, min(JT, 12.0) + 0.01, align=(Align.CENTER, Align.MIN, Align.MIN))
+    body = Pos(0, 0, min(JT, 12.0)) * body
+    z0 = min(JT, 12.0)
+    if md:
+        n = 2 if W < 140 else 3
+        for i in range(n):
+            x = (i - (n - 1) / 2) * W / n
+            body -= Pos(x, H / 2, z0 - 0.01) * Cylinder(md / 2 + 0.1, mt + 0.2, align=MIN_)
+    vd = min(ft - 1.5, 4.0)
+    if grooves == "horizontal V":
+        body -= Pos(-W / 2 - 1, H / 2, z0 + ft) * extrude(Plane.YZ * Polygon((-vd, 0.01), (vd, 0.01), (0, -vd), align=None), amount=W + 2, dir=(1, 0, 0))
+    elif grooves == "horizontal and upright V":
+        body -= Pos(-W / 2 - 1, H / 2, z0 + ft) * extrude(Plane.YZ * Polygon((-vd, 0.01), (vd, 0.01), (0, -vd), align=None), amount=W + 2, dir=(1, 0, 0))
+        body -= Pos(0, -1, z0 + ft) * extrude(Plane.XZ * Polygon((-vd, 0.01), (vd, 0.01), (0, -vd), align=None), amount=H + lip + 2, dir=(0, 1, 0))
+    body = Pos(0, 0, z0 + ft) * (Rot(180, 0, 0) * body)       # turned over to print: the work face on the bed, the lip standing up
+    notes = [f"soft vise jaw {W:g} mm wide for a jaw {H:g} mm tall: a {ft:g} mm face, a lip that hooks {min(JT, 12.0):g} mm down behind the top of the jaw"
+             + (f", pockets in the back for Ø{md:g} x {mt:g} mm magnets (press or glue them in)" if md else "")
+             + ("" if grooves == "plain" else f", {grooves} groove {vd:g} mm deep for round stock"),
+             "print two, as shown: the face that meets the work on the bed and the lip standing up, no supports; in TPU for grip on finished work, PETG for a harder jaw"]
+    return _out(body, notes, ["check the lip clears whatever sits behind your vise's jaw (the screws that hold the steel jaw plates)"], {})
+
+
+VISE_GROOVES = ("horizontal V", "horizontal and upright V", "plain")
+
+
+# ---------- Cell packs ----------
+
+PACK_CELLS = {"18650": 18.4, "21700": 21.2, "26650": 26.3, "AA": 14.5, "custom": 0.0}
+PACK_LAYOUTS = ("grid (rows of cells)", "honeycomb (rows nested)", "round bundle (fits a tube)")
+PACK_EARS = ("none", "two ears", "four ears")
+
+
+def _pack_points(n_s: int, n_p: int, pitch: float, layout: str) -> list[tuple[float, float]]:
+    if layout == PACK_LAYOUTS[0]:
+        pts = [(c * pitch, r * pitch) for r in range(n_s) for c in range(n_p)]
+    elif layout == PACK_LAYOUTS[1]:
+        pts = [(c * pitch + (pitch / 2 if r % 2 else 0.0), r * pitch * math.sqrt(3) / 2) for r in range(n_s) for c in range(n_p)]
+    else:
+        # The cells nearest a middle, on a honeycomb: tried about a cell, about a gap between three, and
+        # about the join of two, keeping whichever bundle is smallest across.
+        n, best = n_s * n_p, None
+        lattice = [(c * pitch + (pitch / 2 if r % 2 else 0.0), r * pitch * math.sqrt(3) / 2) for r in range(-8, 9) for c in range(-8, 9)]
+        for cx, cy in ((0.0, 0.0), (pitch / 2, pitch * math.sqrt(3) / 6), (pitch / 2, 0.0)):
+            near = sorted(lattice, key=lambda q: (round(math.hypot(q[0] - cx, q[1] - cy), 4), round(math.atan2(q[1] - cy, q[0] - cx), 4)))[:n]
+            reach = max(math.hypot(x - cx, y - cy) for x, y in near)
+            if best is None or reach < best[0] - 1e-6:
+                best = (reach, [(x - cx, y - cy) for x, y in near])
+        return best[1]
+    mx, my = (min(x for x, _ in pts) + max(x for x, _ in pts)) / 2, (min(y for _, y in pts) + max(y for _, y in pts)) / 2
+    return [(x - mx, y - my) for x, y in pts]
+
+
+def cell_pack_holder(cell="18650", cell_d=0.0, series=1, parallel=3, layout="honeycomb (rows nested)", height=10.0, gap=1.6, ears="none", fit=0.15):
+    """A holder for a pack of round lithium cells standing on end, the kind you spot-weld nickel
+    strip across: a plate of pockets with a lip that stops each cell and an opening over its
+    terminal. Print two, one for each end. Give it as series x parallel (1S3P, 3S4P, 13S5P): each row
+    is one parallel group. In rows, nested like a honeycomb, or bundled round to slide into a tube."""
+    if cell not in PACK_CELLS:
+        raise ValueError(f"cell: one of {', '.join(PACK_CELLS)}")
+    if layout not in PACK_LAYOUTS or ears not in PACK_EARS:
+        raise ValueError(f"layout: one of {', '.join(PACK_LAYOUTS)}; ears: one of {', '.join(PACK_EARS)}")
+    d = float(cell_d) if cell == "custom" or float(cell_d) > 0 else PACK_CELLS[cell]
+    n_s, n_p, h, g, f = int(series), int(parallel), float(height), float(gap), float(fit)
+    _rng("cell diameter", d, 8, 50); _rng("series", n_s, 1, 20, ""); _rng("parallel", n_p, 1, 20, "")
+    _rng("height", h, 5, 30); _rng("plastic between cells", g, 0.8, 6); _rng("fit", f, 0, 0.5)
+    n = n_s * n_p
+    if n > 80:
+        raise ValueError("up to 80 cells in one holder: print it in sections for more")
+    bore = d + 2 * f
+    pitch = bore + g
+    pts = _pack_points(n_s, n_p, pitch, layout)
+    rnd = layout == PACK_LAYOUTS[2]
+    lip_t = 1.6
+    edge = max(g, 1.6)
+    if rnd:
+        R = max(math.hypot(x, y) for x, y in pts) + bore / 2 + edge
+        flat = Circle(R)
+    else:
+        blob = (0.60 if layout == PACK_LAYOUTS[1] else 0.725) * pitch          # reaches the middle of the gap between neighbours
+        blob = max(blob, bore / 2 + edge)
+        flat = None
+        for x, y in pts:
+            c = Pos(x, y) * Circle(blob)
+            flat = c if flat is None else flat + c
+    body = extrude(flat, amount=h, dir=(0, 0, 1))
+    if len(body.solids()) != 1:
+        raise ValueError("the cells don't join into one holder at this spacing")
+    window = max(d - 5.0, d * 0.6)                    # the opening over each terminal, for the strip and the welder
+    for x, y in pts:
+        body -= Pos(x, y, lip_t) * Cylinder(bore / 2, h, align=MIN_)
+        body -= Pos(x, y, -1) * Cylinder(window / 2, lip_t + 2, align=MIN_)
+    bb = body.bounding_box()
+    n_ears = {"none": 0, "two ears": 2, "four ears": 4}[ears]
+    if n_ears:
+        if rnd:
+            where = [(math.cos(a) * (R + 4.2), math.sin(a) * (R + 4.2)) for a in ([0, math.pi] if n_ears == 2 else [math.pi / 4 + i * math.pi / 2 for i in range(4)])]
+        else:
+            ex = bb.max.X + 4.2
+            ys = [0.0] if n_ears == 2 else [bb.min.Y + 6, bb.max.Y - 6]
+            where = [(sx * ex, y) for sx in (-1, 1) for y in ys]
+        for x, y in where:
+            a = math.atan2(y, x) if rnd else (0.0 if x > 0 else math.pi)
+            ear = Cylinder(5.0, 4.0, align=MIN_) + Pos(-3.5, 0, 0) * Box(7.0, 10.0, 4.0, align=MIN_)
+            ear -= Pos(0, 0, -1) * Cylinder(1.7, 6, align=MIN_)
+            body += Pos(x, y, 0) * (Rot(0, 0, math.degrees(a)) * ear)
+        bb = body.bounding_box()
+    cells = Compound(children=[Pos(x, y, lip_t) * Cylinder(d / 2, 30.0, align=MIN_) for x, y in pts])
+    shape_say = (f"a round bundle Ø{2 * R:.1f} mm" if rnd else f"{bb.size.X:.1f} x {bb.size.Y:.1f} mm") + f", {h:g} mm tall"
+    notes = [f"holder for a {n_s}S{n_p}P pack of {'Ø' + format(d, 'g') + ' mm' if cell == 'custom' else cell} cells ({n} cells, about {3.6 * n_s:.1f} V nominal for lithium-ion): "
+             f"{shape_say}, cells {pitch:.2f} mm apart centre to centre, {layout.split(' (')[0]}",
+             f"each pocket is Ø{bore:g} mm and {h - lip_t:g} mm deep, with a {lip_t:g} mm lip under the cell and a Ø{window:g} mm opening over its terminal for nickel strip",
+             "print two, one for each end of the pack, lip side on the bed as it lies; no supports. PETG or ABS, not PLA: a pack gets warm",
+             "shown in grey: the cells (not printed, and only the first 30 mm of each)"]
+    if not rnd and n_s > 1:
+        notes.insert(2, f"each row of {n_p} is one parallel group; the {n_s} rows go in series, so turn alternate rows the other way up and strap row to row at alternate ends")
+    if rnd:
+        notes.insert(2, "in a round bundle the cells are simply the ones nearest the middle: plan which are the parallel groups before you weld")
+    checks = ["lithium cells: use matched cells, insulating rings on the positive ends, a BMS for anything in series, and never solder straight onto a cell",
+              ]
+    if g < 1.2:
+        checks.append("under 1.2 mm between cells is one or two thin walls: it holds, but won't stand rough handling")
+    out = _out(body, notes, checks, {"cells": n, "pitch": round(pitch, 3), "pocket": round(bore, 3), "outside": [round(bb.size.X, 2), round(bb.size.Y, 2)],
+                                     "centres": [[round(x, 2), round(y, 2)] for x, y in pts]})
+    out["fitted"] = cells
+    return out
+
+
+
+
 KINDS = {
     "bushing": (bushing, "Bushing or sleeve", {"od": 12.0, "bore": 6.0, "length": 10.0, "flange_d": 0.0, "flange_t": 2.0}),
     "flat_plate": (flat_plate, "Plate with holes", {"length": 80.0, "width": 50.0, "thickness": 3.0, "corner": 3.0, "holes": "corners", "hole_d": 4.5,
@@ -871,6 +1151,14 @@ KINDS = {
     "board_mount": (board_mount, "Circuit board mount", {"board": "Raspberry Pi 3, 4 or 5 (Model B)", "style": "standoffs", "standoff": 5.0,
                                                            "plate_holes": True, "board_l": 60.0, "board_w": 40.0, "hole_l": 52.0, "hole_w": 32.0,
                                                            "screw": "M3", "base": 2.4}),
+    "shaft_collar": (shaft_collar, "Shaft collar", {"shaft_d": 8.0, "od": 0.0, "width": 10.0, "style": COLLAR_STYLES[0], "screw": "M3", "fit": 0.1}),
+    "shaft_coupler": (shaft_coupler, "Shaft coupler (rigid)", {"shaft_a": 5.0, "shaft_b": 8.0, "od": 0.0, "length": 25.0, "screw": "M3", "fit": 0.1}),
+    "bearing_block": (bearing_block, "Bearing block (pillow block)", {"bearing": "608", "centre_height": 0.0, "base_length": 0.0, "screw_d": 4.5, "fit": 0.05}),
+    "extrusion_foot": (extrusion_foot, "T-slot foot", {"profile": "1515 (80/20, 1.5 in)", "thickness": 8.0, "margin": 4.0, "keys": True}),
+    "vise_jaws": (vise_jaws, "Soft vise jaws", {"jaw_width": 100.0, "jaw_height": 20.0, "jaw_thickness": 12.0, "face": 5.0, "magnet_d": 10.0, "magnet_t": 3.0,
+                                                "grooves": "horizontal V"}),
+    "cell_pack_holder": (cell_pack_holder, "Cell pack holder (18650, 21700: 1S3P, 3S4P...)", {
+        "cell": "18650", "cell_d": 0.0, "series": 1, "parallel": 3, "layout": PACK_LAYOUTS[1], "height": 10.0, "gap": 1.6, "ears": "none", "fit": 0.15}),
     "extrusion_end_cap": (extrusion_end_cap, "T-slot end cap", {"profile": "1515 (80/20, 1.5 in)", "thickness": 3.0, "tab": 7.0}),
     "extrusion_bracket": (extrusion_bracket, "T-slot corner bracket", {"profile": "1515 (80/20, 1.5 in)", "leg": 0.0, "thickness": 6.0, "holes": 1}),
     "extrusion_cable_guide": (extrusion_cable_guide, "T-slot cable guide", {"profile": "1515 (80/20, 1.5 in)", "bundle_d": 15.0, "width": 12.0, "wall": 2.4}),
@@ -898,6 +1186,24 @@ KINDS = {
 _SCREW = ("Screw hole (4.5 suits a #8 or 4 mm screw)", "len")
 _PROFILE = ("Extrusion", "select")
 KIND_LABELS = {
+    ("shaft_collar", "shaft_d"): ("Shaft: 8, 3/8, 0.5 in", "size"), ("shaft_collar", "od"): ("Outside diameter (0: to suit)", "len"),
+    ("shaft_collar", "style"): ("Held by", "select"), ("shaft_collar", "screw"): ("Screw", "select"), ("shaft_collar", "fit"): ("Fit (added round the shaft)", "len"),
+    ("shaft_coupler", "shaft_a"): ("First shaft: 5, 1/4", "size"), ("shaft_coupler", "shaft_b"): ("Second shaft: 8, 3/8", "size"),
+    ("shaft_coupler", "od"): ("Outside diameter (0: to suit)", "len"), ("shaft_coupler", "screw"): ("Pinch screws", "select"),
+    ("shaft_coupler", "fit"): ("Fit (added round each shaft)", "len"),
+    ("bearing_block", "bearing"): ("Bearing", "select"), ("bearing_block", "centre_height"): ("Shaft centre above the surface (0: as low as it goes)", "len"),
+    ("bearing_block", "base_length"): ("Base length (0: to suit)", "len"), ("bearing_block", "screw_d"): ("Screw holes", "len"),
+    ("bearing_block", "fit"): ("Fit (added round the bearing)", "len"),
+    ("extrusion_foot", "profile"): ("Extrusion", "select"), ("extrusion_foot", "margin"): ("Pad bigger than the extrusion by, each side", "len"),
+    ("extrusion_foot", "keys"): ("Keys into the slots", "bool"),
+    ("vise_jaws", "jaw_width"): ("Jaw width", "len"), ("vise_jaws", "jaw_height"): ("Jaw height", "len"), ("vise_jaws", "jaw_thickness"): ("Jaw thickness (front to back)", "len"),
+    ("vise_jaws", "face"): ("Face thickness", "len"), ("vise_jaws", "magnet_d"): ("Magnet diameter (0: none)", "len"), ("vise_jaws", "magnet_t"): ("Magnet thickness", "len"),
+    ("vise_jaws", "grooves"): ("Grooves for round stock", "select"),
+    ("cell_pack_holder", "cell"): ("Cell", "select"), ("cell_pack_holder", "cell_d"): ("Cell diameter (0: the standard for the cell above)", "len"),
+    ("cell_pack_holder", "series"): ("Series (S): rows", "num"), ("cell_pack_holder", "parallel"): ("Parallel (P): cells in each row", "num"),
+    ("cell_pack_holder", "layout"): ("Arranged as", "select"), ("cell_pack_holder", "height"): ("Height of the holder", "len"),
+    ("cell_pack_holder", "gap"): ("Plastic between cells", "len"), ("cell_pack_holder", "ears"): ("Screw ears", "select"),
+    ("cell_pack_holder", "fit"): ("Fit (added round each cell)", "len"),
     **{(k, "profile"): _PROFILE for k in ("extrusion_end_cap", "extrusion_bracket", "extrusion_cable_guide", "extrusion_panel_clip", "extrusion_handle",
                                           "extrusion_offset_jig", "extrusion_freehand_jig", "extrusion_alignment_jig")},
     **{(k, f): lab for k in ("extrusion_offset_jig", "extrusion_freehand_jig") for f, lab in {
@@ -955,6 +1261,10 @@ KIND_LABELS = {
 }
 _WAYS = ["inside the hose", "over the port"]
 CHOICES = {
+    ("shaft_collar", "style"): list(COLLAR_STYLES), ("shaft_collar", "screw"): list(PINCH), ("shaft_coupler", "screw"): list(PINCH),
+    ("bearing_block", "bearing"): ["623", "625", "688", "608", "6000", "6001", "6200"], ("extrusion_foot", "profile"): list(PROFILES),
+    ("vise_jaws", "grooves"): list(VISE_GROOVES),
+    ("cell_pack_holder", "cell"): list(PACK_CELLS), ("cell_pack_holder", "layout"): list(PACK_LAYOUTS), ("cell_pack_holder", "ears"): list(PACK_EARS),
     **{(k, "profile"): list(PROFILES) for k in ("extrusion_end_cap", "extrusion_bracket", "extrusion_cable_guide", "extrusion_panel_clip", "extrusion_handle",
                                                   "extrusion_offset_jig", "extrusion_freehand_jig", "extrusion_alignment_jig")},
     **{(k, "hole"): list(JIG_HOLES) for k in ("extrusion_offset_jig", "extrusion_freehand_jig")},
@@ -967,12 +1277,15 @@ GROUPS = {
     "Measure and replace": ["bushing", "flat_plate", "slip_cap", "edge_clip", "tool_clip"],
     "Circuit boards": ["board_mount"],
     "T-slot extrusion": ["extrusion_offset_jig", "extrusion_freehand_jig", "extrusion_alignment_jig", "extrusion_end_cap", "extrusion_bracket",
-                         "extrusion_cable_guide", "extrusion_panel_clip", "extrusion_handle"],
-    "Jigs": ["shelf_pin_jig", "clamp_square", "centre_finder", "setup_blocks"],
+                         "extrusion_cable_guide", "extrusion_panel_clip", "extrusion_handle", "extrusion_foot"],
+    "Jigs": ["shelf_pin_jig", "clamp_square", "centre_finder", "setup_blocks", "vise_jaws"],
     "Funnels and hoses": ["funnel", "hose_adapter"],
     "Panels and trainers": ["test_point_plate", "panel_bezel", "terminal_cover"],
 }
 WORDS = {
+    "shaft_collar": "stop collar clamp ring shaft lock", "shaft_coupler": "coupling motor lead screw stepper join shafts", "bearing_block": "pillow block bearing housing mount kp08 shaft support",
+    "extrusion_foot": "8020 80/20 1515 2020 leg foot end pad leveller", "vise_jaws": "vice soft jaws magnetic jaw pads bench vise",
+    "cell_pack_holder": "battery pack 18650 21700 spacer bracket honeycomb 1s3p 3s4p 4s2p ebike lithium cell holder spot weld nickel strip cylindrical",
     "bushing": "spacer sleeve collar washer round replace broken", "flat_plate": "cover patch adapter mounting plate blank", "tool_clip": "broom clip terry clip holder torch",
     "slip_cap": "chair leg cap ferrule post cap pipe cap cover", "edge_clip": "u clip shelf clip trim channel", "board_mount": "raspberry pi arduino esp32 pico pcb standoff tray",
     "extrusion_offset_jig": "8020 80/20 1515 2020 aluminium aluminum drill jig blind joint access hole end", "extrusion_freehand_jig": "8020 80/20 1515 2020 aluminium aluminum drill jig blind joint access hole",

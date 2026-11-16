@@ -2410,7 +2410,7 @@ function partFields() {
   $("#pclear-wrap").hidden = !printing || ["compression_spring", "extension_spring", "torsion_spring"].includes(partform.elements.kind.value);
   $("#pmat-wrap").hidden = !k.material || (k.modes && !printing);
   // Printed parts always have their threads; a pitch other than standard only matters for printing.
-  const shownFields = k.fields.filter(f => !(f.name === "threads" && printing) && !(f.name === "pitch" && !printing) && !(f.name === "bottom_chamfer" && k.modes && !printing));
+  const shownFields = k.fields.filter(f => !(f.name === "threads" && printing) && !(f.name === "pitch" && !printing) && !(["bottom_chamfer", "top_chamfer", "engrave_text"].includes(f.name) && k.modes && !printing));
   $("#pfields").replaceChildren(...shownFields.map(f => {
     if (f.type === "select") return field(f.label, h("select", { name: "p_" + f.name }, f.options.map(o => h("option", { value: o, selected: o === (f.default ?? "") }, PARTS.wires[o] || o || "(none)"))));
     if (f.type === "bool") return h("label", { class: "check" }, h("input", { type: "checkbox", name: "p_" + f.name, checked: !!f.default }), " " + f.label);

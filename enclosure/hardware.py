@@ -1334,7 +1334,7 @@ PRINTED_ONLY |= set(_useful.KINDS) | set(_more.KINDS) | set(_turning.KINDS) | {"
 
 # What each part is filed under on the page, and other words people look for it by.
 GROUPS = {
-    "Batteries": ["battery_holder", "battery_caddy"],
+    "Batteries": ["battery_holder", "cell_pack_holder", "battery_caddy"],
     "Fasteners": ["screw", "nut", "washer", "spacer", "insert", "thumbscrew", "dowel", "snap_ring"],
     "Springs": ["compression_spring", "extension_spring", "torsion_spring"],
     "Mounts and brackets": ["shelf_bracket", "corner_brace", "pipe_clamp", "pegboard_hook", "wall_pocket"],
@@ -1346,6 +1346,7 @@ GROUPS = {
     "Labels": ["label_plate"],
     "Hinges, latches and clips": ["hinge", "latch", "snap_hook"],
     "Wheels, gears and knobs": ["wheel", "handwheel", "rc_wheel", "spur_gear", "gt2_pulley", "knob", "appliance_knob"],
+    "Shafts and bearings": ["shaft_collar", "shaft_coupler", "bearing_block"],
     "Fans": ["fan_guard", "fan_adapter"],
     **_more.GROUPS,
     "Test prints": ["test_print"],
@@ -1442,6 +1443,38 @@ def bed_chamfer(shape, size: float, rotation=None):
     return shape, 0.0
 
 
+def mark_top(shape, text: str):
+    """(the shape with the text cut into its biggest upward flat, the text's height or 0). The text is
+    put where it lies wholly on the flat, clear of holes and edges, as big as fits up to 8 mm."""
+    from build123d import GeomType, Pos, Rectangle, Rot
+    from .more import _engrave
+    flats = [f for f in shape.faces() if f.geom_type == GeomType.PLANE and f.normal_at().Z > 0.999 and f.area > 20]
+    for face in sorted(flats, key=lambda f: -f.area)[:3]:
+        bb = face.bounding_box()
+        z = bb.max.Z
+        turns = (0.0, 90.0) if bb.size.X >= bb.size.Y else (90.0, 0.0)
+        spots = [(bb.min.X + bb.size.X * fx, bb.min.Y + bb.size.Y * fy) for fx, fy in
+                 ((0.5, 0.5), (0.5, 0.25), (0.5, 0.75), (0.25, 0.5), (0.75, 0.5), (0.25, 0.25), (0.75, 0.75), (0.25, 0.75), (0.75, 0.25),
+                  (0.5, 0.12), (0.5, 0.88), (0.12, 0.5), (0.88, 0.5))]
+        for size in (8.0, 6.0, 5.0, 4.0, 3.0):
+            w, h = len(text) * 0.66 * size + 2.0, size * 1.3 + 2.0
+            for turn in turns:
+                if (w if turn == 0 else h) > bb.size.X or (h if turn == 0 else w) > bb.size.Y:
+                    continue
+                for x, y in spots:
+                    pad = Pos(x, y, z) * (Rot(0, 0, turn) * Rectangle(w, h)).face()
+                    try:
+                        on = face & pad
+                        if on is None or abs(on.area - pad.area) > 0.01 * pad.area:
+                            continue
+                        got = _engrave(shape, text, size, x, y, z, turn=turn)
+                    except Exception:
+                        continue
+                    if got.is_valid and len(got.solids()) == len(shape.solids()) and got.volume < shape.volume:
+                        return got, size
+    return shape, 0.0
+
+
 def _unturn(shape, rotation):
     from build123d import Rot
     return Rot(*rotation).inverse() * shape
@@ -1467,6 +1500,20 @@ def _make(kind: str, **params) -> dict:
                              "0 to 3 mm (0 to 0.118 in), and 0.4 mm (0.016 in) is usual")
         if kind not in PRINTED_ONLY and params.get("mode") != "print":
             foot = 0.0                                # a bought part, drawn for reference
+    crown, stamp = 0.0, ""
+    if "top_chamfer" not in allowed:                  # and its top edge broken, and a few words cut into its top
+        try:
+            crown = float(params.pop("top_chamfer", 0) or 0)
+        except (TypeError, ValueError):
+            raise ValueError("top chamfer: a size in mm, 0 for none") from None
+        if not 0 <= crown <= 5:
+            raise ValueError("top edge chamfer: 0 to 5 mm (0 to 0.197 in)")
+    if "engrave_text" not in allowed:
+        stamp = str(params.pop("engrave_text", "") or "").strip()
+        if len(stamp) > 24:
+            raise ValueError("text on the part: up to 24 characters")
+    if kind not in PRINTED_ONLY and params.get("mode") != "print":
+        crown, stamp = 0.0, ""
     extra = set(params) - allowed
     if extra:
         raise ValueError(f"{label}: unknown setting(s) {', '.join(sorted(extra))}")
@@ -1480,6 +1527,21 @@ def _make(kind: str, **params) -> dict:
             r["notes"].append(f"a {done:g} mm 45° chamfer on the edge that sits on the bed, against elephant's foot")
         else:
             r["checks"].append("the bottom edge chamfer was left off: this shape's bottom edge wouldn't take one")
+    if crown > 0:
+        from build123d import Rot
+        flipped, done = bed_chamfer(Rot(180, 0, 0) * r["shape"], crown)
+        if done:
+            r["shape"] = Rot(180, 0, 0) * flipped
+            r["notes"].append(f"a {done:g} mm 45° chamfer on the top edges")
+        else:
+            r["checks"].append("the top edge chamfer was left off: this shape's top edges wouldn't take one")
+    if stamp:
+        marked, size = mark_top(r["shape"], stamp)
+        if size:
+            r["shape"] = marked
+            r["notes"].append(f"'{stamp}' cut 0.5 mm into the biggest flat on top, {size:g} mm tall")
+        else:
+            r["checks"].append(f"'{stamp}' was left off: there is no flat on top big enough for it, even at 3 mm tall")
     shape = r["shape"]
     if not shape.is_valid:
         r["checks"].append("the solid came out with a modelling flaw: check it before printing")
@@ -1613,6 +1675,10 @@ def catalog() -> dict:
         if not any(f["name"] == "bottom_chamfer" for f in fields):
             fields.append({"name": "bottom_chamfer", "label": "Bottom edge chamfer, 45° (against elephant's foot; 0.4 mm or 0.016 in is usual, 0: none)",
                            "type": "len", "default": 0.0})
+        if "top_chamfer" not in params and not any(f["name"] == "top_chamfer" for f in fields):
+            fields.append({"name": "top_chamfer", "label": "Top edge chamfer, 45° (0: none)", "type": "len", "default": 0.0})
+        if "engrave_text" not in params and "text" not in params and not any(f["name"] == "engrave_text" for f in fields):
+            fields.append({"name": "engrave_text", "label": "Words cut into the top (a size, a part number, a name)", "type": "text", "default": "", "options": []})
         out[kind] = {"label": label, "fields": fields, "printed_only": kind in PRINTED_ONLY,
                      "modes": "mode" in params, "material": "material" in params,
                      "doc": " ".join((fn.__doc__ or "").strip().split("\n\n")[0].split()),

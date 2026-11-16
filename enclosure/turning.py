@@ -125,6 +125,13 @@ def handwheel(diameter=100.0, rim=12.0, spokes=3, shaft="round", bore_d=8.0, fla
 # ---------- Wheel and tyre for a radio-controlled car ----------
 
 PIECES = ("wheel (rigid plastic)", "tyre (TPU)")
+# Usual sizes by scale: tyre diameter, width, wheel diameter, drive hex, hex depth, axle.
+RC_SCALES = {"custom (the sizes below)": None,
+             "1/10 touring car (65 x 26, 12 mm hex)": (65.0, 26.0, 52.0, 12.0, 5.0, 4.0),
+             "1/10 buggy, rear (85 x 38, 12 mm hex)": (85.0, 38.0, 56.0, 12.0, 5.0, 4.0),
+             "1/10 crawler, 1.9 in (100 x 35, 12 mm hex)": (100.0, 35.0, 48.3, 12.0, 5.0, 4.0),
+             "1/18 to 1/24 mini (30 x 12, 7 mm hex)": (30.0, 12.0, 22.0, 7.0, 3.0, 2.0),
+             "1/8 buggy (112 x 42, 17 mm hex)": (112.0, 42.0, 83.0, 17.0, 7.0, 8.0)}
 TREADS = ("slick", "ribbed", "blocks")
 WEBS = ("spokes", "dish")
 
@@ -138,7 +145,7 @@ def _rim_profile(rb: float, lip: float, lw: float, W: float, grow: float = 0.0):
 
 
 def rc_wheel(piece="wheel (rigid plastic)", tyre_d=65.0, width=26.0, rim_d=52.0, hex=12.0, hex_depth=5.0, axle_d=4.0, mount_inset=0.0,
-             web="spokes", spokes=6, tread="blocks", fit=0.15):
+             web="spokes", spokes=6, tread="blocks", fit=0.15, scale="custom (the sizes below)"):
     """A wheel for a radio-controlled car or a robot in two prints: a rigid wheel (PETG or PLA) with
     a pocket for the drive hex, and a soft tyre (TPU) that stretches over it and locks behind a lip
     at each edge. Pick which of the two to make; the other is shown with it in grey."""
@@ -146,6 +153,11 @@ def rc_wheel(piece="wheel (rigid plastic)", tyre_d=65.0, width=26.0, rim_d=52.0,
         raise ValueError(f"piece: one of {', '.join(PIECES)}")
     if tread not in TREADS or web not in WEBS:
         raise ValueError(f"tread: one of {', '.join(TREADS)}; centre: one of {', '.join(WEBS)}")
+    if scale not in RC_SCALES:
+        raise ValueError(f"scale: one of {', '.join(RC_SCALES)}")
+    preset = RC_SCALES[scale]
+    if preset:
+        tyre_d, width, rim_d, hex, hex_depth, axle_d = preset
     OD, W, RD, f = float(tyre_d), float(width), float(rim_d), float(fit)
     hx, _ = sizes.parse(hex, "drive hex")
     ax, _ = sizes.parse(axle_d, "axle")
@@ -235,12 +247,42 @@ def rc_wheel(piece="wheel (rigid plastic)", tyre_d=65.0, width=26.0, rim_d=52.0,
                  "shown in grey: the wheel. It is not in these files: choose 'wheel (rigid plastic)' above to make it"]
         out = _out(tyre, notes, [], info)
         out["fitted"] = rim
+    if preset:
+        out["notes"].insert(1, f"sizes are the usual ones for {scale.split(' (')[0]}: cars differ, so check the hex, the axle and the room in the wheel arch on yours. "
+                               "Pick 'custom' to set every size yourself")
     if thick < 5:
         out["checks"].append(f"the tyre is only {thick:g} mm thick: there is little rubber to soak up bumps")
     return out
 
 
 # ---------- Replacement knob for an appliance ----------
+
+def _knob_marks(text, sweep: float, start: float) -> list[tuple[str, float]]:
+    """Markings and where they go, clockwise from the pointer: "OFF|LO|MED|HI" spreads them evenly
+    over the sweep from the start angle; "OFF@0|LO@60|HI@300" puts each where you say. A lone - is a
+    line and a lone . is a dot."""
+    items = [t.strip() for t in str(text or "").replace("\n", "|").split("|") if t.strip()]
+    if not items:
+        return []
+    if len(items) > 24 or any(len(t.split("@")[0].strip()) > 14 for t in items):
+        raise ValueError("markings: up to 24 of them, each up to 14 characters, with | between")
+    _rng("sweep", sweep, 0, 360, "°")
+    out, free = [], []
+    for t in items:
+        if "@" in t:
+            label, _, at = t.rpartition("@")
+            try:
+                out.append((label.strip() or "-", float(at)))
+            except ValueError:
+                raise ValueError(f"markings: '{t}' should be a marking, an @ and an angle, such as HI@270") from None
+        else:
+            free.append(len(out))
+            out.append((t, 0.0))
+    step = (sweep / len(free) if sweep >= 359.9 else sweep / (len(free) - 1)) if len(free) > 1 else 0.0
+    for i, at in enumerate(free):
+        out[at] = (out[at][0], start + i * step)
+    return out
+
 
 KNOB_STYLES = ("pointer bar (oven, hob)", "round, fluted (washer, dryer)", "round, smooth")
 KNOB_SHAFTS = ("D (one flat)", "double D (two flats)", "round", "splined")
@@ -250,7 +292,7 @@ GRIPS = ("snug", "split, springy")
 
 def appliance_knob(style="pointer bar (oven, hob)", diameter=45.0, height=28.0, skirt=5.0, shaft="D (one flat)", shaft_d=6.0, flat=0.0,
                    depth=14.0, flat_at="12 o'clock (toward the pointer)", grip="split, springy", stem_below=0.0, set_screw="none",
-                   two_color=False, fit=0.1):
+                   two_color=False, fit=0.1, marks="", mark_size=4.0, mark_sweep=270.0, mark_start=0.0):
     """A replacement knob for an oven, hob, washer, dryer or anything else with a D shaft: measure
     the shaft, say which way its flat faces when the pointer is straight up, and pick a shape. A
     split stem springs onto the shaft the way the original's clip did."""
@@ -277,10 +319,17 @@ def appliance_knob(style="pointer bar (oven, hob)", diameter=45.0, height=28.0, 
     if 2 * core_r > D * (0.62 if bar else 0.8):
         raise ValueError(f"this shaft needs a knob at least {2 * core_r / (0.62 if bar else 0.8):.0f} mm across")
 
+    labels = _knob_marks(marks, float(mark_sweep), float(mark_start))
+    ms = float(mark_size)
+    ring = 0.0
+    if labels:
+        _rng("marking size", ms, 2.5, 10)
+        ring = ms + (4.0 if bar else 3.0)             # a flat ring round the skirt for the markings to sit on
+        sk = sk or 3.0
     # The body, its base on the bed, the pointer toward +Y.
     if bar:
         base_h = sk or 3.0
-        body = Cylinder(D / 2, base_h, align=MIN_)
+        body = Cylinder(D / 2 + ring, base_h, align=MIN_)
         try:
             body = chamfer(body.edges().sort_by(Axis.Z)[-1], min(1.2, base_h * 0.4))
         except Exception:
@@ -311,7 +360,7 @@ def appliance_knob(style="pointer bar (oven, hob)", diameter=45.0, height=28.0, 
             for i in range(nfl):
                 body -= Rot(0, 0, 360 * (i + 0.5) / nfl + 90) * flute
         if sk:
-            flange = Cylinder(D / 2 + 3, sk, align=MIN_)
+            flange = Cylinder(D / 2 + (ring + 0.5 if ring else 3), sk, align=MIN_)
             try:
                 flange = chamfer(flange.edges().sort_by(Axis.Z)[-1], min(1.0, sk * 0.4))
             except Exception:
@@ -337,6 +386,32 @@ def appliance_knob(style="pointer bar (oven, hob)", diameter=45.0, height=28.0, 
         if slot_h > 2:
             body -= Pos(0, 0, -below - 0.01) * (Rot(0, 0, turn) * Box(2 * stem_r + 2 * relief - 0.4, 1.0, slot_h, align=MIN_))
     body -= mark
+    crowded = False
+    if labels:
+        from build123d import Text
+        from . import fonts
+        rt = D / 2 + (ring / 2 - 0.3 if bar else 0.5 + ring / 2 - 0.2)
+        top = sk if not bar else base_h
+        cuts = []
+        for text, ang in labels:
+            if text == "-":
+                flat = [Box(0.9, ring - 2.0, 0.61, align=MIN_)]
+            elif text == ".":
+                flat = [Cylinder(max(0.8, ms * 0.22), 0.61, align=MIN_)]
+            else:
+                try:
+                    flat = [extrude(f, amount=0.61, dir=(0, 0, 1)) for f in fonts.sound_faces(Text(text, ms, align=(Align.CENTER, Align.CENTER)))]
+                except Exception:
+                    raise ValueError(f"markings: '{text}' has a character that can't be drawn") from None
+            a = math.radians(ang)
+            cuts += [Pos(rt * math.sin(a), rt * math.cos(a), top - 0.6) * (Rot(0, 0, -ang) * c) for c in flat]
+        angs = sorted(a % 360 for _, a in labels)
+        gaps = [(angs[(i + 1) % len(angs)] - angs[i]) % 360 or 360 for i in range(len(angs))] if len(angs) > 1 else [360]
+        widest = max(len(t) for t, _ in labels) * 0.62 * ms
+        crowded = math.radians(min(gaps)) * rt < widest + 1.0
+        mark = Compound(children=[mark] + cuts)
+        for c in cuts:
+            body -= c
     notes = [f"{style.split(' (')[0].split(',')[0]} knob Ø{D:g} x {H:g} mm for {_shaft_say(kind if shaft != 'splined' else 'round', d, fl, d_say).replace('round shaft', shaft + ' shaft')}"
              f", socket {dp:g} mm deep" + (f", on a stem {below:g} mm below the knob" if below else ""),
              ]
@@ -360,11 +435,19 @@ def appliance_knob(style="pointer bar (oven, hob)", diameter=45.0, height=28.0, 
     elif shaft == "round":
         checks.append("a round shaft needs a set screw (or glue) to turn with the knob")
     inlay = None
+    what = "the pointer and the markings" if labels else "the pointer"
+    if labels:
+        notes.append(f"{len(labels)} markings round the skirt, {ms:g} mm tall, on a {ring:g} mm ring added for them (the skirt is now Ø{body.bounding_box().size.X:g} mm): "
+                     + ", ".join(f"{'a line' if t == '-' else 'a dot' if t == '.' else t} at {a % 360:g}°" for t, a in labels[:12])
+                     + "; angles run clockwise from the pointer, seen from the front")
+        if crowded:
+            checks.append("some markings are close enough to touch: fewer of them, a smaller marking size, a wider sweep or a bigger knob")
     if two_color:
         inlay = mark
-        notes.append("the pointer line comes as its own body for a second colour; without a multi-colour printer, fill the groove with paint or a wax crayon")
+        notes.append(f"{what} come as their own body for a second colour; without a multi-colour printer, fill the grooves with paint or a wax crayon")
     else:
-        notes.append("the pointer is a groove 0.6 mm deep: fill it with paint or a wax crayon to make it show")
+        notes.append(f"{what} are cut 0.6 mm deep: fill with paint or a wax crayon to make them show" if labels else
+                     "the pointer is a groove 0.6 mm deep: fill it with paint or a wax crayon to make it show")
     if below:
         checks.append("the stem stands below the knob, so the knob's underside hangs in the air: print with supports from the bed only")
     notes.append("print it as it stands, base on the bed, in PETG or ASA (an oven or hob knob gets warm: not PLA), 3 walls and 30% infill"
@@ -379,11 +462,12 @@ def appliance_knob(style="pointer bar (oven, hob)", diameter=45.0, height=28.0, 
 KINDS = {
     "handwheel": (handwheel, "Handwheel", {"diameter": 100.0, "rim": 12.0, "spokes": 3, "shaft": "round", "bore_d": 8.0, "flat": 0.0,
                                            "hub_length": 20.0, "hub_d": 0.0, "set_screw": "M4", "handle": "none", "fit": 0.15}),
-    "rc_wheel": (rc_wheel, "RC car wheel and tyre", {"piece": PIECES[0], "tyre_d": 65.0, "width": 26.0, "rim_d": 52.0, "hex": 12.0, "hex_depth": 5.0,
+    "rc_wheel": (rc_wheel, "RC car wheel and tyre", {"piece": PIECES[0], "scale": "custom (the sizes below)", "tyre_d": 65.0, "width": 26.0, "rim_d": 52.0, "hex": 12.0, "hex_depth": 5.0,
                                                      "axle_d": 4.0, "mount_inset": 0.0, "web": "spokes", "spokes": 6, "tread": "blocks", "fit": 0.15}),
     "appliance_knob": (appliance_knob, "Appliance knob (oven, washer, dryer)", {
         "style": KNOB_STYLES[0], "diameter": 45.0, "height": 28.0, "skirt": 5.0, "shaft": "D (one flat)", "shaft_d": 6.0, "flat": 0.0, "depth": 14.0,
-        "flat_at": FLAT_AT[0], "grip": GRIPS[1], "stem_below": 0.0, "set_screw": "none", "two_color": False, "fit": 0.1}),
+        "flat_at": FLAT_AT[0], "grip": GRIPS[1], "stem_below": 0.0, "set_screw": "none", "two_color": False, "fit": 0.1,
+        "marks": "", "mark_size": 4.0, "mark_sweep": 270.0, "mark_start": 0.0}),
 }
 KIND_LABELS = {
     ("handwheel", "diameter"): ("Diameter", "len"), ("handwheel", "rim"): ("Rim thickness", "len"), ("handwheel", "spokes"): ("Spokes (0: a solid web)", "num"),
@@ -391,7 +475,7 @@ KIND_LABELS = {
     ("handwheel", "flat"): ("D shaft: across the flat (0: three quarters of the shaft)", "size"),
     ("handwheel", "hub_length"): ("Hub length (0: no hub, flush with the rim)", "len"), ("handwheel", "hub_d"): ("Hub diameter (0: to suit)", "len"),
     ("handwheel", "set_screw"): ("Set screw", "select"), ("handwheel", "handle"): ("Spinner handle", "select"), ("handwheel", "fit"): ("Fit (added round the shaft)", "len"),
-    ("rc_wheel", "piece"): ("Make the", "select"), ("rc_wheel", "tyre_d"): ("Tyre outside diameter", "len"), ("rc_wheel", "width"): ("Width", "len"),
+    ("rc_wheel", "piece"): ("Make the", "select"), ("rc_wheel", "scale"): ("Scale", "select"), ("rc_wheel", "tyre_d"): ("Tyre outside diameter", "len"), ("rc_wheel", "width"): ("Width", "len"),
     ("rc_wheel", "rim_d"): ("Wheel diameter (where the tyre sits)", "len"), ("rc_wheel", "hex"): ("Drive hex: 12 for 1/10, 7 for small scales, 17 for 1/8 (0: none)", "size"),
     ("rc_wheel", "hex_depth"): ("Hex depth", "len"), ("rc_wheel", "axle_d"): ("Axle diameter", "size"),
     ("rc_wheel", "mount_inset"): ("Hex face in from the inner edge (0: the middle)", "len"), ("rc_wheel", "web"): ("Face", "select"),
@@ -401,12 +485,15 @@ KIND_LABELS = {
     ("appliance_knob", "shaft_d"): ("Shaft diameter: 6, 1/4, 3/16", "size"), ("appliance_knob", "flat"): ("Across the flat (0: three quarters of the shaft)", "size"),
     ("appliance_knob", "depth"): ("Socket depth (how much shaft goes in)", "len"), ("appliance_knob", "flat_at"): ("With the pointer up, the flat is at", "select"),
     ("appliance_knob", "grip"): ("Grip on the shaft", "select"), ("appliance_knob", "stem_below"): ("Stem below the knob, for a shaft set back in the panel (0: none)", "len"),
-    ("appliance_knob", "set_screw"): ("Set screw", "select"), ("appliance_knob", "two_color"): ("Pointer in a second colour", "bool"),
+    ("appliance_knob", "set_screw"): ("Set screw", "select"), ("appliance_knob", "two_color"): ("Pointer and markings in a second colour", "bool"),
     ("appliance_knob", "fit"): ("Fit (added round the shaft)", "len"),
+    ("appliance_knob", "marks"): ("Your markings round the skirt, | between: OFF|LO|MED|HI, or each at its own angle: OFF@0|1@45|2@90 (- is a line, . a dot)", "text"),
+    ("appliance_knob", "mark_size"): ("Marking height", "len"), ("appliance_knob", "mark_sweep"): ("Spread them over, °", "num"),
+    ("appliance_knob", "mark_start"): ("First one at, ° clockwise from the pointer", "num"),
 }
 CHOICES = {
     ("handwheel", "shaft"): list(SHAFTS), ("handwheel", "set_screw"): list(SET_SCREWS), ("handwheel", "handle"): list(HANDLES),
-    ("rc_wheel", "piece"): list(PIECES), ("rc_wheel", "web"): list(WEBS), ("rc_wheel", "tread"): list(TREADS),
+    ("rc_wheel", "piece"): list(PIECES), ("rc_wheel", "scale"): list(RC_SCALES), ("rc_wheel", "web"): list(WEBS), ("rc_wheel", "tread"): list(TREADS),
     ("appliance_knob", "style"): list(KNOB_STYLES), ("appliance_knob", "shaft"): list(KNOB_SHAFTS), ("appliance_knob", "flat_at"): list(FLAT_AT),
     ("appliance_knob", "grip"): list(GRIPS), ("appliance_knob", "set_screw"): ["none", "M3", "M4"],
 }

@@ -33,6 +33,12 @@ VARIANTS = {
     "test_point_plate": [{}, {"labels": "A|B|C|D|E|F", "rows": 2, "hole_d": 6}, {"labels": "GND", "mount_holes": False}],
     "panel_bezel": [{}, {"depth": 0, "screw_d": 0}],
     "terminal_cover": [{}, {"wire_slot": 0, "length": 30}],
+    "cell_pack_holder": [{}, {"series": 2, "parallel": 3, "layout": "grid (rows of cells)", "ears": "two ears"}],
+    "shaft_collar": [{}, {"style": "set screw"}],
+    "shaft_coupler": [{}, {"shaft_a": 6.35, "shaft_b": 6.35}],
+    "bearing_block": [{}, {"bearing": "625"}],
+    "extrusion_foot": [{}, {"profile": "4040 (40 mm)"}],
+    "vise_jaws": [{}, {"grooves": "plain"}],
 }
 
 
