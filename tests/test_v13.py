@@ -17,7 +17,7 @@ from enclosure import box, hardware as hw
     ("snap_ring", {"size": 16, "type": "internal"}),
     ("thumbscrew", {}),
     ("thumbscrew", {"style": "wing", "size": "M4"}),
-    ("thumbscrew", {"style": "cap"}),
+    ("thumbscrew", {"style": "star"}),
 ])
 def test_new_parts(kind, params):
     r = hw.make(kind, **params)

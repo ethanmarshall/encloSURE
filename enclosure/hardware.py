@@ -1135,85 +1135,92 @@ def snap_ring(size=10.0, type="external", mode="reference"):
 SHCS_HEAD = {2: (3.8, 2.0), 2.5: (4.5, 2.5), 3: (5.5, 3.0), 4: (7.0, 4.0), 5: (8.5, 5.0), 6: (10.0, 6.0), 8: (13.0, 8.0)}
 
 
-def thumbscrew(size="M3", length=10.0, style="knurled", mode="reference", threads=False, clearance=0.2, head_d=None):
-    """A screw to turn by hand, its head above z = 0 and its shank down to -length: a knurled head
-    (like DIN 464), wings (like DIN 316), or a printed cap that a socket head screw presses into (style
-    cap: no printed thread to strip)."""
+# ISO 4762 heads are in SHCS_HEAD; these are ASME B18.3 inch socket head cap screws: (head diameter, head height) in mm.
+SHCS_HEAD_INCH = {"#2": (3.56, 2.18), "#4": (4.65, 2.84), "#6": (5.74, 3.51), "#8": (6.86, 4.17), "#10": (7.92, 4.83),
+                  "1/4": (9.53, 6.35), "5/16": (11.91, 7.94), "3/8": (14.29, 9.53)}
+THUMB_STYLES = ("knurled", "wing", "star")
+
+
+def thumbscrew(size="M3", style="knurled", head_d=None, height=None, seat=2.0, pocket_fit=0.1, length=None, **_old):
+    """A thumb screw cap: a printed head that presses onto a standard socket head cap screw and turns
+    it into a thumb screw. The screw drops in from the top, its head sits in a ribbed pocket, and its
+    own steel thread does the work. Knurled, winged, or a star knob."""
     tsize, d, p, system = thread_size(size)
-    if not 2 <= length <= 150:
-        raise ValueError("length: 2 to 150 mm")
+    if style == "cap":          # the old name for the knurled cap
+        style = "knurled"
+    if style not in THUMB_STYLES:
+        raise ValueError(f"thumb screw cap style: one of {', '.join(THUMB_STYLES)}")
+    if system == "inch":
+        key = tsize.split("-")[0]
+        if key not in SHCS_HEAD_INCH:
+            raise ValueError(f"no socket head size on file for {tsize}: one of {', '.join(SHCS_HEAD_INCH)} or a metric size")
+        hd, hh = SHCS_HEAD_INCH[key]
+    else:
+        hd, hh = SHCS_HEAD.get(d, (1.5 * d + 1.0, d))
+    seat = float(seat)
+    if not 1.2 <= seat <= 10:
+        raise ValueError("under the head: 1.2 to 10 mm of plastic")
+    k = float(height) if height else round(hh + seat, 2)
+    if k < hh + seat - 0.01:
+        k = round(hh + seat, 2)
+    dk = float(head_d) if head_d else max(hd + 7.0, round(3.6 * d), 10.0)
+    if dk < hd + 4:
+        raise ValueError(f"the head must be at least {hd + 4:g} mm across to hold a Ø{hd:g} mm screw head")
+    if dk > 80:
+        raise ValueError("head diameter: up to 80 mm")
     notes, checks = [], []
-    dk = float(head_d) if head_d else max(7.0, round(4 * d))
-    k = max(4.5, min(2 * d + 1.5, 16.0))
-    if style == "cap":
-        hd, hh = SHCS_HEAD.get(d, (1.6 * d, d))
-        dk = float(head_d) if head_d else max(dk, hd + 6)
-        k = max(k, hh + 2.0)
-        cap = Cylinder(dk / 2, k, align=(Align.CENTER, Align.CENTER, Align.MIN))
-        for i in range(int(dk * 2.2)):
-            cap -= Rot(0, 0, 360 * i / int(dk * 2.2)) * Pos(dk / 2 + 0.25, 0, 0) * Cylinder(0.7, k * 3)
-        try:
-            cap = chamfer(cap.edges().sort_by(Axis.Z)[-1], 0.8)
-        except Exception:
-            pass
-        # The screw goes in from the top: its head in a snug pocket, the shank out of the bottom.
-        cap -= Pos(0, 0, k - hh - 0.01) * Cylinder(hd / 2 + 0.05, hh + 0.02, align=(Align.CENTER, Align.CENTER, Align.MIN))
-        cap -= Cylinder((d + 0.4) / 2, k * 3)
-        notes.append(f"printed thumb cap Ø{dk:g} x {k:g} mm for an {tsize} socket head cap screw: press the head into "
-                     f"the Ø{hd + 0.1:g} mm pocket (a drop of CA glue holds it); the screw's own thread does the work")
-        return {"shape": cap, "notes": notes, "checks": checks,
-                "info": {"head_d": dk, "head_h": k, "pocket": hd + 0.1},
-                "buy": f"{tsize} x {length:g} socket head cap screw (ISO 4762)"}
-    # The head.
     if style == "knurled":
-        collar_d, collar_h = round(dk * 0.5, 1), max(1.5, 0.3 * k)  # the shoulder under the knurl
-        head = Cylinder(dk / 2, k - collar_h, align=(Align.CENTER, Align.CENTER, Align.MIN))
-        n = int(dk * 2.2)
+        cap = Cylinder(dk / 2, k, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        n = max(12, int(dk * 2.0))
         for i in range(n):
-            head -= Rot(0, 0, 360 * i / n) * Pos(dk / 2 + 0.25, 0, 0) * Cylinder(0.6, k * 3)
-        head = Pos(0, 0, collar_h) * head + Cylinder(collar_d / 2, collar_h + 0.01, align=(Align.CENTER, Align.CENTER, Align.MIN))
-        try:
-            head = chamfer(head.edges().sort_by(Axis.Z)[-1], min(0.8, k / 8))
-        except Exception:
-            pass
-        label, std = "knurled thumb screw", "DIN 464"
-    elif style == "wing":
-        span = max(16.0, 5.0 * d)
-        hub_d = max(d * 2.0, 6.0)
-        wt = max(2.0, 0.6 * d)
-        wh = max(k * 1.3, 8.0)
-        head = Cylinder(hub_d / 2, wh * 0.8, align=(Align.CENTER, Align.CENTER, Align.MIN))
-        hw_ = span / 2
-        prof = Polygon((0, 0), (hw_ * 0.75, wh * 0.3), (hw_, wh * 0.75), (hw_ * 0.9, wh), (hw_ * 0.5, wh * 0.95), (0, wh * 0.8),
+            cap -= Rot(0, 0, 360 * i / n) * Pos(dk / 2 + 0.3, 0, 0) * Cylinder(0.8, k * 3)
+    elif style == "star":
+        lobes = 5
+        cap = Cylinder(dk / 2 * 0.72, k, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        for i in range(lobes):
+            cap += Rot(0, 0, 360 * i / lobes) * Pos(dk / 2 * 0.72, 0, 0) * Cylinder(dk / 2 * 0.28, k, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    else:  # wing
+        hub = hd + 5.0
+        span = float(head_d) if head_d else max(22.0, 5.5 * d)
+        dk = span
+        wt = max(2.4, 0.7 * d)
+        wh = max(k, min(1.6 * k, k + 6))
+        cap = Cylinder(hub / 2, k, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        prof = Polygon((0, 0), (span / 2 - 1.5, 0), (span / 2, 1.5), (span / 2, wh - 2), (span / 2 - 2, wh), (hub / 2 + 1, wh), (hub / 2 - 0.5, k), (0, k),
                        align=None)
         wing = extrude(Plane.XZ * prof, amount=wt / 2, both=True)
-        head += wing + Rot(0, 0, 180) * wing
-        dk = span
-        label, std = "wing screw", "DIN 316"
-    else:
-        raise ValueError("thumb screw style: knurled, wing or cap")
-    # The shank.
-    if mode == "print":
-        th = _thread(d, p, length, True, clearance, ("chamfer", "square"))
-        core = Cylinder(th.root_radius + 0.01, length, align=(Align.CENTER, Align.CENTER, Align.MIN))
-        shank = Pos(0, 0, -length) * (core + th)
-        _printed_thread_checks(d, p, checks)
-        notes.append(f"printed {label} {d:g} x {p:g} x {length:g} mm, head Ø{dk:g} mm, threads {clearance:g} mm undersize; "
-                     "print it standing on its head")
-        buy = None
-    else:
-        if threads:
-            th = _thread(d, p, length, True, 0.0, ("chamfer", "square"))
-            core = Cylinder(th.root_radius + 0.01, length, align=(Align.CENTER, Align.CENTER, Align.MIN))
-            shank = Pos(0, 0, -length) * (core + th)
-        else:
-            shank = Pos(0, 0, -length) * Cylinder(d / 2, length, align=(Align.CENTER, Align.CENTER, Align.MIN))
-        notes.append(f"{tsize} x {length:g} {label} (like {std}), head Ø{dk:g} mm" + ("" if threads else ", threads shown plain"))
-        buy = f"{tsize} x {length:g} {label}, {std}"
-    shape = head + shank
-    return {"shape": shape, "notes": notes, "checks": checks,
-            "info": {"major_d": d, "pitch": p, "length": length, "head_d": dk}, "buy": buy}
-
+        cap += wing + Rot(0, 0, 180) * wing
+    try:
+        cap = chamfer(cap.edges().group_by(Axis.Z)[-1], 0.6)
+    except Exception:
+        pass
+    try:
+        cap = chamfer(cap.edges().group_by(Axis.Z)[0], 0.4)
+    except Exception:
+        pass
+    # The screw goes in from the top: its head in a pocket with crush ribs, the shank out of the bottom.
+    pr = hd / 2 + float(pocket_fit)
+    top = cap.bounding_box().max.Z
+    cap -= Pos(0, 0, seat) * Cylinder(pr, top + 1, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    cap -= Pos(0, 0, -1) * Cylinder((d + 0.4) / 2, top + 2, align=(Align.CENTER, Align.CENTER, Align.MIN))
+    rib = 0.25
+    for i in range(6):
+        tri = extrude(Polygon((-0.5, 0.05), (0.5, 0.05), (0, -rib), align=None), amount=hh - 0.6, dir=(0, 0, 1))
+        cap += Rot(0, 0, 60 * i) * Pos(0, pr, seat) * tri
+    proud = round(k - seat - hh, 2)
+    notes.append(f"thumb screw cap for an {tsize} socket head cap screw (head Ø{hd:g} x {hh:g} mm): {style}, Ø{dk:g} x {top:g} mm; "
+                 f"the pocket is Ø{2 * pr:g} mm with six {rib:g} mm crush ribs, and the head sits "
+                 + ("flush with the top" if abs(proud) < 0.05 else f"{proud:g} mm below the top"))
+    notes.append(f"push the screw in from the top until its head seats (a vice or a tap helps), with a drop of CA glue for a "
+                 f"cap that never turns on the head; a hex key still fits. The cap takes {seat:g} mm of the screw's length")
+    notes.append("print it as it stands, pocket up, no supports")
+    if d < 3:
+        checks.append("on a screw under M3 the pocket's walls are thin: glue it")
+    want = f" x {float(length):g}" if length else ""
+    return {"shape": cap.clean(), "notes": notes, "checks": checks,
+            "info": {"head_d": round(dk, 2), "height": round(top, 2), "pocket_d": round(2 * pr, 2), "pocket_depth": round(top - seat, 2),
+                     "screw_head": [hd, hh], "shank_hole": round(d + 0.4, 2)},
+            "buy": f"{tsize}{want} socket head cap screw ({'ASME B18.3' if system == 'inch' else 'ISO 4762'}), {seat:g} mm longer than the thread you need"}
 
 
 # ---------- Gridfinity ----------
@@ -1298,7 +1305,8 @@ KINDS = {
     "dowel": (dowel, "Dowel pin", {"diameter": 4.0, "length": 20.0, "fit": "press", "chamfer": None, "chamfer_angle": 45.0,
                                    "ends": "both"}),
     "snap_ring": (snap_ring, "Snap ring (circlip)", {"size": 10.0, "type": "external"}),
-    "thumbscrew": (thumbscrew, "Thumb screw", {"size": "M3", "length": 10.0, "style": "knurled", "threads": False, "head_d": None}),
+    "thumbscrew": (thumbscrew, "Thumb screw cap (for a socket head screw)", {"size": "M3", "style": "knurled", "head_d": None, "height": None,
+                                                                              "seat": 2.0, "pocket_fit": 0.1}),
     "gridfinity_bin": (gridfinity_bin, "Gridfinity bin", {"units_x": 1, "units_y": 1, "height": 3, "wall": 1.2, "div_x": 0,
                                                           "div_y": 0, "lip": True, "magnets": False, "screws": False, "label": False}),
     "gridfinity_baseplate": (gridfinity_baseplate, "Gridfinity baseplate", {"units_x": 3, "units_y": 2, "magnets": False}),
@@ -1307,7 +1315,7 @@ KINDS = {
 # How each part sits on the print bed: a turn (x, y, z degrees) from how it is modelled.
 PRINT_ROTATION = {"screw": (180, 0, 0), "snap_hook": (90, 0, 0), "din_clip": (180, 0, 0), "knob": (180, 0, 0),
                   "button_cap": (180, 0, 0), "latch": (90, 0, 0),
-                  "extension_spring": (0, 0, 0), "torsion_spring": (0, 0, 0), "thumbscrew": (180, 0, 0), "dowel": (90, 0, 0)}
+                  "extension_spring": (0, 0, 0), "torsion_spring": (0, 0, 0), "dowel": (90, 0, 0)}
 # Parts that are always printed (no bought version): mode is ignored, and material matters.
 PRINTED_ONLY = {"snap_hook", "cable_clip", "tie_mount", "board_clip", "din_clip", "spur_gear", "gt2_pulley", "knob",
                 "button_cap", "hinge", "latch", "test_print", "wheel", "gridfinity_bin", "gridfinity_baseplate"}
@@ -1317,26 +1325,27 @@ PRINTED_ONLY = {"snap_hook", "cable_clip", "tie_mount", "board_clip", "din_clip"
 from . import useful as _useful  # noqa: E402
 
 KINDS.update(_useful.KINDS)
-PRINTED_ONLY |= set(_useful.KINDS)
+PRINTED_ONLY |= set(_useful.KINDS) | {"thumbscrew"}
 
 # What each part is filed under on the page, and other words people look for it by.
 GROUPS = {
     "Fasteners": ["screw", "nut", "washer", "spacer", "insert", "thumbscrew", "dowel", "snap_ring"],
     "Springs": ["compression_spring", "extension_spring", "torsion_spring"],
-    "Mounts and brackets": ["shelf_bracket", "corner_brace", "pipe_clamp", "pegboard_hook", "wall_pocket", "din_clip"],
+    "Mounts and brackets": ["shelf_bracket", "corner_brace", "pipe_clamp", "pegboard_hook", "wall_pocket"],
     "Cable management": ["cable_clip", "tie_mount", "cable_comb", "raceway", "desk_grommet", "grommet"],
     "Workshop": ["bit_holder", "tool_rack", "sanding_block", "drill_guide"],
     "Storage": ["gridfinity_bin", "gridfinity_baseplate", "drawer_organizer", "battery_caddy"],
-    "Repairs": ["knob", "foot", "end_cap", "shim", "hole_plug", "button_cap"],
+    "Electronics": ["battery_holder", "board_clip", "din_clip", "button_cap"],
+    "Repairs": ["knob", "foot", "end_cap", "shim", "hole_plug"],
     "Labels": ["label_plate"],
-    "Hinges, latches and clips": ["hinge", "latch", "snap_hook", "board_clip"],
+    "Hinges, latches and clips": ["hinge", "latch", "snap_hook"],
     "Motion": ["spur_gear", "gt2_pulley", "wheel"],
     "Fans": ["fan_guard", "fan_adapter"],
     "Test prints": ["test_print"],
 }
 WORDS = {
     "screw": "bolt machine screw cap screw fastener", "nut": "hex nut square nut", "washer": "fender penny", "spacer": "standoff",
-    "insert": "heat set threaded brass", "thumbscrew": "thumb knob wing screw", "dowel": "pin peg", "snap_ring": "circlip retaining ring e-clip",
+    "insert": "heat set threaded brass", "thumbscrew": "thumb knob wing screw cap shcs socket head", "dowel": "pin peg", "snap_ring": "circlip retaining ring e-clip",
     "shelf_bracket": "shelf support angle", "corner_brace": "angle bracket l bracket", "pipe_clamp": "conduit tube saddle strap p-clip",
     "pegboard_hook": "peg board hanger", "wall_pocket": "phone holder remote holder wall mount cradle dock",
     "din_clip": "din rail mount ts35", "cable_clip": "wire clip cord", "tie_mount": "zip tie cable tie anchor",
@@ -1348,7 +1357,7 @@ WORDS = {
     "button_cap": "switch cap", "hinge": "leaf hinge", "latch": "catch", "snap_hook": "snap fit cantilever", "board_clip": "pcb clip",
     "spur_gear": "gear cog", "gt2_pulley": "belt pulley timing", "wheel": "roller caster bearing", "fan_guard": "fan grill grille cover",
     "fan_adapter": "fan duct reducer", "compression_spring": "coil spring", "extension_spring": "tension spring", "torsion_spring": "",
-    "test_print": "tolerance calibration", "label_plate": "name plate tag sign nameplate keychain key fob plant marker valve tag text",
+    "test_print": "tolerance calibration", "battery_holder": "battery compartment holder case 18650 aa aaa 9v cell contacts protected", "label_plate": "name plate tag sign nameplate keychain key fob plant marker valve tag text",
 }
 GROUP_OF = {k: g for g, ks in GROUPS.items() for k in ks}
 
@@ -1466,8 +1475,12 @@ KIND_LABELS = {("knob", "height"): ("Height", "len"), ("knob", "grip"): ("Grip r
                ("dowel", "fit"): ("Fit", "select"), ("dowel", "chamfer"): ("Chamfer (blank: about 10% of Ø)", "len"),
                ("dowel", "chamfer_angle"): ("Chamfer angle from the axis, ° (45 plain, 15 lead-in)", "num"),
                ("dowel", "ends"): ("Chamfered ends", "select"), ("snap_ring", "size"): ("Shaft or bore", "select"),
-               ("snap_ring", "type"): ("Type", "select"), ("thumbscrew", "style"): ("Head", "select"),
-               ("thumbscrew", "head_d"): ("Head diameter (blank: standard)", "len"), ("test_print", "size"): ("Thread", "text")}
+               ("snap_ring", "type"): ("Type", "select"), ("thumbscrew", "style"): ("Cap", "select"),
+               ("thumbscrew", "size"): ("Screw size", "text"),
+               ("thumbscrew", "head_d"): ("Cap diameter or wing span (blank: standard)", "len"),
+               ("thumbscrew", "height"): ("Cap height (blank: the screw head plus what's under it)", "len"),
+               ("thumbscrew", "seat"): ("Plastic under the screw's head", "len"),
+               ("thumbscrew", "pocket_fit"): ("Pocket fit (added to the head's radius)", "len"), ("test_print", "size"): ("Thread", "text")}
 
 
 def catalog() -> dict:
@@ -1485,7 +1498,7 @@ def catalog() -> dict:
         ("wheel", "set_screw"): ["", "M2", "M2.5", "M3", "M4"], ("wheel", "tread"): ["flat", "rounded", "o-ring", "v-groove"],
         ("dowel", "fit"): ["press", "slip"], ("dowel", "ends"): ["both", "one", "none"], ("snap_ring", "type"): ["external", "internal"],
         ("snap_ring", "size"): sorted(set(RINGS_EXTERNAL) | set(RINGS_INTERNAL)),
-        ("thumbscrew", "style"): ["knurled", "wing", "cap"],
+        ("thumbscrew", "style"): list(THUMB_STYLES),
         **_useful.CHOICES,
     }
     out = {}

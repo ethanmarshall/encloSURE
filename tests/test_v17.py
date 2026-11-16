@@ -26,6 +26,8 @@ VARIANTS = {
     "drawer_organizer": [{}, {"div_x": 0, "div_y": 3}],
     "battery_caddy": [{}, {"cell": "9V", "rows": 1, "cols": 2}, {"cell": "18650"}],
     "fan_guard": [{}, {"fan": "120"}, {"fan": 40}],
+    "battery_holder": [{}, {"cell": "18650 protected", "count": 2}, {"cell": "AA", "count": 4}, {"cell": "AAA", "count": 2, "ears": False},
+                       {"cell": "9V"}, {"cell": "9V", "count": 2}, {"cell": "21700"}],
     "label_plate": [{}, {"text": "MAIN VALVE|Shut off here", "style": "engraved", "mount": "cable tie slots"},
                     {"text": "12 V", "icon": "dc", "mount": "screw holes"}, {"text": "FUSES", "mount": "magnets", "style": "engraved"},
                     {"text": "TOMATO", "mount": "stake"}, {"text": "OK", "width": 80, "height": 40, "corners": "square", "border": False}],
@@ -123,3 +125,35 @@ def test_label_plates():
     import io, zipfile
     z = zipfile.ZipFile(io.BytesIO(c.post("/api/part/download", json={"kind": "label_plate", "params": {"style": "flush"}}).content))
     assert any(n.endswith("label_plate_second_colour.stl") for n in z.namelist())
+
+
+def test_battery_compartments_and_18650_lengths():
+    bare = hw.make("battery_holder", cell="18650")
+    prot = hw.make("battery_holder", cell="18650 protected")
+    mine = hw.make("battery_holder", cell="18650", cell_length=68.4)
+    assert bare["info"]["inside_length"] == pytest.approx(65.2 + 6.5)
+    assert prot["info"]["inside_length"] == pytest.approx(69.5 + 6.5)
+    assert mine["info"]["inside_length"] == pytest.approx(68.4 + 6.5) and "standard 18650 is 65.2" in mine["notes"][0]
+    assert prot["size"][0] - bare["size"][0] == pytest.approx(4.3, abs=0.01)
+    assert "protection circuit" in " ".join(bare["notes"])
+    nine = hw.make("battery_holder", cell="9V")
+    assert "snap connector" in nine["notes"][0] and nine["info"]["contact_width"] is None
+    for bad in ({"cell": "AA", "contact_w": 20}, {"cell": "18650", "cell_length": 90}, {"cell": "C"}, {"count": 9}):
+        with pytest.raises(ValueError):
+            hw.make("battery_holder", **bad)
+
+
+def test_thumb_screw_is_a_cap_for_a_socket_head_screw():
+    r = hw.make("thumbscrew", size="M4")
+    assert r["info"]["screw_head"] == [7.0, 4.0] and r["info"]["pocket_d"] == pytest.approx(7.2)
+    assert r["info"]["shank_hole"] == pytest.approx(4.4) and "socket head cap screw (ISO 4762)" in r["buy"]
+    assert r["shape"].bounding_box().min.Z > -0.01 and r["size"][2] == pytest.approx(6.0)   # the head's 4 mm and 2 mm under it
+    inch = hw.make("thumbscrew", size="1/4-20", style="star")
+    assert inch["info"]["screw_head"] == [9.53, 6.35] and "ASME B18.3" in inch["buy"]
+    assert hw.make("thumbscrew", style="wing", size="M5")["shape"].is_valid
+    old = hw.make("thumbscrew", style="cap", length=10, threads=False, mode="print")       # a saved part from before still opens
+    assert old["shape"].is_valid
+    cat = hw.catalog()["kinds"]["thumbscrew"]
+    assert not cat["modes"] and "length" not in [f["name"] for f in cat["fields"]]
+    with pytest.raises(ValueError):
+        hw.make("thumbscrew", size="M3", head_d=6)

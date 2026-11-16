@@ -551,7 +551,7 @@ CELL_SIZES = {"AAA": (10.5, 44.5), "AA": (14.5, 50.5), "C": (26.2, 50.0), "D": (
 
 def battery_caddy(cell="AA", rows=2, cols=4, depth_fraction=0.5):
     """A storage block for spare cells, standing up in pockets: AAA, AA, C, D, CR123A, 18650, 21700
-    or 9V. It stores them; it has no contacts (see the box's battery holder for a powered one)."""
+    or 9V. It stores them; it has no contacts (the battery compartment is the powered one)."""
     if cell not in CELL_SIZES:
         raise ValueError(f"cell: one of {', '.join(CELL_SIZES)}")
     r, c, f = int(rows), int(cols), float(depth_fraction)
@@ -576,6 +576,103 @@ def battery_caddy(cell="AA", rows=2, cols=4, depth_fraction=0.5):
     notes = [f"storage block for {r * c} {cell} cells ({r} x {c}): pockets {pw:g} mm, {dp:.0f} mm deep; "
              f"{c * px + 2:.0f} x {r * py + 2:.0f} x {dp + 1.6:.0f} mm", "print it as it stands"]
     return _out(body, notes, ["store lithium cells with their ends covered, and never loose with metal"] if cell in ("18650", "21700", "CR123A") else [])
+
+
+# Cells for a holder with contacts: (diameter, length, contact plate width). A protected 18650 has a
+# protection circuit on one end from the factory and runs 68 to 70 mm, against 65 mm for a bare one.
+HOLDER_CELLS = {"AAA": (10.5, 44.5, 7.0), "AA": (14.5, 50.5, 9.5), "18650": (18.6, 65.2, 12.0),
+                "18650 protected": (18.9, 69.5, 12.0), "21700": (21.4, 70.2, 14.0)}
+NINE_V = (26.5, 17.5, 48.5)   # a PP3: width, thickness, length to the top of its terminals
+
+
+def battery_holder(cell="18650", count=1, cell_length=0.0, contact_room=6.5, contact_w=0.0, contact_t=0.6, ears=True):
+    """A battery compartment with places for contacts: AAA, AA, 18650 (bare or with a protection
+    circuit), 21700, or a 9V. Each cell lies in a trough between two end walls, and each end wall has
+    a slot a flat contact plate drops into (a spring at one end, a button at the other). The cell
+    length is yours to set, which is what makes a protected 18650 fit."""
+    n = int(count)
+    _rng("cells", n, 1, 8, "")
+    fl, side = 1.6, 1.6
+    notes, checks = [], []
+    if cell == "9V":
+        w9, t9, l9 = NINE_V
+        ln = float(cell_length) or l9
+        _rng("battery length", ln, 40, 60)
+        room = 9.0                                    # the snap connector on the terminals
+        iw, il = n * (w9 + 0.6) + (n - 1) * side, ln + room
+        wall_h = fl + 0.7 * t9
+        body = Box(il + 2 * side, iw + 2 * side, wall_h, align=MIN_)
+        for i in range(n):
+            y = -iw / 2 + (w9 + 0.6) / 2 + i * (w9 + 0.6 + side)
+            body -= Pos(0, y, fl) * Box(il, w9 + 0.6, wall_h, align=MIN_)
+            body -= Pos(il / 2 + side / 2, y, fl + 3) * Box(side * 3, 6.0, wall_h, align=MIN_)        # the leads' way out
+            body -= Pos(-il / 2 - side / 2, y, fl + wall_h * 0.5) * Box(side * 3, 14.0, wall_h, align=MIN_)   # a thumb notch to lift it
+        notes.append(f"compartment for {n} x 9V (PP3, {w9:g} x {t9:g} x {ln:g} mm): {il:g} mm long inside with {room:g} mm for the "
+                     f"snap connector and a slot for its leads; no contacts to fit, the snap connector is the contact")
+        cw = None
+        L_out, W_out = il + 2 * side, iw + 2 * side
+    else:
+        if cell not in HOLDER_CELLS:
+            raise ValueError(f"cell: one of {', '.join(list(HOLDER_CELLS) + ['9V'])}")
+        dia, std_len, cw_std = HOLDER_CELLS[cell]
+        ln = float(cell_length) or std_len
+        _rng("cell length", ln, std_len - 8, std_len + 12)
+        room, ct = float(contact_room), float(contact_t)
+        _rng("room for the contacts", room, 2, 14); _rng("contact thickness", ct, 0.2, 1.5)
+        cw = float(contact_w) or cw_std
+        pitch = dia + 0.5 + side
+        if cw > pitch - 1.6:
+            raise ValueError(f"a {cw:g} mm contact is too wide for {cell} cells {pitch:g} mm apart: {pitch - 1.6:g} mm at most")
+        lip, back = 1.0, 1.4
+        end_t = lip + ct + 0.3 + back                 # the end wall: a lip, the contact's slot, a back
+        il = ln + room
+        iw = n * (dia + 0.5) + (n - 1) * side
+        L_out, W_out = il + 2 * end_t, iw + 2 * side
+        zc = fl + dia / 2 + 0.2                       # the cells' axis
+        low, high = fl + 0.55 * dia, fl + 0.9 * dia   # the side walls, and the end walls
+        body = Box(L_out, W_out, low, align=MIN_)
+        for sx in (-1, 1):
+            body += Pos(sx * (L_out / 2 - end_t / 2), 0, 0) * Box(end_t, W_out, high, align=MIN_)
+        for i in range(n):
+            y = -iw / 2 + (dia + 0.5) / 2 + i * pitch
+            body -= Pos(0, y, zc) * (Rot(0, 90, 0) * Cylinder(dia / 2 + 0.25, il))        # the trough the cell lies in
+            body -= Pos(0, y, zc + dia / 2) * Box(il, dia + 0.5, dia, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+            body -= Pos(0, y, -1) * Box(min(18.0, il * 0.3), dia * 0.55, fl + 2, align=MIN_)   # a hole to push the cell out from below
+            for sx in (-1, 1):
+                x_in = sx * il / 2                     # the end wall's inner face
+                # The plate's slot, open at the top, and a narrower window through the lip for the spring or button.
+                body -= Pos(x_in + sx * (lip + (ct + 0.3) / 2), y, fl + 0.6) * Box(ct + 0.3, cw + 0.4, high, align=MIN_)
+                body -= Pos(x_in + sx * lip / 2, y, zc - (cw - 3.0) / 2) * Box(lip + 0.02, cw - 3.0, high, align=MIN_)
+                # The solder tab's way out through the back, at the top.
+                body -= Pos(x_in + sx * (end_t - back / 2), y, zc + 1.0) * Box(back + 0.02, min(4.0, cw - 3.0), high, align=MIN_)
+            # A plus sign sunk into the top of the positive end's wall; alternate ends, as cells in series go.
+            px = (1 if i % 2 == 0 else -1) * (L_out / 2 - end_t / 2)
+            for a, b in ((2.6, 0.7), (0.7, 2.6)):
+                body -= Pos(px, y + cw / 2 + 1.3 if y + cw / 2 + 2.6 < W_out / 2 else y - cw / 2 - 1.3, high - 0.4) * Box(min(a, end_t - 0.6), b, 1, align=MIN_)
+        spring, button = room - 1.5, 1.5
+        notes.append(f"compartment for {n} x {cell} (Ø{dia:g} x {ln:g} mm cells): {il:g} mm between the end walls, which leaves "
+                     f"{room:g} mm for the contacts (about {spring:g} mm for a spring squeezed down, {button:g} mm for a button)")
+        notes.append(f"each end wall has a slot for a flat contact plate up to {cw:g} mm wide and {ct:g} mm thick, dropped in from the "
+                     f"top, with a notch behind it for its solder tab; buy spring and button contact plates sold for {cell.split()[0]} cells")
+        notes.append("a plus sign marks one end of each cell, alternating, which is how cells in series lie; for parallel, turn "
+                     "every cell the same way and ignore the marks on the even ones" if n > 1 else "a plus sign marks the positive end")
+        if cell.startswith("18650"):
+            notes.append("18650 lengths differ: a bare cell is about 65 mm, one with a protection circuit 68 to 70 mm, and a button "
+                         f"top adds about 1 mm. This one is set for {ln:g} mm: measure yours and set the cell length to match")
+        if ln != std_len:
+            notes[0] += f" (the standard {cell} is {std_len:g} mm)"
+        checks.append("contact plates differ between makers: check yours against the slot before printing a set, and set the "
+                      "contact width, thickness and room to match")
+    if ears:
+        eh = 3.4
+        for sy in (-1, 1):
+            ear = Pos(0, sy * (W_out / 2 + 4.5 - 0.1), 0) * Box(10.0, 9.2, fl + 0.8, align=MIN_)
+            ear -= Pos(0, sy * (W_out / 2 + 4.8), -1) * Cylinder(eh / 2, 10, align=MIN_)
+            body += ear
+        notes.append(f"a screw ear each side (Ø{eh:g} mm, M3), {W_out + 9.6:.1f} mm apart")
+    notes.append("print it as it stands, no supports")
+    return _out(body, notes, checks, {"inside_length": round(il, 2), "outside": [round(L_out, 2), round(W_out, 2)],
+                                      "cell_length": ln, "contact_width": cw})
 
 
 # ---------- Fans ----------
@@ -845,6 +942,8 @@ KINDS = {
     "label_plate": (label_plate, "Label, tag or name plate", {"text": "PUMP 1", "text_size": 8.0, "style": "raised", "mount": "none",
                                                                "width": 0.0, "height": 0.0, "thickness": 2.0, "depth": 0.6, "bold": True,
                                                                "border": True, "corners": "rounded", "icon": "", "two_color": False}),
+    "battery_holder": (battery_holder, "Battery compartment (with contact slots)", {"cell": "18650", "count": 1, "cell_length": 0.0,
+                                                                                    "contact_room": 6.5, "contact_w": 0.0, "contact_t": 0.6, "ears": True}),
     "fan_guard": (fan_guard, "Fan guard", {"fan": 80, "thickness": 2.4, "bar": 1.6, "gap": 7.0}),
     "fan_adapter": (fan_adapter, "Fan size adapter", {"from_size": 120, "to_size": 80, "height": 0.0, "wall": 2.0}),
 }
@@ -890,6 +989,10 @@ KIND_LABELS = {
     ("label_plate", "depth"): ("Text depth or height", "len"), ("label_plate", "bold"): ("Bold", "bool"),
     ("label_plate", "border"): ("Border", "bool"), ("label_plate", "corners"): ("Corners", "select"), ("label_plate", "icon"): ("Icon", "select"),
     ("label_plate", "two_color"): ("Two colours", "bool"),
+    ("battery_holder", "cell"): ("Cell", "select"), ("battery_holder", "count"): ("Cells, side by side", "num"),
+    ("battery_holder", "cell_length"): ("Cell length (0: standard; a protected 18650 is 68 to 70)", "len"),
+    ("battery_holder", "contact_room"): ("Room for both contacts", "len"), ("battery_holder", "contact_w"): ("Contact plate width (0: usual)", "len"),
+    ("battery_holder", "contact_t"): ("Contact plate thickness", "len"), ("battery_holder", "ears"): ("Screw ears", "bool"),
     ("fan_guard", "fan"): ("Fan size, mm", "select"), ("fan_guard", "bar"): ("Bar width", "len"), ("fan_guard", "gap"): ("Gap between bars", "len"),
     ("fan_adapter", "from_size"): ("Bigger fan, mm", "select"), ("fan_adapter", "to_size"): ("Smaller fan, mm", "select"),
     ("fan_adapter", "height"): ("Height (0: shortest that prints)", "len"),
@@ -899,5 +1002,6 @@ CHOICES = {
     ("end_cap", "shape"): ["round", "square", "rectangle"], ("battery_caddy", "cell"): list(CELL_SIZES),
     ("label_plate", "style"): list(LABEL_STYLES), ("label_plate", "mount"): list(LABEL_MOUNTS),
     ("label_plate", "corners"): ["rounded", "square", "pill"], ("label_plate", "icon"): ["", "usb", "power", "antenna", "fan", "dc", "fuse", "lan", "onoff"],
+    ("battery_holder", "cell"): list(HOLDER_CELLS) + ["9V"],
     ("fan_guard", "fan"): list(FANS), ("fan_adapter", "from_size"): list(FANS), ("fan_adapter", "to_size"): list(FANS),
 }

@@ -298,8 +298,8 @@ Each part comes as STEP and STL with a notes file, and the page's Parts tab draw
 - **Dowel pins**: ISO 8734 reference pins with the hole to make, or printed pins lying on a flat.
 - **Snap rings**: DIN 471 (shaft) and DIN 472 (bore) retaining rings with the groove's diameter and
   width (rounded from the standards: check your supplier's table).
-- **Thumb screws**: a knurled head (like DIN 464), wings (like DIN 316), or a printed cap a socket
-  head screw presses into.
+- **Thumb screw caps**: a printed head (knurled, winged or star) that presses onto a standard socket
+  head cap screw, metric or inch, in a pocket with crush ribs; the screw's own thread does the work.
 - **Test print** (`test_print`): a strip of threaded holes at several clearances with a bolt for each,
   and snap hooks of three undercuts with a plate to push them through. Print it once; the clearance
   that turns by hand is the one to use.
@@ -370,6 +370,9 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   holder, tool rack, sanding block, drill guide, foot, tube end cap, shim or wedge, hole plug,
   drawer organiser, battery storage block, fan guard and fan size adapter. Each is built the way
   it prints, without supports.
+- **Battery compartments** (Parts tab): AAA, AA, 18650, 21700 or 9V, one to eight side by side. Each
+  cell lies in a trough between end walls with slots for flat contact plates. The cell length is
+  settable, so a protected 18650 (68 to 70 mm) fits as well as a bare one (65 mm).
 - **Labels, tags and name plates** (Parts tab): lines of text, raised, engraved, or flush in a second
   colour (the text comes as its own body, in place), with a border, an icon, and screw holes,
   cable-tie slots, a key-ring hole, magnets in the back or a stake. Text shrinks to fit a set size.
