@@ -410,7 +410,7 @@ CHOICES = {
     ("appliance_knob", "style"): list(KNOB_STYLES), ("appliance_knob", "shaft"): list(KNOB_SHAFTS), ("appliance_knob", "flat_at"): list(FLAT_AT),
     ("appliance_knob", "grip"): list(GRIPS), ("appliance_knob", "set_screw"): ["none", "M3", "M4"],
 }
-GROUPS = {"Wheels and knobs": ["handwheel", "rc_wheel", "appliance_knob"]}
+GROUPS: dict = {}       # filed with the gears and pulleys, in hardware.py
 WORDS = {
     "handwheel": "hand wheel crank valve wheel machine lathe mill handle hub set screw",
     "rc_wheel": "rc car radio control tire tyre tpu rim robot wheel 12mm hex buggy crawler",

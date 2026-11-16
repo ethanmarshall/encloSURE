@@ -79,6 +79,23 @@ def test_appliance_knob_fits_its_shaft():
 def test_they_are_on_the_page():
     cat = hw.catalog()
     for kind in ("handwheel", "rc_wheel", "appliance_knob"):
-        assert cat["kinds"][kind]["printed_only"] and cat["kinds"][kind]["group"] == "Wheels and knobs"
+        assert cat["kinds"][kind]["printed_only"] and cat["kinds"][kind]["group"] == "Wheels, gears and knobs"
+    assert cat["kinds"]["spur_gear"]["group"] == cat["kinds"]["wheel"]["group"] == cat["kinds"]["knob"]["group"] == "Wheels, gears and knobs"
+    assert not any(k["group"] == "Motion" for k in cat["kinds"].values())
     f = {x["name"]: x for x in cat["kinds"]["appliance_knob"]["fields"]}
     assert f["shaft_d"]["type"] == "size" and f["flat_at"]["type"] == "select" and len(f["flat_at"]["options"]) == 4
+
+
+def test_battery_cells_apart_or_together():
+    apart = hw.make("battery_holder", cell="AA", count=3, mount="none")
+    together = hw.make("battery_holder", cell="AA", count=3, mount="none", bays="one open compartment")
+    assert together["shape"].is_valid and len(together["shape"].solids()) == 1
+    assert apart["size"][1] - together["size"][1] == pytest.approx(3.2)          # two 1.6 mm walls gone
+    assert together["shape"].volume < apart["shape"].volume
+    assert "own bay" in apart["notes"][1] and "one open compartment" in together["notes"][1]
+    one = hw.make("battery_holder", bays="one open compartment")
+    assert one["size"] == hw.make("battery_holder")["size"] and not any("open compartment" in n for n in one["notes"])
+    nine = hw.make("battery_holder", cell="9V", count=2, bays="one open compartment")
+    assert nine["shape"].is_valid and "no wall between" in nine["notes"][1]
+    with pytest.raises(ValueError):
+        hw.make("battery_holder", bays="loose")

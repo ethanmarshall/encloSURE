@@ -595,6 +595,7 @@ NINE_V = (26.5, 17.5, 48.5)   # a PP3: width, thickness, length to the top of it
 
 
 BATTERY_MOUNTS = ("external ears", "internal holes", "none")
+BATTERY_BAYS = ("each cell in its own bay", "one open compartment")
 # As the holder first shows in the 3D view: its length left to right, the front toward you.
 EAR_SIDES = ("front and back", "both ends", "front only", "back only", "left end only", "right end only")
 _EARS = {"front and back": ("y", (-1, 1)), "both ends": ("x", (-1, 1)), "front only": ("y", (-1,)), "back only": ("y", (1,)),
@@ -602,7 +603,7 @@ _EARS = {"front and back": ("y", (-1, 1)), "both ends": ("x", (-1, 1)), "front o
 
 
 def battery_holder(cell="18650", count=1, cell_length=0.0, contact_room=6.5, contact_w=0.0, contact_t=0.6, mount="external ears",
-                   ear_side="front and back", ears=None):
+                   ear_side="front and back", ears=None, bays="each cell in its own bay"):
     """A battery compartment with places for contacts: AAA, AA, 18650 (bare or with a protection
     circuit), 21700, or a 9V. Each cell lies in a trough between two end walls, and each end wall has
     a slot a flat contact plate drops into (a spring at one end, a button at the other). The cell
@@ -615,7 +616,10 @@ def battery_holder(cell="18650", count=1, cell_length=0.0, contact_room=6.5, con
         raise ValueError(f"fixing: one of {', '.join(BATTERY_MOUNTS)}")
     if ear_side not in EAR_SIDES:
         raise ValueError(f"ears on: one of {', '.join(EAR_SIDES)}")
+    if bays not in BATTERY_BAYS:
+        raise ValueError(f"cells: one of {', '.join(BATTERY_BAYS)}")
     side = 1.6
+    between = side if bays == BATTERY_BAYS[0] or n == 1 else 0.0      # the wall between two cells, or none
     fl = 2.4 if mount == "internal holes" else 1.6     # a thicker floor to sink the screws' heads into
     notes, checks = [], []
     seats = []                           # (y of each cell's centre line, the floor's top there)
@@ -624,13 +628,13 @@ def battery_holder(cell="18650", count=1, cell_length=0.0, contact_room=6.5, con
         ln = float(cell_length) or l9
         _rng("battery length", ln, 40, 60)
         room = 9.0                                    # the snap connector on the terminals
-        iw, il = n * (w9 + 0.6) + (n - 1) * side, ln + room
+        iw, il = n * (w9 + 0.6) + (n - 1) * between, ln + room
         wall_h = fl + 0.7 * t9
         body = Box(il + 2 * side, iw + 2 * side, wall_h, align=MIN_)
         for i in range(n):
-            y = -iw / 2 + (w9 + 0.6) / 2 + i * (w9 + 0.6 + side)
+            y = -iw / 2 + (w9 + 0.6) / 2 + i * (w9 + 0.6 + between)
             seats.append(y)
-            body -= Pos(0, y, fl) * Box(il, w9 + 0.6, wall_h, align=MIN_)
+            body -= Pos(0, y, fl) * Box(il, w9 + 0.6 + (0.02 if not between else 0), wall_h, align=MIN_)
             body -= Pos(il / 2 + side / 2, y, fl + 3) * Box(side * 3, 6.0, wall_h, align=MIN_)        # the leads' way out
             body -= Pos(-il / 2 - side / 2, y, fl + wall_h * 0.5) * Box(side * 3, 14.0, wall_h, align=MIN_)   # a thumb notch to lift it
         notes.append(f"compartment for {n} x 9V (PP3, {w9:g} x {t9:g} x {ln:g} mm): {il:g} mm long inside with {room:g} mm for the "
@@ -646,13 +650,13 @@ def battery_holder(cell="18650", count=1, cell_length=0.0, contact_room=6.5, con
         room, ct = float(contact_room), float(contact_t)
         _rng("room for the contacts", room, 2, 14); _rng("contact thickness", ct, 0.2, 1.5)
         cw = float(contact_w) or cw_std
-        pitch = dia + 0.5 + side
+        pitch = dia + 0.5 + between
         if cw > pitch - 1.6:
             raise ValueError(f"a {cw:g} mm contact is too wide for {cell} cells {pitch:g} mm apart: {pitch - 1.6:g} mm at most")
         lip, back = 1.0, 1.4
         end_t = lip + ct + 0.3 + back                 # the end wall: a lip, the contact's slot, a back
         il = ln + room
-        iw = n * (dia + 0.5) + (n - 1) * side
+        iw = n * (dia + 0.5) + (n - 1) * between
         L_out, W_out = il + 2 * end_t, iw + 2 * side
         zc = fl + dia / 2 + 0.2                       # the cells' axis
         low, high = fl + 0.55 * dia, fl + 0.9 * dia   # the side walls, and the end walls
@@ -663,7 +667,7 @@ def battery_holder(cell="18650", count=1, cell_length=0.0, contact_room=6.5, con
             y = -iw / 2 + (dia + 0.5) / 2 + i * pitch
             seats.append(y)
             body -= Pos(0, y, zc) * (Rot(0, 90, 0) * Cylinder(dia / 2 + 0.25, il))        # the trough the cell lies in
-            body -= Pos(0, y, zc + dia / 2) * Box(il, dia + 0.5, dia, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+            body -= Pos(0, y, zc + dia / 2) * Box(il, dia + 0.5 + (0.02 if not between else 0), dia, align=(Align.CENTER, Align.CENTER, Align.CENTER))
             body -= Pos(0, y, -1) * Box(min(18.0, il * 0.3), dia * 0.55, fl + 2, align=MIN_)   # a hole to push the cell out from below
             for sx in (-1, 1):
                 x_in = sx * il / 2                     # the end wall's inner face
@@ -690,6 +694,11 @@ def battery_holder(cell="18650", count=1, cell_length=0.0, contact_room=6.5, con
             notes[0] += f" (the standard {cell} is {std_len:g} mm)"
         checks.append("contact plates differ between makers: check yours against the slot before printing a set, and set the "
                       "contact width, thickness and room to match")
+    if n > 1:
+        notes.insert(1, f"each cell lies in its own bay, with a {side:g} mm wall between neighbours" if between else
+                     ("the batteries share one open compartment, side by side with no wall between them" if cell == "9V" else
+                      "the cells share one open compartment, side by side with no wall between them: a low ridge in the floor keeps each in its place, "
+                      "and the pack is narrower"))
     eh = 3.4
     if mount == "external ears":
         axis, signs = _EARS[ear_side]
@@ -1042,7 +1051,7 @@ KINDS = {
                                                                "fit_text": True, "font": "Default (DejaVu Sans)", "google_font": "",
                                                                "border": True, "corners": "rounded", "icon": "", "logo": "", "logo_only": False,
                                                                "two_color": False}),
-    "battery_holder": (battery_holder, "Battery compartment (with contact slots)", {"cell": "18650", "count": 1, "cell_length": 0.0,
+    "battery_holder": (battery_holder, "Battery compartment (with contact slots)", {"cell": "18650", "count": 1, "bays": BATTERY_BAYS[0], "cell_length": 0.0,
                                                                                     "contact_room": 6.5, "contact_w": 0.0, "contact_t": 0.6,
                                                                                     "mount": "external ears", "ear_side": "front and back"}),
     "fan_guard": (fan_guard, "Fan guard", {"fan": 80, "thickness": 2.4, "bar": 1.6, "gap": 7.0}),
@@ -1099,6 +1108,7 @@ KIND_LABELS = {
     ("battery_holder", "contact_room"): ("Room for both contacts", "len"), ("battery_holder", "contact_w"): ("Contact plate width (0: usual)", "len"),
     ("battery_holder", "contact_t"): ("Contact plate thickness", "len"), ("battery_holder", "mount"): ("Screw fixing", "select"),
     ("battery_holder", "ear_side"): ("External ears on", "select"),
+    ("battery_holder", "bays"): ("With more than one cell", "select"),
     ("fan_guard", "fan"): ("Fan size, mm", "select"), ("fan_guard", "bar"): ("Bar width", "len"), ("fan_guard", "gap"): ("Gap between bars", "len"),
     ("fan_adapter", "from_size"): ("Bigger fan, mm", "select"), ("fan_adapter", "to_size"): ("Smaller fan, mm", "select"),
     ("fan_adapter", "height"): ("Height (0: shortest that prints)", "len"),
@@ -1109,6 +1119,6 @@ CHOICES = {
     ("label_plate", "style"): list(LABEL_STYLES), ("label_plate", "mount"): list(LABEL_MOUNTS), ("label_plate", "font"): _font_names(),
     ("label_plate", "corners"): ["rounded", "square", "pill"], ("label_plate", "icon"): ["", "usb", "power", "antenna", "fan", "dc", "fuse", "lan", "onoff"],
     ("battery_holder", "cell"): list(HOLDER_CELLS) + ["9V"], ("battery_holder", "mount"): list(BATTERY_MOUNTS),
-    ("battery_holder", "ear_side"): list(EAR_SIDES),
+    ("battery_holder", "ear_side"): list(EAR_SIDES), ("battery_holder", "bays"): list(BATTERY_BAYS),
     ("fan_guard", "fan"): list(FANS), ("fan_adapter", "from_size"): list(FANS), ("fan_adapter", "to_size"): list(FANS),
 }
