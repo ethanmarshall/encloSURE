@@ -256,8 +256,11 @@ def part_preview(body: dict):
             r = hardware.make(kind, **params)
         except (ValueError, RuntimeError, TypeError) as e:
             _bad(e)
-    return _keep(key, {"label": r["label"], "notes": r["notes"], "checks": r["checks"], "info": r["info"], "size": r["size"],
-                       "buy": r["buy"], "mesh": base64.b64encode(_stl(r["shape"])).decode()})
+    out = {"label": r["label"], "notes": r["notes"], "checks": r["checks"], "info": r["info"], "size": r["size"],
+           "buy": r["buy"], "mesh": base64.b64encode(_stl(r["shape"])).decode()}
+    if r.get("inlay") is not None:
+        out["inlay"] = base64.b64encode(_stl(r["inlay"])).decode()
+    return _keep(key, out)
 
 
 @app.post("/api/part/onshape")
@@ -306,7 +309,7 @@ def _plate_items(body: dict) -> list:
             raise ValueError("qty: 1 to 50 of each part")
         r = hardware.make(kind, **params)
         for n in range(qty):
-            items.append(plate.part_item(kind, r["shape"], f"{kind}_{i + 1}" + (f"_{n + 1}" if qty > 1 else "")))
+            items.append(plate.part_item(kind, r["shape"], f"{kind}_{i + 1}" + (f"_{n + 1}" if qty > 1 else ""), r.get("inlay")))
     if not items:
         raise ValueError("nothing to print: add the box or some parts")
     if len(items) > 80:
@@ -431,7 +434,7 @@ def print_folder(body: dict):
                         raise ValueError("qty: 1 to 50 of each part")
                     r = hardware.make(kind, **params)
                     name = kind if sum(1 for q in body["parts"] if q.get("kind") == kind) == 1 else f"{kind}_{i + 1}"
-                    groups.append((name, plate.part_item(kind, r["shape"])[1], qty))
+                    groups.append((name, plate.part_item(kind, r["shape"], name, r.get("inlay"))[1], qty))
                     designed.append((name, r["shape"]))
                     notes += [f"{name}: {n}" for n in r["notes"]]
                     checks += [f"{name}: {c}" for c in r["checks"]]

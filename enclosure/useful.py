@@ -27,7 +27,7 @@ def _rng(name: str, v: float, lo: float, hi: float, unit: str = "mm") -> None:
 
 def _prism(points, depth: float):
     """A flat outline in XY, `depth` tall."""
-    return extrude(Polygon(*points, align=None), amount=depth)
+    return extrude(Polygon(*points, align=None), amount=depth, dir=(0, 0, 1))
 
 
 def _csk(d: float, head_d: float | None = None, length: float = 80.0):
@@ -652,6 +652,171 @@ def fan_adapter(from_size=120, to_size=80, height=0.0, wall=2.0):
     return _out(body, notes, ["necking a fan down costs airflow: keep the duct as tall as you have room for"], {"height": H})
 
 
+# ---------- Labels ----------
+
+LABEL_MOUNTS = ("none", "screw holes", "cable tie slots", "key ring hole", "magnets", "stake")
+LABEL_STYLES = ("raised", "engraved", "flush")
+
+
+def label_plate(text="PUMP 1", text_size=8.0, style="raised", width=0.0, height=0.0, thickness=2.0, depth=0.6, bold=True,
+                border=True, corners="rounded", mount="none", icon="", two_color=False):
+    """A label, tag or name plate: one or more lines of text (put | between lines), raised, engraved,
+    or flush in a second colour, with a border, an icon, and a way to fix it: screw holes, cable-tie
+    slots, a key-ring hole, magnets in the back, or a stake to push into soil."""
+    from build123d import FontStyle, Text
+    from . import icons
+    lines = [ln.strip() for ln in str(text).replace("\n", "|").split("|")]
+    lines = [ln for ln in lines if ln]
+    if not lines:
+        raise ValueError("label: type some text")
+    if len(lines) > 6 or any(len(ln) > 40 for ln in lines):
+        raise ValueError("label: up to 6 lines of up to 40 characters")
+    if style not in LABEL_STYLES:
+        raise ValueError(f"style: one of {', '.join(LABEL_STYLES)}")
+    if mount not in LABEL_MOUNTS:
+        raise ValueError(f"fixing: one of {', '.join(LABEL_MOUNTS)}")
+    if corners not in ("rounded", "square", "pill"):
+        raise ValueError("corners: rounded, square or pill")
+    if icon and icon not in icons.NAMES:
+        raise ValueError(f"icon: one of {', '.join(icons.NAMES)}, or none")
+    size, t, dp = float(text_size), float(thickness), float(depth)
+    _rng("text size", size, 3, 80); _rng("thickness", t, 0.8, 10); _rng("text depth", dp, 0.2, 3)
+    if mount == "magnets":
+        t = max(t, 3.2)                      # room for a 6 x 2 mm magnet and a skin over it
+    if style != "raised" and dp > t - 0.6:
+        raise ValueError(f"text {dp:g} mm deep leaves too little of a {t:g} mm plate: a thicker plate or shallower text")
+    W_ask, H_ask = float(width), float(height)
+
+    def layout(sz: float):
+        """The text and icon as flat faces centred on the origin, and their overall size."""
+        pitch = 1.35 * sz
+        parts, wmax = [], 0.0
+        for i, ln in enumerate(lines):
+            try:
+                tx = Text(ln, sz, align=(Align.CENTER, Align.CENTER), font_style=FontStyle.BOLD if bold else FontStyle.REGULAR)
+            except Exception:
+                raise ValueError(f"the text '{ln}' has a character this font can't draw") from None
+            y = ((len(lines) - 1) / 2 - i) * pitch
+            parts.append(Pos(0, y) * tx)
+            wmax = max(wmax, tx.bounding_box().size.X)
+        th = (len(lines) - 1) * pitch + sz
+        tw = wmax
+        if icon:
+            isz = min(th, 1.8 * sz)
+            gap = 0.5 * sz
+            parts = [Pos((isz + gap) / 2, 0) * p for p in parts]
+            parts.append(Pos(-(tw + gap) / 2, 0) * icons.icon_shape(icon, isz))
+            tw += isz + gap
+        return parts, tw, th
+
+    margin = max(2.5, 0.45 * size)
+    rim = 1.2 if border and style != "flush" else 0.0
+    pad = margin + (rim + 0.8 if rim else 0.0)
+    side = {"screw holes": 3.6 + 5.0, "cable tie slots": 3.0 + 4.0, "key ring hole": 0.0, "magnets": 0.0, "stake": 0.0, "none": 0.0}[mount]
+    left = 5.0 + 5.0 if mount == "key ring hole" else side      # extra room at the left end, and at the right
+    right = side
+    parts, tw, th = layout(size)
+    shrunk = None
+    need_w, need_h = tw + 2 * pad + left + right, th + 2 * pad
+    if (W_ask and need_w > W_ask) or (H_ask and need_h > H_ask):
+        k = min((W_ask - 2 * pad - left - right) / tw if W_ask else 9, (H_ask - 2 * pad) / th if H_ask else 9)
+        if k * size < 3:
+            raise ValueError(f"the text doesn't fit {W_ask or need_w:g} x {H_ask or need_h:g} mm even at 3 mm tall: "
+                             f"it needs {need_w:.0f} x {need_h:.0f} mm at {size:g} mm")
+        shrunk = round(size * k * 0.98, 1)
+        parts, tw, th = layout(shrunk)
+        need_w, need_h = tw + 2 * pad + left + right, th + 2 * pad
+    W, H = max(W_ask, need_w), max(H_ask, need_h)
+    if mount == "magnets":
+        H = max(H, 6.5 + 4)
+        W = max(W, 2 * 6.5 + 12)
+    _rng("label width", W, 8, 400); _rng("label height", H, 6, 300)
+    r = {"square": 0.01, "rounded": min(3.0, H / 4), "pill": H / 2 - 0.01}[corners]
+    outline = RectangleRounded(W, H, r) if r > 0.05 else Rectangle(W, H)
+    plate = extrude(outline, amount=t)
+    cx = (left - right) / 2                      # the text sits in what's left between the fixings
+    faces = [Pos(cx, 0) * p for p in parts]
+
+    def solid(amount: float, z: float):
+        out = None
+        for f in faces:
+            sld = Pos(0, 0, z) * extrude(f, amount=amount)
+            out = sld if out is None else out + sld
+        return out
+
+    inlay = None
+    if style == "raised":
+        z0 = t if two_color else t - 0.01     # its own body sits exactly on the plate; fused, it bites in a hair
+        txt = solid(dp, z0)
+        if rim:
+            ring = extrude(outline, amount=dp) - extrude(RectangleRounded(W - 2 * rim, H - 2 * rim, max(0.05, r - rim)) if r > rim + 0.05
+                                                         else Rectangle(W - 2 * rim, H - 2 * rim), amount=dp + 1, both=True)
+            txt = txt + Pos(0, 0, z0) * ring
+        if two_color:
+            inlay = txt
+            body = plate
+        else:
+            body = plate + txt
+    else:
+        cut = solid(dp + 0.01, t - dp)
+        body = plate - cut
+        if style == "engraved" and rim:
+            inset = 1.0
+            groove = extrude(RectangleRounded(W - 2 * inset, H - 2 * inset, max(0.05, r - inset)) if r > inset + 0.05 else Rectangle(W - 2 * inset, H - 2 * inset), amount=dp + 0.01) \
+                - extrude(RectangleRounded(W - 2 * inset - 2 * 0.8, H - 2 * inset - 2 * 0.8, max(0.05, r - inset - 0.8)) if r > inset + 0.85
+                          else Rectangle(W - 2 * inset - 1.6, H - 2 * inset - 1.6), amount=dp + 1, both=True)
+            body -= Pos(0, 0, t - dp) * groove
+        if style == "flush":
+            inlay = solid(dp, t - dp)
+    notes = [f"label {W:.1f} x {H:.1f} x {t:g} mm, {len(lines)} line{'s' if len(lines) > 1 else ''} of {(shrunk or size):g} mm text, {style}"
+             + (f" {dp:g} mm" if style != "flush" else f" in a second colour, {dp:g} mm deep")
+             + (", with a border" if rim else "") + (f", {icon} icon" if icon else "")]
+    checks = []
+    if shrunk:
+        notes.append(f"the text was shrunk from {size:g} to {shrunk:g} mm to fit the size you set")
+    hx_l, hx_r = -W / 2 + left / 2, W / 2 - right / 2
+    if mount == "screw holes":
+        for x in (hx_l, hx_r):
+            body -= Pos(x, 0, t) * _csk(3.6, min(7.0, H - 3), 30)
+            if inlay is not None:
+                inlay -= Pos(x, 0, -1) * Cylinder(4.5, 50, align=MIN_)
+        notes.append(f"two countersunk Ø3.6 mm holes (M3 or a #4 screw), {hx_r - hx_l:.1f} mm apart")
+    elif mount == "cable tie slots":
+        sl = min(5.5, H - 4)
+        for x in (hx_l, hx_r):
+            body -= Pos(x, 0, -1) * Box(2.2, sl, t + 20, align=MIN_)
+        notes.append(f"a 2.2 x {sl:g} mm slot at each end for a cable tie up to {sl - 0.5:g} mm wide: tie it round a cable, a pipe or a valve")
+    elif mount == "key ring hole":
+        body -= Pos(-W / 2 + 5.0, 0, -1) * Cylinder(2.5, t + 20, align=MIN_)
+        notes.append("a Ø5 mm hole at the left end for a key ring or a cord")
+    elif mount == "magnets":
+        mx = W / 2 - 6.5 / 2 - 3
+        for x in ((-mx, mx) if W > 40 else (0.0,)):
+            body -= Pos(x, 0, -0.01) * Cylinder(6.5 / 2, 2.3, align=MIN_)
+        notes.append(f"{'two pockets' if W > 40 else 'a pocket'} in the back for 6 x 2 mm magnets (Ø6.5 x 2.3 mm, glued in), "
+                     f"which is why the plate is {t:g} mm thick")
+    elif mount == "stake":
+        sw, sl = min(12.0, W * 0.5), max(60.0, 1.2 * H)
+        body += extrude(Polygon((-sw / 2, -H / 2 + 0.5), (sw / 2, -H / 2 + 0.5), (sw / 2, -H / 2 - sl * 0.7), (0, -H / 2 - sl), (-sw / 2, -H / 2 - sl * 0.7), align=None),
+                        amount=t, dir=(0, 0, 1))
+        notes.append(f"a {sl:.0f} mm stake underneath to push into soil")
+        if t < 2:
+            checks.append("a stake under 2 mm thick snaps easily: thicken the plate")
+    if style == "raised" and not two_color:
+        notes.append(f"for a second colour without a multi-colour printer, pause at {t:g} mm (where the text starts) and change filament")
+    elif inlay is not None:
+        notes.append("the text is its own body, in place: in the slicer load both files as one object and give the text another filament")
+    notes.append("print it flat, face up, as it lies")
+    strokes = 0.12 * (shrunk or size)
+    if strokes < 0.5:
+        checks.append(f"text {(shrunk or size):g} mm tall has strokes about {strokes:.1f} mm wide: thinner than a 0.4 mm nozzle draws cleanly. "
+                      "5 mm or taller reads well")
+    out = _out(body, notes, checks, {"size": [round(W, 1), round(H, 1), t], "text_size": shrunk or size})
+    if inlay is not None:
+        out["inlay"] = inlay
+    return out
+
+
 # ---------- What the page needs to know ----------
 
 # kind -> (function, label, defaults)
@@ -677,6 +842,9 @@ KINDS = {
     "drawer_organizer": (drawer_organizer, "Drawer organiser", {"length": 150.0, "width": 80.0, "height": 40.0, "wall": 1.2,
                                                                   "div_x": 2, "div_y": 0, "corner": 3.0}),
     "battery_caddy": (battery_caddy, "Battery storage block", {"cell": "AA", "rows": 2, "cols": 4, "depth_fraction": 0.5}),
+    "label_plate": (label_plate, "Label, tag or name plate", {"text": "PUMP 1", "text_size": 8.0, "style": "raised", "mount": "none",
+                                                               "width": 0.0, "height": 0.0, "thickness": 2.0, "depth": 0.6, "bold": True,
+                                                               "border": True, "corners": "rounded", "icon": "", "two_color": False}),
     "fan_guard": (fan_guard, "Fan guard", {"fan": 80, "thickness": 2.4, "bar": 1.6, "gap": 7.0}),
     "fan_adapter": (fan_adapter, "Fan size adapter", {"from_size": 120, "to_size": 80, "height": 0.0, "wall": 2.0}),
 }
@@ -716,6 +884,12 @@ KIND_LABELS = {
     ("drawer_organizer", "div_y"): ("Dividers across the width", "num"), ("drawer_organizer", "corner"): ("Corner radius", "len"),
     ("battery_caddy", "cell"): ("Cell", "select"), ("battery_caddy", "rows"): ("Rows", "num"), ("battery_caddy", "cols"): ("Columns", "num"),
     ("battery_caddy", "depth_fraction"): ("Pocket depth, as a part of the cell", "num"),
+    ("label_plate", "text"): ("Text (put | between lines)", "text"), ("label_plate", "text_size"): ("Text height", "len"),
+    ("label_plate", "style"): ("Text", "select"), ("label_plate", "mount"): ("Fixing", "select"),
+    ("label_plate", "width"): ("Width (0: fit the text)", "len"), ("label_plate", "height"): ("Height (0: fit the text)", "len"),
+    ("label_plate", "depth"): ("Text depth or height", "len"), ("label_plate", "bold"): ("Bold", "bool"),
+    ("label_plate", "border"): ("Border", "bool"), ("label_plate", "corners"): ("Corners", "select"), ("label_plate", "icon"): ("Icon", "select"),
+    ("label_plate", "two_color"): ("Two colours", "bool"),
     ("fan_guard", "fan"): ("Fan size, mm", "select"), ("fan_guard", "bar"): ("Bar width", "len"), ("fan_guard", "gap"): ("Gap between bars", "len"),
     ("fan_adapter", "from_size"): ("Bigger fan, mm", "select"), ("fan_adapter", "to_size"): ("Smaller fan, mm", "select"),
     ("fan_adapter", "height"): ("Height (0: shortest that prints)", "len"),
@@ -723,5 +897,7 @@ KIND_LABELS = {
 CHOICES = {
     ("pipe_clamp", "ears"): [1, 2], ("pegboard_hook", "board"): list(PEGBOARDS), ("bit_holder", "hole"): ["hex", "round"],
     ("end_cap", "shape"): ["round", "square", "rectangle"], ("battery_caddy", "cell"): list(CELL_SIZES),
+    ("label_plate", "style"): list(LABEL_STYLES), ("label_plate", "mount"): list(LABEL_MOUNTS),
+    ("label_plate", "corners"): ["rounded", "square", "pill"], ("label_plate", "icon"): ["", "usb", "power", "antenna", "fan", "dc", "fuse", "lan", "onoff"],
     ("fan_guard", "fan"): list(FANS), ("fan_adapter", "from_size"): list(FANS), ("fan_adapter", "to_size"): list(FANS),
 }

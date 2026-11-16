@@ -26,6 +26,9 @@ VARIANTS = {
     "drawer_organizer": [{}, {"div_x": 0, "div_y": 3}],
     "battery_caddy": [{}, {"cell": "9V", "rows": 1, "cols": 2}, {"cell": "18650"}],
     "fan_guard": [{}, {"fan": "120"}, {"fan": 40}],
+    "label_plate": [{}, {"text": "MAIN VALVE|Shut off here", "style": "engraved", "mount": "cable tie slots"},
+                    {"text": "12 V", "icon": "dc", "mount": "screw holes"}, {"text": "FUSES", "mount": "magnets", "style": "engraved"},
+                    {"text": "TOMATO", "mount": "stake"}, {"text": "OK", "width": 80, "height": 40, "corners": "square", "border": False}],
     "fan_adapter": [{}, {"from_size": "140", "to_size": "120"}],
 }
 
@@ -98,3 +101,25 @@ def test_kept_answers_and_case_inserts_through_the_web():
     r = c.post("/api/kit", json={"case": {"size": [120, 80, 28], "insert_cols": 3, "insert_rows": 2}, "bed": "bambu-h3c"})
     names = zipfile.ZipFile(io.BytesIO(r.content)).namelist()
     assert any(n.endswith("stl/bin_1x1.stl") for n in names)
+
+
+def test_label_plates():
+    flush = hw.make("label_plate", text="Ethan", style="flush", mount="key ring hole", corners="pill")
+    assert flush["inlay"].is_valid and _overlap(flush["shape"], flush["inlay"]) < 1e-3
+    assert flush["size"][2] == pytest.approx(2.0)                      # flush: nothing stands proud
+    raised = hw.make("label_plate", text="Ethan")
+    assert "inlay" not in raised and raised["size"][2] == pytest.approx(2.59, abs=0.02) and "pause at 2 mm" in " ".join(raised["notes"])
+    two = hw.make("label_plate", text="Ethan", two_color=True)
+    assert _overlap(two["shape"], two["inlay"]) < 1e-3
+    small = hw.make("label_plate", text="A LONG LINE OF TEXT", width=60)
+    assert small["size"][0] == pytest.approx(60) and small["info"]["text_size"] < 8
+    assert hw.make("label_plate", text="X", mount="magnets")["info"]["size"][2] == 3.2
+    for bad in ({"text": "X", "width": 8, "text_size": 20}, {"style": "engraved", "depth": 2}, {"mount": "glue"}, {"text": "a|b|c|d|e|f|g"}):
+        with pytest.raises(ValueError):
+            hw.make("label_plate", **bad)
+    c = TestClient(app)
+    r = c.post("/api/part", json={"kind": "label_plate", "params": {"style": "flush"}})
+    assert r.status_code == 200 and r.json()["inlay"]
+    import io, zipfile
+    z = zipfile.ZipFile(io.BytesIO(c.post("/api/part/download", json={"kind": "label_plate", "params": {"style": "flush"}}).content))
+    assert any(n.endswith("label_plate_second_colour.stl") for n in z.namelist())

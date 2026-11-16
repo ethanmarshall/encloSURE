@@ -2437,6 +2437,7 @@ async function partPreview() {
   const pb = m.geometry.boundingBox, c = pb.getCenter(new THREE.Vector3());
   m.position.set(-c.x, -c.y, -pb.min.z);  // centred, standing on the floor of the view
   g.add(m);
+  if (partData.inlay) { const i2 = mesh(partData.inlay, 0x2f6fb3); i2.position.copy(m.position); g.add(i2); }  // the second colour, in place
   const bb = new THREE.Box3().setFromObject(g);
   views.parts = { group: g, lid: null, top: 0, size: bb.getSize(new THREE.Vector3()), framed: false };
   if (tab === "parts") { empty(""); showView(views.parts); }

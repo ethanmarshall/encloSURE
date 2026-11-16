@@ -370,6 +370,9 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   holder, tool rack, sanding block, drill guide, foot, tube end cap, shim or wedge, hole plug,
   drawer organiser, battery storage block, fan guard and fan size adapter. Each is built the way
   it prints, without supports.
+- **Labels, tags and name plates** (Parts tab): lines of text, raised, engraved, or flush in a second
+  colour (the text comes as its own body, in place), with a border, an icon, and screw holes,
+  cable-tie slots, a key-ring hole, magnets in the back or a stake. Text shrinks to fit a set size.
 - **Lift-out bins for the hinged case**: a grid of cells inside the tray, bigger bins by cells
   ("2x1:2, 2x2:1"), the rest filled with one-cell bins, one to three layers, with a scoop front and
   a label tab if wanted. They show in the tray and come out in the downloads and the print folder.

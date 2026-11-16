@@ -1328,6 +1328,7 @@ GROUPS = {
     "Workshop": ["bit_holder", "tool_rack", "sanding_block", "drill_guide"],
     "Storage": ["gridfinity_bin", "gridfinity_baseplate", "drawer_organizer", "battery_caddy"],
     "Repairs": ["knob", "foot", "end_cap", "shim", "hole_plug", "button_cap"],
+    "Labels": ["label_plate"],
     "Hinges, latches and clips": ["hinge", "latch", "snap_hook", "board_clip"],
     "Motion": ["spur_gear", "gt2_pulley", "wheel"],
     "Fans": ["fan_guard", "fan_adapter"],
@@ -1347,7 +1348,7 @@ WORDS = {
     "button_cap": "switch cap", "hinge": "leaf hinge", "latch": "catch", "snap_hook": "snap fit cantilever", "board_clip": "pcb clip",
     "spur_gear": "gear cog", "gt2_pulley": "belt pulley timing", "wheel": "roller caster bearing", "fan_guard": "fan grill grille cover",
     "fan_adapter": "fan duct reducer", "compression_spring": "coil spring", "extension_spring": "tension spring", "torsion_spring": "",
-    "test_print": "tolerance calibration",
+    "test_print": "tolerance calibration", "label_plate": "name plate tag sign nameplate keychain key fob plant marker valve tag text",
 }
 GROUP_OF = {k: g for g, ks in GROUPS.items() for k in ks}
 
@@ -1406,6 +1407,10 @@ def write(kind: str, folder, stl: bool = True, **params) -> dict:
     if stl:
         export_stl(r["shape"], str(out / f"{stem}.stl"), tolerance=0.01, angular_tolerance=0.2)
         files["stl"] = str(out / f"{stem}.stl")
+    if r.get("inlay") is not None:   # a second-colour body, in place with the first
+        export_step(r["inlay"], str(out / f"{stem}_second_colour.step"))
+        if stl:
+            export_stl(r["inlay"], str(out / f"{stem}_second_colour.stl"), tolerance=0.01, angular_tolerance=0.2)
     lines = [f"# {r['label']}", ""] + [f"- {n}" for n in r["notes"]] + [f"- check: {c}" for c in r["checks"]]
     lines += ["", "Settings: " + ", ".join(f"{k}={v}" for k, v in params.items())]
     (out / "notes.md").write_text("\n".join(lines) + "\n", encoding="utf-8")

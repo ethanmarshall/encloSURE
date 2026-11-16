@@ -74,11 +74,18 @@ def box_items(spec, made: dict) -> list[tuple[str, object]]:
     return items
 
 
-def part_item(kind: str, shape, name: str | None = None):
-    """A hardware part turned the way its notes say it prints."""
+def part_item(kind: str, shape, name: str | None = None, inlay=None):
+    """A hardware part turned the way its notes say it prints. One with a second-colour body keeps
+    the two together, in place, as separate objects."""
     from .hardware import PRINT_ROTATION
     rot = PRINT_ROTATION.get(kind)
-    return (name or kind, Rot(*rot) * shape if rot else shape)
+    name = name or kind
+    if inlay is not None:
+        from build123d import Compound, copy_module
+        both = Compound(children=[copy_module.copy(shape), copy_module.copy(inlay)])
+        both.label = "group:" + "|".join([name, f"{name}_second_colour"])
+        return (name, both)
+    return (name, Rot(*rot) * shape if rot else shape)
 
 
 def make(items: list[tuple[str, object]], bed=(250.0, 210.0), gap: float = GAP) -> dict:
