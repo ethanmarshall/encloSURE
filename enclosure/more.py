@@ -402,7 +402,7 @@ def _jig_bushing(bushing_od, d: float) -> tuple[float, str]:
         raise ValueError(f"a bushing for a {d:g} mm drill is at least {d + 2:g} mm outside")
     if bo > 30:
         raise ValueError("bushing diameter: up to 30 mm")
-    return bo, say
+    return bo, (" " + say.split(" (")[0] if " in" in say else "")       # "a 3/8 in steel drill bushing", or just "a steel drill bushing"
 
 
 def _round_corners(body, r: float, limit: float, what: str = "corner radius"):
@@ -519,7 +519,7 @@ def extrusion_offset_jig(profile="1515 (80/20, 1.5 in)", offsets="", hole="bolt 
         body, marked = _jig_marking(body, mark, lines, iw / 2 + w, max(d + 0.25, bo), (ln - stop) / 2, ln + stop)
     notes = [f"offset drilling jig for {profile}, on its {fw:g} mm face: it caps the end and guides {what} at "
              f"{', '.join(f'{x:g}' for x in offs)} mm from the end" + (f", on both slot lines ({len(lines) * len(offs)} holes)" if len(lines) > 1 else ", on the slot's centre line"),
-             f"the guide is {tp:g} mm deep" + (f", bored Ø{bo:g} mm for a {bo_say} steel drill bushing (press or glue it in)" if bo else
+             f"the guide is {tp:g} mm deep" + (f", bored Ø{bo:g} mm for a{bo_say} steel drill bushing (press or glue it in)" if bo else
                                               f", a plain Ø{d + 0.25:g} mm printed hole")
              + f"; hold it with a clamp, or with a {bolt} bolt and T-nut through the hole in its side",
              "print it top down as it lies (the open side up), 5 walls or more and 40% infill"]
@@ -565,7 +565,7 @@ def extrusion_freehand_jig(profile="1515 (80/20, 1.5 in)", holes=1, pitch=0.0, h
              + (f", {p:g} mm apart" if n > 1 else "") + (" on both slot lines" if len(lines) > 1 else " on the slot's centre line"),
              "mark where the hole goes on the extrusion's side, slide the jig along until the mark shows in the middle of the 2 mm gap in its wall, and clamp it; "
              f"or fix it with {bolt} bolts and T-nuts through the holes in its side",
-             f"the guide is {tp:g} mm deep" + (f", bored Ø{bo:g} mm for a {bo_say} steel drill bushing" if bo else f", a plain Ø{d + 0.25:g} mm printed hole"),
+             f"the guide is {tp:g} mm deep" + (f", bored Ø{bo:g} mm for a{bo_say} steel drill bushing" if bo else f", a plain Ø{d + 0.25:g} mm printed hole"),
              "print it top down as it lies (the open side up), 5 walls or more and 40% infill"]
     checks = ["a printed guide hole wears after a dozen or so holes in aluminium: for more, set a bushing diameter and fit a steel drill bushing"] if not bo else []
     out = _out(body, notes, checks, {"drill": round(d, 4), "bushing": round(bo, 4), "hole_centres": [round(x, 2) for x in xs], "length": round(ln, 1)})

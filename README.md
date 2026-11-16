@@ -382,6 +382,12 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   set distances from it, one that sits anywhere along it with a sight gap for your mark, and a flat
   L that holds a joint square; plain printed guide holes, or bored for steel drill bushings.
 - **Jigs**: shelf-pin drilling jig, clamping square, centre finder, setup blocks.
+- **Wheels and knobs**: a handwheel (rounded rim, spokes or a solid web; round, D, hex or square
+  bore; with a hub and set screw, or flush with neither; a spinner post or a hole for a bolt-on
+  handle). A wheel and tyre for radio-controlled cars in two prints: a rigid wheel with a drive-hex
+  pocket (12, 7 or 17 mm) and a TPU tyre, slick, ribbed or blocked, that locks behind a lip at each
+  edge. A replacement appliance knob for ovens, hobs, washers and dryers: D, double D, round or
+  splined shaft, the flat set to where yours is with the pointer up, a split stem that springs on.
 - **Drill sizes the way a shop says them**: the drilling jigs and the drill guide take 5, 13/64,
   1/4", 0.201 in or 1-1/2 (a fraction is inches). The T-slot jigs cut their drill size into the top
   face, show a steel bushing in the picture when you give its outside diameter (it is not in the

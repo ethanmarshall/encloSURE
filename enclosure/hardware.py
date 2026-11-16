@@ -1328,7 +1328,9 @@ from . import more as _more  # noqa: E402
 
 KINDS.update(_useful.KINDS)
 KINDS.update(_more.KINDS)
-PRINTED_ONLY |= set(_useful.KINDS) | set(_more.KINDS) | {"thumbscrew"}
+from . import turning as _turning  # noqa: E402
+KINDS.update(_turning.KINDS)
+PRINTED_ONLY |= set(_useful.KINDS) | set(_more.KINDS) | set(_turning.KINDS) | {"thumbscrew"}
 
 # What each part is filed under on the page, and other words people look for it by.
 GROUPS = {
@@ -1345,6 +1347,7 @@ GROUPS = {
     "Hinges, latches and clips": ["hinge", "latch", "snap_hook"],
     "Motion": ["spur_gear", "gt2_pulley", "wheel"],
     "Fans": ["fan_guard", "fan_adapter"],
+    **_turning.GROUPS,
     **_more.GROUPS,
     "Test prints": ["test_print"],
 }
@@ -1365,6 +1368,7 @@ WORDS = {
     "test_print": "tolerance calibration", "battery_holder": "battery compartment holder case 18650 aa aaa 9v cell contacts protected", "label_plate": "name plate tag sign nameplate keychain key fob plant marker valve tag text",
 }
 WORDS.update(_more.WORDS)
+WORDS.update(_turning.WORDS)
 GROUP_OF = {k: g for g, ks in GROUPS.items() for k in ks}
 RANK = {k: i for ks in GROUPS.values() for i, k in enumerate(ks)}       # the order within a group
 
@@ -1581,13 +1585,13 @@ def catalog() -> dict:
         ("dowel", "fit"): ["press", "slip"], ("dowel", "ends"): ["both", "one", "none"], ("snap_ring", "type"): ["external", "internal"],
         ("snap_ring", "size"): sorted(set(RINGS_EXTERNAL) | set(RINGS_INTERNAL)),
         ("thumbscrew", "style"): list(THUMB_STYLES),
-        **_useful.CHOICES, **_more.CHOICES,
+        **_useful.CHOICES, **_more.CHOICES, **_turning.CHOICES,
     }
     out = {}
     for kind, (fn, label, defaults) in KINDS.items():
         fields = []
         for name, default in defaults.items():
-            lab, typ = KIND_LABELS.get((kind, name)) or _useful.KIND_LABELS.get((kind, name)) or _more.KIND_LABELS.get((kind, name)) or LABELS.get(name, (name.replace("_", " ").capitalize(), "len"))
+            lab, typ = KIND_LABELS.get((kind, name)) or _useful.KIND_LABELS.get((kind, name)) or _more.KIND_LABELS.get((kind, name)) or _turning.KIND_LABELS.get((kind, name)) or LABELS.get(name, (name.replace("_", " ").capitalize(), "len"))
             opts = choices.get((kind, name))
             if name == "wire":
                 opts = list(WIRE)
