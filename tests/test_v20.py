@@ -134,9 +134,10 @@ def test_extrusion_drilling_jigs():
     assert hw.make("extrusion_offset_jig", hole="hex key access")["info"]["drill"] == 7.14  # 80/20's .281 in
     wide = hw.make("extrusion_offset_jig", profile="1530 (80/20, 1.5 x 3 in)", face="wide face", offsets="19.05, 57.15")
     assert "4 holes" in wide["notes"][0] and wide["info"]["inside_width"] == pytest.approx(76.5)
-    plain = hw.make("extrusion_offset_jig", profile="2020 (20 mm)")["shape"].volume
-    bushed = hw.make("extrusion_offset_jig", profile="2020 (20 mm)", bushing_od=8)["shape"].volume
-    assert bushed < plain                                                                   # the bore for the bushing is bigger
+    plain = hw.make("extrusion_offset_jig", profile="2020 (20 mm)")
+    bushed = hw.make("extrusion_offset_jig", profile="2020 (20 mm)", bushing_od=8)
+    assert "plain Ø5.75 mm printed hole" in plain["notes"][1] and plain["checks"]
+    assert "bored Ø8 mm for a steel drill bushing" in bushed["notes"][1] and not bushed["checks"]
     free = hw.make("extrusion_freehand_jig", holes=3, profile="2020 (20 mm)")
     assert free["info"]["hole_centres"] == [-20.0, 0.0, 20.0]
     for kind, bad in [("extrusion_offset_jig", {"offsets": "1"}), ("extrusion_offset_jig", {"offsets": "x"}),
