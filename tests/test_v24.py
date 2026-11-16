@@ -25,7 +25,7 @@ def test_knob_markings_are_yours():
     marked = _ok(hw.make("appliance_knob", grip="snug", marks="OFF|LO|2|3|4|HI"))
     assert marked["size"][0] == 61.0 and plain["size"][0] == 45.0                           # a ring added for them
     assert any("6 markings" in n and "HI at 270°" in n for n in marked["notes"])
-    two = _ok(hw.make("appliance_knob", style="round, fluted (washer, dryer)", marks="NORMAL@0|DELICATE@120|HEAVY DUTY@240", two_color=True, diameter=60))
+    two = _ok(hw.make("appliance_knob", style="round, fluted (washer, dryer)", marks="NORMAL@0|DELICATE@120|HEAVY DUTY@240", diameter=60))
     assert two["inlay"].is_valid and len(two["inlay"].solids()) > 10                        # the pointer and every letter
     assert hw.make("appliance_knob", marks="|".join(str(i) for i in range(20)), mark_size=6)["checks"]   # crowded
     for bad in ({"marks": "A@x"}, {"marks": "|".join("x" * 25)}, {"marks": "ABCDEFGHIJKLMNOP"}, {"marks": "A|B", "mark_size": 20}):

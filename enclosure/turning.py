@@ -292,7 +292,7 @@ GRIPS = ("snug", "split, springy")
 
 def appliance_knob(style="pointer bar (oven, hob)", diameter=45.0, height=28.0, skirt=5.0, shaft="D (one flat)", shaft_d=6.0, flat=0.0,
                    depth=14.0, flat_at="12 o'clock (toward the pointer)", grip="split, springy", stem_below=0.0, set_screw="none",
-                   two_color=False, fit=0.1, marks="", mark_size=4.0, mark_sweep=270.0, mark_start=0.0):
+                   two_color=True, fit=0.1, marks="", mark_size=4.0, mark_sweep=270.0, mark_start=0.0, taper=0.0):
     """A replacement knob for an oven, hob, washer, dryer or anything else with a D shaft: measure
     the shaft, say which way its flat faces when the pointer is straight up, and pick a shape. A
     split stem springs onto the shaft the way the original's clip did."""
@@ -335,16 +335,31 @@ def appliance_knob(style="pointer bar (oven, hob)", diameter=45.0, height=28.0, 
         except Exception:
             pass
         bw = max(9.0, D * 0.27)
-        grip_bar = Pos(0, 0, base_h - 0.01) * extrude(RectangleRounded(bw, D * 0.94, bw * 0.38), amount=H - base_h + 0.01, dir=(0, 0, 1))
+        tp = float(taper)
+        _rng("taper", tp, 0, 25, "°")
+        bh = H - base_h + 0.01
+        if tp > 0:
+            # The bar's sides lean in toward the top, the way most oven knobs' do; its ends lean a third as much.
+            cut_in = bh * math.tan(math.radians(tp))
+            top_w = bw - 2 * cut_in
+            if top_w < 4.0:
+                raise ValueError(f"taper: up to {math.degrees(math.atan((bw - 4.0) / 2 / bh)):.0f}° on this knob, to leave the bar 4 mm wide at the top")
+            top_l = D * 0.94 - 2 * cut_in / 3
+            from build123d import Solid
+            grip_bar = Pos(0, 0, base_h - 0.01) * Solid.make_loft([RectangleRounded(bw, D * 0.94, bw * 0.38).wire(),
+                                                                   Pos(0, 0, bh) * RectangleRounded(top_w, top_l, top_w * 0.38).wire()])
+        else:
+            top_w = bw
+            grip_bar = Pos(0, 0, base_h - 0.01) * extrude(RectangleRounded(bw, D * 0.94, bw * 0.38), amount=bh, dir=(0, 0, 1))
         try:
-            grip_bar = fillet(grip_bar.edges().group_by(Axis.Z)[-1], min(1.5, bw * 0.15))
+            grip_bar = fillet(grip_bar.edges().group_by(Axis.Z)[-1], min(1.5, top_w * 0.15))
         except Exception:
             pass
         body += grip_bar
         hub_h = min(H, max(base_h, dp - below + 2.5))
         if 2 * core_r > bw - 1 and hub_h > base_h:
             body += Cylinder(core_r, hub_h, align=MIN_)       # room for the stem where the bar is narrower than it
-        ml = D * 0.47 - 4.5
+        ml = D * 0.47 - 4.5 - (bh * math.tan(math.radians(tp)) / 3 if tp > 0 else 0)
         mark = Pos(0, 3 + ml / 2, H - 0.6) * Box(1.6, ml, 0.61, align=MIN_)
     else:
         from build123d import Cone
@@ -442,12 +457,10 @@ def appliance_knob(style="pointer bar (oven, hob)", diameter=45.0, height=28.0, 
                      + "; angles run clockwise from the pointer, seen from the front")
         if crowded:
             checks.append("some markings are close enough to touch: fewer of them, a smaller marking size, a wider sweep or a bigger knob")
-    if two_color:
-        inlay = mark
-        notes.append(f"{what} come as their own body for a second colour; without a multi-colour printer, fill the grooves with paint or a wax crayon")
-    else:
-        notes.append(f"{what} are cut 0.6 mm deep: fill with paint or a wax crayon to make them show" if labels else
-                     "the pointer is a groove 0.6 mm deep: fill it with paint or a wax crayon to make it show")
+    # Always its own body, so it prints in a colour that shows against the knob.
+    inlay = mark
+    notes.append(f"{what} {'are' if labels else 'is'} a separate body, flush with the surface and 0.6 mm deep, to print in a contrasting colour: "
+                 "it is the second object on the print plate and comes as its own file. On a one-colour printer, leave that body out and fill the groove with paint")
     if below:
         checks.append("the stem stands below the knob, so the knob's underside hangs in the air: print with supports from the bed only")
     notes.append("print it as it stands, base on the bed, in PETG or ASA (an oven or hob knob gets warm: not PLA), 3 walls and 30% infill"
@@ -466,7 +479,7 @@ KINDS = {
                                                      "axle_d": 4.0, "mount_inset": 0.0, "web": "spokes", "spokes": 6, "tread": "blocks", "fit": 0.15}),
     "appliance_knob": (appliance_knob, "Appliance knob (oven, washer, dryer)", {
         "style": KNOB_STYLES[0], "diameter": 45.0, "height": 28.0, "skirt": 5.0, "shaft": "D (one flat)", "shaft_d": 6.0, "flat": 0.0, "depth": 14.0,
-        "flat_at": FLAT_AT[0], "grip": GRIPS[1], "stem_below": 0.0, "set_screw": "none", "two_color": False, "fit": 0.1,
+        "flat_at": FLAT_AT[0], "grip": GRIPS[1], "stem_below": 0.0, "set_screw": "none", "taper": 0.0, "fit": 0.1,
         "marks": "", "mark_size": 4.0, "mark_sweep": 270.0, "mark_start": 0.0}),
 }
 KIND_LABELS = {
@@ -485,7 +498,7 @@ KIND_LABELS = {
     ("appliance_knob", "shaft_d"): ("Shaft diameter: 6, 1/4, 3/16", "size"), ("appliance_knob", "flat"): ("Across the flat (0: three quarters of the shaft)", "size"),
     ("appliance_knob", "depth"): ("Socket depth (how much shaft goes in)", "len"), ("appliance_knob", "flat_at"): ("With the pointer up, the flat is at", "select"),
     ("appliance_knob", "grip"): ("Grip on the shaft", "select"), ("appliance_knob", "stem_below"): ("Stem below the knob, for a shaft set back in the panel (0: none)", "len"),
-    ("appliance_knob", "set_screw"): ("Set screw", "select"), ("appliance_knob", "two_color"): ("Pointer and markings in a second colour", "bool"),
+    ("appliance_knob", "set_screw"): ("Set screw", "select"), ("appliance_knob", "taper"): ("Pointer bar: sides lean in by, ° (0: straight)", "num"),
     ("appliance_knob", "fit"): ("Fit (added round the shaft)", "len"),
     ("appliance_knob", "marks"): ("Your markings round the skirt, | between: OFF|LO|MED|HI, or each at its own angle: OFF@0|1@45|2@90 (- is a line, . a dot)", "text"),
     ("appliance_knob", "mark_size"): ("Marking height", "len"), ("appliance_knob", "mark_sweep"): ("Spread them over, °", "num"),

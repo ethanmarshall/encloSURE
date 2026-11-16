@@ -707,8 +707,10 @@ def knob(diameter=20.0, height=15.0, shaft="d", shaft_d=6.0, depth=10.0, grip=24
         rib = Cylinder(0.6, height * 3)
         for i in range(int(grip)):
             k -= Rot(0, 0, 360 * i / grip) * Pos(diameter / 2 + 0.2, 0, 0) * rib
+    line = None
     if pointer:
-        k -= Pos(0, diameter / 4, height) * Box(1.0, diameter / 2 - 1.5, 1.2)
+        line = Pos(0, diameter / 4, height - 0.6) * Box(1.2, diameter / 2 - 1.5, 0.6, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        k -= line
     sd = shaft_d + 2 * clearance
     if shaft == "d":
         k = _bore(k, depth + 0.01, "d", sd, None, z0=-0.01)
@@ -724,8 +726,10 @@ def knob(diameter=20.0, height=15.0, shaft="d", shaft_d=6.0, depth=10.0, grip=24
         k -= Pos(0, -diameter / 2, depth / 2) * Cylinder(c / 2, diameter, rotation=(90, 0, 0))
     return {"shape": k, "checks": [],
             "notes": [f"knob Ø{diameter:g} x {height:g} mm for a {shaft_d:g} mm {shaft} shaft, {depth:g} mm deep"
-                      + (f", {set_screw} set screw (tap size hole)" if set_screw else "") + "; print it upside down (top on the bed)"],
-            "info": {"hole": round(sd if shaft != "knurled" else shaft_d - 0.3, 3)}, "buy": None}
+                      + (f", {set_screw} set screw (tap size hole)" if set_screw else "")
+                      + ("; the pointer line is a separate body, flush with the top, to print in a contrasting colour: print it as it stands, top up"
+                         if line is not None else "; print it as it stands")],
+            "info": {"hole": round(sd if shaft != "knurled" else shaft_d - 0.3, 3)}, "buy": None, **({"inlay": line} if line is not None else {})}
 
 
 def button_cap(diameter=10.0, height=6.0, stem_d=3.5, stem_depth=2.5, panel=2.0, flange=1.5, clearance=0.1):
@@ -1313,7 +1317,7 @@ KINDS = {
     "test_print": (test_print, "Thread and snap test print", {"size": "M8", "clearances": "0.1,0.15,0.2,0.25,0.3", "hooks": "0.6,1.0,1.4"}),
 }
 # How each part sits on the print bed: a turn (x, y, z degrees) from how it is modelled.
-PRINT_ROTATION = {"screw": (180, 0, 0), "snap_hook": (90, 0, 0), "din_clip": (180, 0, 0), "knob": (180, 0, 0),
+PRINT_ROTATION = {"screw": (180, 0, 0), "snap_hook": (90, 0, 0), "din_clip": (180, 0, 0),
                   "button_cap": (180, 0, 0), "latch": (90, 0, 0),
                   "extension_spring": (0, 0, 0), "torsion_spring": (0, 0, 0), "dowel": (90, 0, 0)}
 # Parts that are always printed (no bought version): mode is ignored, and material matters.
@@ -1342,10 +1346,10 @@ GROUPS = {
     "Workshop": ["bit_holder", "tool_rack", "sanding_block", "drill_guide"],
     "Storage": ["gridfinity_bin", "gridfinity_baseplate", "drawer_organizer"],
     "Electronics": ["board_clip", "din_clip", "button_cap"],
-    "Repairs": ["foot", "end_cap", "shim", "hole_plug"],
+    "Repairs": ["appliance_knob", "knob", "foot", "end_cap", "shim", "hole_plug"],
     "Labels": ["label_plate"],
     "Hinges, latches and clips": ["hinge", "latch", "snap_hook"],
-    "Wheels, gears and knobs": ["wheel", "handwheel", "rc_wheel", "spur_gear", "gt2_pulley", "knob", "appliance_knob"],
+    "Wheels and gears": ["wheel", "handwheel", "rc_wheel", "spur_gear", "gt2_pulley"],
     "Shafts and bearings": ["shaft_collar", "shaft_coupler", "bearing_block"],
     "Fans": ["fan_guard", "fan_adapter"],
     **_more.GROUPS,

@@ -63,6 +63,13 @@ def test_appliance_knob_fits_its_shaft():
     fits = other["shape"] & Pos(0, 0, 0.5) * (Rot(0, 0, 180) * rod)
     assert fits is None or fits.volume < 1e-3
     split = _ok(hw.make("appliance_knob"))
+    assert k["inlay"].is_valid and split["inlay"].is_valid                                   # the pointer is always its own body
+    straight, leaning = hw.make("appliance_knob", grip="snug"), _ok(hw.make("appliance_knob", grip="snug", taper=8))
+    assert leaning["shape"].volume < straight["shape"].volume and leaning["size"] == straight["size"] and leaning["inlay"].is_valid
+    with pytest.raises(ValueError, match="taper"):
+        hw.make("appliance_knob", taper=20)
+    plain = hw.make("knob")
+    assert plain["inlay"].is_valid and "inlay" not in hw.make("knob", pointer=False)
     assert split["shape"].volume < k["shape"].volume and any("springs onto the shaft" in n for n in split["notes"])
     fluted = _ok(hw.make("appliance_knob", style="round, fluted (washer, dryer)", shaft_d="1/4", diameter=55, two_color=True))
     assert "1/4 in (6.35 mm) D shaft" in fluted["notes"][0] and fluted["inlay"].is_valid
@@ -79,8 +86,8 @@ def test_appliance_knob_fits_its_shaft():
 def test_they_are_on_the_page():
     cat = hw.catalog()
     for kind in ("handwheel", "rc_wheel", "appliance_knob"):
-        assert cat["kinds"][kind]["printed_only"] and cat["kinds"][kind]["group"] == "Wheels, gears and knobs"
-    assert cat["kinds"]["spur_gear"]["group"] == cat["kinds"]["wheel"]["group"] == cat["kinds"]["knob"]["group"] == "Wheels, gears and knobs"
+        assert cat["kinds"][kind]["printed_only"] and cat["kinds"][kind]["group"] == ("Repairs" if kind == "appliance_knob" else "Wheels and gears")
+    assert cat["kinds"]["spur_gear"]["group"] == cat["kinds"]["wheel"]["group"] == "Wheels and gears" and cat["kinds"]["knob"]["group"] == "Repairs"
     assert not any(k["group"] == "Motion" for k in cat["kinds"].values())
     f = {x["name"]: x for x in cat["kinds"]["appliance_knob"]["fields"]}
     assert f["shaft_d"]["type"] == "size" and f["flat_at"]["type"] == "select" and len(f["flat_at"]["options"]) == 4
