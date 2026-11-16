@@ -1341,8 +1341,8 @@ GROUPS = {
     "Batteries": ["battery_holder", "cell_pack_holder", "battery_caddy"],
     "Fasteners": ["screw", "nut", "washer", "spacer", "insert", "thumbscrew", "dowel", "snap_ring"],
     "Springs": ["compression_spring", "extension_spring", "torsion_spring"],
-    "Mounts and brackets": ["shelf_bracket", "corner_brace", "pipe_clamp", "pegboard_hook", "wall_pocket"],
-    "Cable management": ["cable_clip", "tie_mount", "cable_comb", "raceway", "desk_grommet", "grommet"],
+    "Mounts and brackets": ["shelf_bracket", "corner_brace", "pipe_clamp", "pegboard_hook", "wall_pocket", "french_cleat"],
+    "Cable management": ["cable_clip", "tie_mount", "cable_comb", "raceway", "desk_grommet", "grommet", "cable_clamp"],
     "Workshop": ["bit_holder", "tool_rack", "sanding_block", "drill_guide"],
     "Storage": ["gridfinity_bin", "gridfinity_baseplate", "drawer_organizer"],
     "Electronics": ["board_clip", "din_clip", "button_cap"],
@@ -1350,7 +1350,7 @@ GROUPS = {
     "Labels": ["label_plate"],
     "Hinges, latches and clips": ["hinge", "latch", "snap_hook"],
     "Wheels and gears": ["wheel", "handwheel", "rc_wheel", "spur_gear", "gt2_pulley"],
-    "Shafts and bearings": ["shaft_collar", "shaft_coupler", "bearing_block"],
+    "Shafts and bearings": ["shaft_collar", "shaft_coupler", "bearing_block", "belt_clamp"],
     "Fans": ["fan_guard", "fan_adapter"],
     **_more.GROUPS,
     "Test prints": ["test_print"],
@@ -1447,6 +1447,78 @@ def bed_chamfer(shape, size: float, rotation=None):
     return shape, 0.0
 
 
+def _mm(v) -> float:
+    from . import sizes
+    return sizes.parse(v)[0]
+
+
+# A fit test is the part's one critical feature, cut out of the real part at three fits and laid in
+# a row: {kind: (the setting that is the fit, where the feature is)}. Where: a function of the
+# settings and the built part giving (x, y, radius, z from, z to); None for z means the part's bottom.
+FIT_TESTS = {
+    "appliance_knob": ("fit", lambda p, r: (0, 0, _mm(p["shaft_d"]) / 2 + 4.6, None, 6.0)),
+    "knob": ("clearance", lambda p, r: (0, 0, float(p["shaft_d"]) / 2 + 4.0, None, 6.0)),
+    "handwheel": ("fit", lambda p, r: (0, 0, r["info"]["hub_d"] / 2, None, 6.0)),
+    "shaft_collar": ("fit", lambda p, r: (0, 0, _mm(p["shaft_d"]) / 2 + 3.2, None, 6.0)),
+    "shaft_coupler": ("fit", lambda p, r: (0, 0, _mm(p["shaft_a"]) / 2 + 3.2, None, 6.0)),
+    "bearing_block": ("fit", lambda p, r: (0, r["info"]["centre_height"], r["info"]["seat"] / 2 + 3.0, r["size"][2] - 6.0, 6.0)),
+    "rc_wheel": ("fit", lambda p, r: (0, 0, max(_mm(p["hex"]) * 0.58 + 2.5, _mm(p["axle_d"]) / 2 + 3.5),
+                                      r["info"]["width"] - r["info"]["mounting_face_from_inner_edge"] - 1.6, float(p["hex_depth"]) + 1.6)),
+    "spur_gear": ("clearance", lambda p, r: (0, 0, float(p["bore_d"]) / 2 + 4.0, None, 6.0)),
+    "cell_pack_holder": ("fit", lambda p, r: (r["info"]["centres"][0][0], r["info"]["centres"][0][1], r["info"]["pocket"] / 2 + 1.6, None, 6.0)),
+}
+
+
+def _fit_test(kind: str, fn, label: str, defaults: dict, clean: dict) -> dict:
+    """Three small pieces to print in ten minutes: the feature at a tighter fit, the fit asked for,
+    and a looser one, told apart by one, two or three notches."""
+    from build123d import Align, Compound, Cylinder, Pos
+    setting, where = FIT_TESTS[kind]
+    if kind == "rc_wheel":
+        clean = {**clean, "piece": "wheel (rigid plastic)"}
+    full = {**defaults, **clean}
+    mid = float(full.get(setting) or 0)
+    fits = [round(mid + d, 3) for d in (-0.1, 0.0, 0.1)]
+    if fits[0] < 0:
+        fits = [0.0, 0.1, 0.2] if mid < 0.1 else fits
+    pieces, said, x_at = [], [], 0.0
+    for i, f in enumerate(fits):
+        try:
+            r = fn(**{**clean, setting: f})
+        except ValueError as e:
+            raise ValueError(f"fit test at {f:g} mm: {e}") from None
+        bb = r["shape"].bounding_box()
+        r["size"] = [round(bb.size.X, 3), round(bb.size.Y, 3), round(bb.size.Z, 3)]
+        x, y, rad, z0, h = where({**full, setting: f}, r)
+        z0 = bb.min.Z if z0 is None else z0
+        tall = h - 1.0 + i                              # 5, 6 and 7 mm: the shortest is the tightest
+        cut = r["shape"] & (Pos(x, y, z0 + (h - tall if z0 > bb.min.Z + 0.01 else 0)) * Cylinder(rad, tall, align=(Align.CENTER, Align.CENTER, Align.MIN)))
+        if cut is None or not cut.solids():
+            raise ValueError(f"{label}: the fit test came out empty")
+        piece = max(cut.solids(), key=lambda q: q.volume)
+        pb = piece.bounding_box()
+        cx = (pb.min.X + pb.max.X) / 2
+        for j in range(i + 1):                          # one, two or three notches in its edge
+            nick = Pos(cx + (j - i / 2) * 2.6, pb.max.Y, pb.min.Z - 1) * Cylinder(1.2, pb.size.Z + 2, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            nicked = piece - nick
+            if nicked.is_valid and len(nicked.solids()) == 1:
+                piece = nicked.solids()[0]
+        piece = Pos(x_at - pb.min.X, -(pb.min.Y + pb.max.Y) / 2, -pb.min.Z) * piece
+        x_at += pb.size.X + 4.0
+        pieces.append(piece)
+        said.append(f"{f:g} mm ({i + 1} notch{'es' if i else ''})")
+    shape = Compound(children=pieces)
+    bb = shape.bounding_box()
+    return {"shape": shape, "kind": kind, "label": label + ": fit test", "buy": None,
+            "size": [round(bb.size.X, 3), round(bb.size.Y, 3), round(bb.size.Z, 3)],
+            "notes": [f"fit test for the {label.lower()}: the part of it that has to fit, cut from the real part at three fits and laid in a row: " + ", ".join(said),
+                      "one notch in its edge is the tightest, three the loosest (and where the part is thick enough, tighter is shorter). Print it, try each on the real shaft, hex, bearing or cell, "
+                      "and type the fit of the one you like into the part before printing it whole",
+                      "print as it lies with the same plastic, layer height and walls you will use for the part: fit changes with all three"],
+            "checks": [] if all(p.is_valid for p in pieces) else ["a test piece came out with a modelling flaw"],
+            "info": {"fits": fits, "setting": setting}}
+
+
 def mark_top(shape, text: str):
     """(the shape with the text cut into its biggest upward flat, the text's height or 0). The text is
     put where it lies wholly on the flat, clear of holes and edges, as big as fits up to 8 mm."""
@@ -1504,6 +1576,12 @@ def _make(kind: str, **params) -> dict:
                              "0 to 3 mm (0 to 0.118 in), and 0.4 mm (0.016 in) is usual")
         if kind not in PRINTED_ONLY and params.get("mode") != "print":
             foot = 0.0                                # a bought part, drawn for reference
+    if params.pop("fit_test", False) not in (False, None, "", 0, "false"):
+        if kind not in FIT_TESTS:
+            raise ValueError(f"{label}: there is no fit test for this part")
+        for k in ("bottom_chamfer", "top_chamfer", "engrave_text"):
+            params.pop(k, None)
+        return _fit_test(kind, fn, label, defaults, {k: v for k, v in params.items() if v is not None and v != ""})
     crown, stamp = 0.0, ""
     if "top_chamfer" not in allowed:                  # and its top edge broken, and a few words cut into its top
         try:
@@ -1679,6 +1757,8 @@ def catalog() -> dict:
         if not any(f["name"] == "bottom_chamfer" for f in fields):
             fields.append({"name": "bottom_chamfer", "label": "Bottom edge chamfer, 45° (against elephant's foot; 0.4 mm or 0.016 in is usual, 0: none)",
                            "type": "len", "default": 0.0})
+        if kind in FIT_TESTS:
+            fields.append({"name": "fit_test", "label": "Fit test: just the part that has to fit, at three fits (a ten minute print)", "type": "bool", "default": False})
         if "top_chamfer" not in params and not any(f["name"] == "top_chamfer" for f in fields):
             fields.append({"name": "top_chamfer", "label": "Top edge chamfer, 45° (0: none)", "type": "len", "default": 0.0})
         if "engrave_text" not in params and "text" not in params and not any(f["name"] == "engrave_text" for f in fields):

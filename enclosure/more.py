@@ -1037,6 +1037,143 @@ def vise_jaws(jaw_width=100.0, jaw_height=20.0, jaw_thickness=12.0, face=5.0, ma
 VISE_GROOVES = ("horizontal V", "horizontal and upright V", "plain")
 
 
+# ---------- Clamps, cleats and barbs ----------
+
+def cable_clamp(cable_d=6.0, width=12.0, screw_d=3.4, squeeze=0.5, wall=2.5):
+    """A strain relief clamp: a saddle and a cap that close round a cable with two screws and grip
+    it, so a pull on the cable stops here and not at its solder joints. Two parts, side by side."""
+    d, w, sd, sq, t = float(cable_d), float(width), float(screw_d), float(squeeze), float(wall)
+    _rng("cable", d, 2, 30); _rng("width", w, 6, 40); _rng("screw hole", sd, 2.5, 6); _rng("squeeze", sq, 0, d * 0.3); _rng("wall", t, 1.6, 6)
+    L = d + 2 * (sd + 5.0)
+    hx = d / 2 + sd / 2 + 2.5                         # the screws, either side of the cable
+    half_h = d / 2 + t - sq / 2                       # each half stops short of the middle, so the screws squeeze the cable
+    parts = []
+    for k in range(2):
+        half = Box(L, w, half_h, align=MIN_)
+        half -= Pos(0, 0, half_h + sq / 2) * (Rot(90, 0, 0) * Cylinder(d / 2, w + 2, align=(Align.CENTER, Align.CENTER, Align.CENTER)))
+        for i in range(3):                            # ridges across the groove to bite the jacket
+            y = (i - 1) * w / 3
+            half += (Pos(0, y, half_h + sq / 2) * (Rot(90, 0, 0) * (Cylinder(d / 2 + 0.01, 1.2, align=(Align.CENTER, Align.CENTER, Align.CENTER))
+                                                                 - Cylinder(d / 2 - 0.5, 1.4, align=(Align.CENTER, Align.CENTER, Align.CENTER))))) & Box(L, w, half_h, align=MIN_)
+        for sx in (-1, 1):
+            half -= Pos(sx * hx, 0, -1) * Cylinder(sd / 2, half_h + 2, align=MIN_)
+        parts.append(Pos(0, k * (w + 5), 0) * half)
+    body = Compound(children=parts)
+    notes = [f"strain relief clamp for a Ø{d:g} mm cable: two halves {L:g} x {w:g} x {half_h:g} mm, ridges in the groove, two Ø{sd:g} mm screws {2 * hx:g} mm apart",
+             f"closed on the cable the halves stop {sq:g} mm apart, which is the squeeze: more for a soft jacket, less for a stiff one",
+             "screw through both into the panel or box (or bolt them together with nuts); print as they lie, flat sides on the bed"]
+    return _out(body, notes, [], {"screw_spacing": round(2 * hx, 2), "height_closed": round(2 * half_h + sq, 2)})
+
+
+CLEAT_PIECES = ("both", "wall cleat", "hanger")
+
+
+def french_cleat(length=150.0, height=35.0, thickness=12.0, piece="both", screw_d=4.5, screws=0, fit=0.3):
+    """A French cleat: a wall strip with a 45 degree hook along its top and a hanger with the same
+    slope turned over, so a shelf, a tool board or a cabinet drops on and can't come off forward."""
+    L, H, T, sd, f = float(length), float(height), float(thickness), float(screw_d), float(fit)
+    if piece not in CLEAT_PIECES:
+        raise ValueError(f"piece: one of {', '.join(CLEAT_PIECES)}")
+    _rng("length", L, 30, 400); _rng("height", H, T + 10, 120); _rng("thickness", T, 6, 30); _rng("screw hole", sd, 3, 7); _rng("fit", f, 0, 1)
+    n = int(screws) or max(2, round(L / 90))
+    _rng("screws", n, 1, 8, "")
+
+    def strip(shrink: float):
+        # Seen from its end: the back flat against the wall (x = 0), the slope on its top edge running up and away from the wall.
+        prof = Polygon((0, 0), (T, 0), (T, H - shrink), (0, H - T - shrink), align=None)
+        body = Pos(0, L / 2, 0) * extrude(Plane.XZ * prof, amount=L, dir=(0, 1, 0))
+        body = Pos(0, -L, 0) * body if body.bounding_box().min.Y > L / 2 - 1 else body
+        bb = body.bounding_box()
+        body = Pos(0, -(bb.min.Y + bb.max.Y) / 2, 0) * body
+        zc = (H - T) / 2
+        for i in range(n):
+            y = (i - (n - 1) / 2) * (L / n)
+            body -= Pos(T, y, zc) * (Rot(0, -90, 0) * _csk(sd, 2 * sd, 60))
+        return body
+
+    wall, hang = strip(0.0), strip(f)
+    # Laid on their backs to print: the wall's face on the bed.
+    lay = lambda b: Rot(0, 90, 0) * b
+    pieces = {"wall cleat": [wall], "hanger": [hang], "both": [wall, hang]}[piece]
+    laid = []
+    for i, b in enumerate(pieces):
+        g = lay(b)
+        gb = g.bounding_box()
+        laid.append(Pos(-gb.min.X + i * (H + 6), 0, -gb.min.Z) * g)
+    body = laid[0] if len(laid) == 1 else Compound(children=laid)
+    notes = [f"French cleat {L:g} mm long: strips {H:g} mm tall and {T:g} mm thick with a 45° edge, {n} countersunk Ø{sd:g} mm screw holes in each",
+             "screw one to the wall with its slope at the top, pointing up and away from the wall; screw the other to the back of what you hang, slope at the bottom, "
+             "pointing down and away from it. The two slopes hook together" + (f"; the hanger is {f:g} mm shorter so it seats fully" if f and piece != "wall cleat" else ""),
+             "print them lying on their backs as shown, 4 walls and 40% infill: the load runs along the layers, which is the strong way"]
+    return _out(body, notes, ["a printed cleat carries a tool board or a small shelf, not a cabinet full of plates: for real weight use wood or metal, into studs"],
+                {"screws": n})
+
+
+def hose_barb(tube_a=8.0, tube_b=8.0, barbs=3, length=0.0, wall=1.6):
+    """A barbed connector to join two soft tubes, the same size or different: saw-tooth barbs that
+    let the tube push on and stop it pulling off. For water, air and aquarium line, not pressure."""
+    a, a_say = sizes.parse(tube_a, "first tube")
+    b, b_say = sizes.parse(tube_b, "second tube")
+    n, w = int(barbs), float(wall)
+    _rng("first tube inside diameter", a, 3, 40); _rng("second tube inside diameter", b, 3, 40); _rng("barbs", n, 1, 6, ""); _rng("wall", w, 1.0, 4)
+    if min(a, b) - 2 * w < 1.5:
+        raise ValueError(f"a {min(a, b):g} mm tube leaves no hole with a {w:g} mm wall: a thinner wall, {max(1.0, (min(a, b) - 1.5) / 2):.1f} mm at most")
+    pitch_a, pitch_b = max(3.0, a * 0.5), max(3.0, b * 0.5)
+    la, lb = n * pitch_a + 2, n * pitch_b + 2
+    mid = float(length) or max(4.0, max(a, b) * 0.4)
+    _rng("middle", mid, 2, 60)
+
+    def end(d, pitch, z0, up):
+        # Barbs: each a cone growing from just under the tube's bore to a little over it, sharp edge toward the middle.
+        pts = []
+        for i in range(n):
+            lo, hi = z0 + up * (2 + i * pitch), z0 + up * (2 + (i + 1) * pitch)
+            pts += [(d / 2 * 0.92, lo), (d / 2 * 1.08, hi)]
+        return pts
+
+    collar = max(a, b) / 2 * 1.08 + 1.5
+    outer = [(a / 2 * 0.92, 0)] + end(a, pitch_a, 0, 1) + [(a / 2 * 0.92, la), (collar, la), (collar, la + mid), (b / 2 * 0.92, la + mid)]
+    top = la + mid + lb
+    eb = end(b, pitch_b, top, -1)                    # the far end's barbs point the other way
+    outer += [(r, z) for r, z in reversed(eb)] + [(b / 2 * 0.92, top)]
+    # Ordered up the outside, then back down the bore.
+    bore_a, bore_b = a / 2 * 0.92 - w, b / 2 * 0.92 - w
+    prof = outer + [(bore_b, top), (bore_b, la + mid / 2), (bore_a, la + mid / 2), (bore_a, 0)]
+    body = revolve(Plane.XZ * Polygon(*prof, align=None), axis=Axis.Z)
+    notes = [f"barbed connector for a {a_say} tube to a {b_say} tube (inside diameters): {n} barbs each end, a Ø{2 * collar:.1f} mm collar between to push against, "
+             f"{top:.1f} mm long, bores Ø{2 * bore_a:.1f} and Ø{2 * bore_b:.1f} mm",
+             "print it standing on end, the bigger tube's end down, 100% infill or enough walls to be solid, PETG; a 0.12 mm layer makes barbs that seal better",
+             "warm the tube in hot water to push it on; add a clip or a cable tie behind the first barb for anything that matters"]
+    return _out(body, notes, ["printed layers can weep: fine for drains, air and low pressure water, not for fuel, gas or mains pressure"],
+                {"length": round(top, 2), "bore_a": round(2 * bore_a, 2), "bore_b": round(2 * bore_b, 2)})
+
+
+def belt_clamp(belt_width=6.0, teeth=6, pitch=2.0, screw_d=3.4, thickness=4.0):
+    """A clamp to anchor the end of a GT2 timing belt to a carriage: a base with grooves that the
+    belt's teeth sit in and a cap that screws down on it. Two parts, side by side."""
+    bw, n, p, sd, t = float(belt_width), int(teeth), float(pitch), float(screw_d), float(thickness)
+    _rng("belt width", bw, 4, 20); _rng("teeth", n, 3, 15, ""); _rng("pitch", p, 2, 5); _rng("screw hole", sd, 2.5, 5.5); _rng("thickness", t, 3, 10)
+    ln = n * p + 4.0
+    W = bw + 1.0 + 2 * (sd + 4.0)
+    hy = (bw + 1.0) / 2 + sd / 2 + 1.5
+    base = Box(ln, W, t, align=MIN_)
+    td = 0.75 * p / 2                                 # GT2 tooth height is 0.75 mm at a 2 mm pitch
+    for i in range(n):
+        x = (i - (n - 1) / 2) * p
+        base -= Pos(x, 0, t - td) * Box(p * 0.55, bw + 1.0, td + 1, align=MIN_)
+    cap = Box(ln, W, t, align=MIN_)
+    cap -= Pos(0, 0, t - 0.6) * Box(ln + 2, bw + 1.0, 1.0, align=MIN_)         # a shallow track that keeps the belt straight; it still pinches
+    for sy in (-1, 1):
+        base -= Pos(0, sy * hy, -1) * Cylinder(sd / 2, t + 2, align=MIN_)
+        cap -= Pos(0, sy * hy, -1) * Cylinder(sd / 2, t + 2, align=MIN_)
+    body = Compound(children=[base, Pos(0, W + 5, 0) * cap])
+    notes = [f"belt clamp for a {bw:g} mm belt with a {p:g} mm pitch (GT2 is 2): {n} grooves {td:.2f} mm deep hold its teeth, the cap pinches it; "
+             f"each half {ln:g} x {W:g} x {t:g} mm, two Ø{sd:g} mm screws {2 * hy:g} mm apart",
+             "lay the belt teeth down in the grooves, put the cap on track side down, and screw through both into the carriage",
+             "print as they lie, grooves and track up; a 0.12 or 0.16 mm layer prints the grooves cleanly"]
+    return _out(body, notes, [], {"screw_spacing": round(2 * hy, 2)})
+
+
 # ---------- Cell packs ----------
 
 PACK_CELLS = {"18650": 18.4, "21700": 21.2, "26650": 26.3, "AA": 14.5, "custom": 0.0}
@@ -1157,6 +1294,10 @@ KINDS = {
     "extrusion_foot": (extrusion_foot, "T-slot foot", {"profile": "1515 (80/20, 1.5 in)", "thickness": 8.0, "margin": 4.0, "keys": True}),
     "vise_jaws": (vise_jaws, "Soft vise jaws", {"jaw_width": 100.0, "jaw_height": 20.0, "jaw_thickness": 12.0, "face": 5.0, "magnet_d": 10.0, "magnet_t": 3.0,
                                                 "grooves": "horizontal V"}),
+    "cable_clamp": (cable_clamp, "Strain relief cable clamp", {"cable_d": 6.0, "width": 12.0, "screw_d": 3.4, "squeeze": 0.5, "wall": 2.5}),
+    "french_cleat": (french_cleat, "French cleat", {"length": 150.0, "height": 35.0, "thickness": 12.0, "piece": "both", "screw_d": 4.5, "screws": 0, "fit": 0.3}),
+    "hose_barb": (hose_barb, "Hose barb connector", {"tube_a": 8.0, "tube_b": 8.0, "barbs": 3, "length": 0.0, "wall": 1.6}),
+    "belt_clamp": (belt_clamp, "Timing belt clamp", {"belt_width": 6.0, "teeth": 6, "pitch": 2.0, "screw_d": 3.4, "thickness": 4.0}),
     "cell_pack_holder": (cell_pack_holder, "Cell pack holder (18650, 21700: 1S3P, 3S4P...)", {
         "cell": "18650", "cell_d": 0.0, "series": 1, "parallel": 3, "layout": PACK_LAYOUTS[1], "height": 10.0, "gap": 1.6, "ears": "none", "fit": 0.15}),
     "extrusion_end_cap": (extrusion_end_cap, "T-slot end cap", {"profile": "1515 (80/20, 1.5 in)", "thickness": 3.0, "tab": 7.0}),
@@ -1186,6 +1327,13 @@ KINDS = {
 _SCREW = ("Screw hole (4.5 suits a #8 or 4 mm screw)", "len")
 _PROFILE = ("Extrusion", "select")
 KIND_LABELS = {
+    ("cable_clamp", "cable_d"): ("Cable diameter", "len"), ("cable_clamp", "screw_d"): ("Screw holes", "len"), ("cable_clamp", "squeeze"): ("Squeeze on the cable", "len"),
+    ("french_cleat", "piece"): ("Make", "select"), ("french_cleat", "screw_d"): ("Screw holes", "len"), ("french_cleat", "screws"): ("Screws in each (0: to suit)", "num"),
+    ("french_cleat", "fit"): ("Hanger shorter by", "len"), ("french_cleat", "height"): ("Height of each strip", "len"),
+    ("hose_barb", "tube_a"): ("First tube, inside diameter: 8, 1/4, 3/8", "size"), ("hose_barb", "tube_b"): ("Second tube, inside diameter", "size"),
+    ("hose_barb", "barbs"): ("Barbs each end", "num"), ("hose_barb", "length"): ("Middle collar length (0: to suit)", "len"),
+    ("belt_clamp", "belt_width"): ("Belt width", "len"), ("belt_clamp", "teeth"): ("Teeth held", "num"), ("belt_clamp", "pitch"): ("Tooth pitch (GT2: 2)", "len"),
+    ("belt_clamp", "screw_d"): ("Screw holes", "len"),
     ("shaft_collar", "shaft_d"): ("Shaft: 8, 3/8, 0.5 in", "size"), ("shaft_collar", "od"): ("Outside diameter (0: to suit)", "len"),
     ("shaft_collar", "style"): ("Held by", "select"), ("shaft_collar", "screw"): ("Screw", "select"), ("shaft_collar", "fit"): ("Fit (added round the shaft)", "len"),
     ("shaft_coupler", "shaft_a"): ("First shaft: 5, 1/4", "size"), ("shaft_coupler", "shaft_b"): ("Second shaft: 8, 3/8", "size"),
@@ -1261,6 +1409,7 @@ KIND_LABELS = {
 }
 _WAYS = ["inside the hose", "over the port"]
 CHOICES = {
+    ("french_cleat", "piece"): list(CLEAT_PIECES),
     ("shaft_collar", "style"): list(COLLAR_STYLES), ("shaft_collar", "screw"): list(PINCH), ("shaft_coupler", "screw"): list(PINCH),
     ("bearing_block", "bearing"): ["623", "625", "688", "608", "6000", "6001", "6200"], ("extrusion_foot", "profile"): list(PROFILES),
     ("vise_jaws", "grooves"): list(VISE_GROOVES),
@@ -1279,10 +1428,12 @@ GROUPS = {
     "T-slot extrusion": ["extrusion_offset_jig", "extrusion_freehand_jig", "extrusion_alignment_jig", "extrusion_end_cap", "extrusion_bracket",
                          "extrusion_cable_guide", "extrusion_panel_clip", "extrusion_handle", "extrusion_foot"],
     "Jigs": ["shelf_pin_jig", "clamp_square", "centre_finder", "setup_blocks", "vise_jaws"],
-    "Funnels and hoses": ["funnel", "hose_adapter"],
+    "Funnels and hoses": ["funnel", "hose_adapter", "hose_barb"],
     "Panels and trainers": ["test_point_plate", "panel_bezel", "terminal_cover"],
 }
 WORDS = {
+    "cable_clamp": "strain relief cord grip cable gland clamp saddle", "french_cleat": "cleat wall hanger tool board shelf mount hang",
+    "hose_barb": "tube connector barb fitting coupler reducer aquarium air water line", "belt_clamp": "gt2 timing belt anchor clamp tensioner 3d printer carriage",
     "shaft_collar": "stop collar clamp ring shaft lock", "shaft_coupler": "coupling motor lead screw stepper join shafts", "bearing_block": "pillow block bearing housing mount kp08 shaft support",
     "extrusion_foot": "8020 80/20 1515 2020 leg foot end pad leveller", "vise_jaws": "vice soft jaws magnetic jaw pads bench vise",
     "cell_pack_holder": "battery pack 18650 21700 spacer bracket honeycomb 1s3p 3s4p 4s2p ebike lithium cell holder spot weld nickel strip cylindrical",

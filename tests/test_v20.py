@@ -39,6 +39,10 @@ VARIANTS = {
     "bearing_block": [{}, {"bearing": "625"}],
     "extrusion_foot": [{}, {"profile": "4040 (40 mm)"}],
     "vise_jaws": [{}, {"grooves": "plain"}],
+    "cable_clamp": [{}, {"cable_d": 12}],
+    "french_cleat": [{}, {"piece": "hanger"}],
+    "hose_barb": [{}, {"tube_a": 12.7, "tube_b": 6.35}],
+    "belt_clamp": [{}, {"belt_width": 9, "teeth": 10}],
 }
 
 
@@ -51,7 +55,7 @@ def test_more_parts(kind, params):
     r = hw.make(kind, **params)
     assert r["shape"].is_valid and r["shape"].volume > 0 and r["notes"]
     assert r["shape"].bounding_box().min.Z > -0.01
-    if kind != "setup_blocks":
+    if kind not in ("setup_blocks", "cable_clamp", "french_cleat", "belt_clamp"):       # those are several pieces laid out together
         assert len(r["shape"].solids()) == 1
 
 

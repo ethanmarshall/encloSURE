@@ -603,7 +603,7 @@ _EARS = {"front and back": ("y", (-1, 1)), "both ends": ("x", (-1, 1)), "front o
 
 
 def battery_holder(cell="18650", count=1, cell_length=0.0, contact_room=6.5, contact_w=0.0, contact_t=0.6, mount="external ears",
-                   ear_side="front and back", ears=None, bays="each cell in its own bay"):
+                   ear_side="front and back", ears=None, bays="each cell in its own bay", wire_channel=False):
     """A battery compartment with places for contacts: AAA, AA, 18650 (bare or with a protection
     circuit), 21700, or a 9V. Each cell lies in a trough between two end walls, and each end wall has
     a slot a flat contact plate drops into (a spring at one end, a button at the other). The cell
@@ -699,19 +699,27 @@ def battery_holder(cell="18650", count=1, cell_length=0.0, contact_room=6.5, con
                      ("the batteries share one open compartment, side by side with no wall between them" if cell == "9V" else
                       "the cells share one open compartment, side by side with no wall between them: a low ridge in the floor keeps each in its place, "
                       "and the pack is narrower"))
+    back = 0.0                           # what a wire channel adds along the back
+    if wire_channel and cell != "9V":
+        back = 4.2
+        body += Pos(0, W_out / 2 + back / 2 - 0.01, 0) * Box(L_out, back + 0.02, low, align=MIN_)
+        body -= Pos(0, W_out / 2 + 1.5, fl) * Box(L_out + 2, 3.0, low, align=MIN_)
+        notes.append("a wire channel 3 mm wide runs along the back, open at the top and at both ends: solder a lead to the far end's tab, lay it in the "
+                     "channel, and both leads leave from the same end. A dab of hot glue or a strip of tape holds it in")
     eh = 3.4
     if mount == "external ears":
         axis, signs = _EARS[ear_side]
         long_side = axis == "y"
         for sg in signs:
             if long_side:
-                ear = Pos(0, sg * (W_out / 2 + 4.5 - 0.1), 0) * Box(10.0, 9.2, fl + 0.8, align=MIN_)
-                ear -= Pos(0, sg * (W_out / 2 + 4.8), -1) * Cylinder(eh / 2, 10, align=MIN_)
+                half = W_out / 2 + (back if sg > 0 else 0.0)
+                ear = Pos(0, sg * (half + 4.5 - 0.1), 0) * Box(10.0, 9.2, fl + 0.8, align=MIN_)
+                ear -= Pos(0, sg * (half + 4.8), -1) * Cylinder(eh / 2, 10, align=MIN_)
             else:
                 ear = Pos(sg * (L_out / 2 + 4.5 - 0.1), 0, 0) * Box(9.2, 10.0, fl + 0.8, align=MIN_)
                 ear -= Pos(sg * (L_out / 2 + 4.8), 0, -1) * Cylinder(eh / 2, 10, align=MIN_)
             body += ear
-        apart = (W_out if long_side else L_out) + 9.6
+        apart = (W_out + back if long_side else L_out) + 9.6
         where = {"front and back": "at the front and the back (the long sides)", "both ends": "at each end"}.get(ear_side, "at the " + ear_side.replace(" only", "") + " only")
         notes.append(f"a screw ear {where} (Ø{eh:g} mm, M3)" + (f", {apart:.1f} mm apart" if len(signs) == 2 else ""))
         if len(signs) == 1:
@@ -1051,7 +1059,7 @@ KINDS = {
                                                                "fit_text": True, "font": "Default (DejaVu Sans)", "google_font": "",
                                                                "border": True, "corners": "rounded", "icon": "", "logo": "", "logo_only": False,
                                                                "two_color": False}),
-    "battery_holder": (battery_holder, "Battery compartment (with contact slots)", {"cell": "18650", "count": 1, "bays": BATTERY_BAYS[0], "cell_length": 0.0,
+    "battery_holder": (battery_holder, "Battery compartment (with contact slots)", {"cell": "18650", "count": 1, "bays": BATTERY_BAYS[0], "wire_channel": False, "cell_length": 0.0,
                                                                                     "contact_room": 6.5, "contact_w": 0.0, "contact_t": 0.6,
                                                                                     "mount": "external ears", "ear_side": "front and back"}),
     "fan_guard": (fan_guard, "Fan guard", {"fan": 80, "thickness": 2.4, "bar": 1.6, "gap": 7.0}),
@@ -1109,6 +1117,7 @@ KIND_LABELS = {
     ("battery_holder", "contact_t"): ("Contact plate thickness", "len"), ("battery_holder", "mount"): ("Screw fixing", "select"),
     ("battery_holder", "ear_side"): ("External ears on", "select"),
     ("battery_holder", "bays"): ("With more than one cell", "select"),
+    ("battery_holder", "wire_channel"): ("Wire channel along the back (both leads out one end)", "bool"),
     ("fan_guard", "fan"): ("Fan size, mm", "select"), ("fan_guard", "bar"): ("Bar width", "len"), ("fan_guard", "gap"): ("Gap between bars", "len"),
     ("fan_adapter", "from_size"): ("Bigger fan, mm", "select"), ("fan_adapter", "to_size"): ("Smaller fan, mm", "select"),
     ("fan_adapter", "height"): ("Height (0: shortest that prints)", "len"),

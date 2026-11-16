@@ -124,7 +124,7 @@ def handwheel(diameter=100.0, rim=12.0, spokes=3, shaft="round", bore_d=8.0, fla
 
 # ---------- Wheel and tyre for a radio-controlled car ----------
 
-PIECES = ("wheel (rigid plastic)", "tyre (TPU)")
+PIECES = ("wheel (rigid plastic)", "tyre (TPU)", "both, as one two-material print")
 # Usual sizes by scale: tyre diameter, width, wheel diameter, drive hex, hex depth, axle.
 RC_SCALES = {"custom (the sizes below)": None,
              "1/10 touring car (65 x 26, 12 mm hex)": (65.0, 26.0, 52.0, 12.0, 5.0, 4.0),
@@ -225,6 +225,23 @@ def rc_wheel(piece="wheel (rigid plastic)", tyre_d=65.0, width=26.0, rim_d=52.0,
         tyre -= tools
         tyre -= Pos(0, 0, W / 2 - 0.8) * (Cylinder(ro + 1, 1.6, align=MIN_) - Cylinder(ro - td, 1.6, align=MIN_))
 
+    if piece == PIECES[2]:
+        # Printed together on a multi-material printer: the tyre is formed round the wheel, so it is the
+        # tyre's full shape with the wheel taken out of it, touching all over and locked behind the lips.
+        solid_tyre = revolve(Plane.XZ * Polygon((ri + 0.5, 0), (ri + 0.5, W), (ro - sh, W), (ro, W - sh), (ro, sh), (ro - sh, 0), align=None), axis=Axis.Z)
+        formed = solid_tyre - rim
+        if tread != "slick":
+            formed = formed & (tyre + Cylinder(rb + lip + 0.3, W, align=MIN_))        # keep the tread that was cut
+        formed = max(formed.solids(), key=lambda q: q.volume)
+        info = {"tyre_d": OD, "wheel_d": RD, "width": W, "tyre_thickness": round(thick, 2)}
+        out = _out(rim, [f"wheel and tyre for a radio-controlled car, printed together: Ø{OD:g} x {W:g} mm tyre on a Ø{RD:g} mm wheel"
+                         + (f", {hx:g} mm drive hex {hd:g} mm deep" if hx else "") + f", Ø{ax:g} mm axle; tread {tread}",
+                         "two bodies in one print: the wheel in PETG or PLA and the tyre in TPU, the tyre formed round the wheel and locked behind the lip at each edge. "
+                         "On the print plate they are two objects in place: give the second one the TPU",
+                         "TPU and PETG stick to each other only a little, so the lips are what hold the tyre; a purge tower or a generous prime is worth it at each change",
+                         "print as it lies, the wheel's outer face on the bed; no supports"], [], info)
+        out["inlay"] = formed
+        return out
     making_rim = piece == PIECES[0]
     info = {"tyre_d": OD, "wheel_d": RD, "width": W, "tyre_thickness": round(thick, 2), "tyre_bore": round(2 * rb * squeeze, 2),
             "mounting_face_from_inner_edge": round(inset, 2)}

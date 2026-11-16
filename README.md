@@ -397,6 +397,13 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   for two sizes, pillow block for a ball bearing. Also a T-slot foot and soft vise jaws.
 - **On any printed part**: a top edge chamfer, and a few words cut into the biggest flat on top
   (`top_chamfer`, `engrave_text`).
+- **Fit test**: for parts that have to fit something (knobs, handwheel, collar, coupler, bearing
+  block, RC wheel, gear, cell holder), tick "Fit test" to get just that feature at three fits in a
+  ten minute print, marked with one, two or three notches.
+- **RC wheel and tyre in one print**: "both, as one two-material print" gives the wheel and a tyre
+  formed round it as two bodies in place, for a multi-material printer.
+- **More parts**: strain relief cable clamp, French cleat, hose barb connector, timing belt clamp;
+  a wire channel along the back of the battery compartment.
 - **Drill sizes the way a shop says them**: the drilling jigs and the drill guide take 5, 13/64,
   1/4", 0.201 in or 1-1/2 (a fraction is inches). The T-slot jigs cut their drill size into the top
   face, show a steel bushing in the picture when you give its outside diameter (it is not in the
