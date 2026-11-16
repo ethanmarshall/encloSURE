@@ -99,3 +99,17 @@ def test_battery_cells_apart_or_together():
     assert nine["shape"].is_valid and "no wall between" in nine["notes"][1]
     with pytest.raises(ValueError):
         hw.make("battery_holder", bays="loose")
+
+
+def test_internal_holes_under_every_cell():
+    one = hw.make("battery_holder", mount="internal holes")
+    four = hw.make("battery_holder", mount="internal holes", count=4, cell="AA")
+    solid = hw.make("battery_holder", mount="none", count=4, cell="AA")
+    assert four["shape"].is_valid and "8 countersunk" in " ".join(four["notes"]) and "2 countersunk" in " ".join(one["notes"])
+    from build123d import GeomType
+    def holes(r):
+        return len({(round(f.center().X, 1), round(f.center().Y, 1)) for f in r["shape"].faces() if f.geom_type == GeomType.CONE})
+    assert holes(four) == 8 and holes(one) == 2 and holes(solid) == 0
+    with pytest.raises(ValueError, match="0.016 in"):
+        hw.make("flat_plate", bottom_chamfer=10.16)             # 0.4 typed with the page in inches
+    assert hw.make("flat_plate", bottom_chamfer=2.5)["shape"].is_valid

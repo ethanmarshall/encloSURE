@@ -1462,8 +1462,9 @@ def _make(kind: str, **params) -> dict:
             foot = float(params.pop("bottom_chamfer", 0) or 0)
         except (TypeError, ValueError):
             raise ValueError("bottom chamfer: a size in mm, 0 for none") from None
-        if not 0 <= foot <= 2:
-            raise ValueError("bottom chamfer: 0 to 2 mm (0.3 to 0.5 is usual)")
+        if not 0 <= foot <= 3:
+            raise ValueError(f"bottom edge chamfer: {foot:g} mm ({foot / 25.4:.3g} in) is too big. It only has to hide the first layer's squish: "
+                             "0 to 3 mm (0 to 0.118 in), and 0.4 mm (0.016 in) is usual")
         if kind not in PRINTED_ONLY and params.get("mode") != "print":
             foot = 0.0                                # a bought part, drawn for reference
     extra = set(params) - allowed
@@ -1610,7 +1611,7 @@ def catalog() -> dict:
         import inspect
         params = inspect.signature(fn).parameters
         if not any(f["name"] == "bottom_chamfer" for f in fields):
-            fields.append({"name": "bottom_chamfer", "label": "Bottom edge chamfer, 45° (against elephant's foot; 0.4 is usual, 0: none)",
+            fields.append({"name": "bottom_chamfer", "label": "Bottom edge chamfer, 45° (against elephant's foot; 0.4 mm or 0.016 in is usual, 0: none)",
                            "type": "len", "default": 0.0})
         out[kind] = {"label": label, "fields": fields, "printed_only": kind in PRINTED_ONLY,
                      "modes": "mode" in params, "material": "material" in params,

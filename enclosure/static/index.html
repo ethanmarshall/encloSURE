@@ -2434,6 +2434,7 @@ function partFields() {
     if (f.type === "len") {
       const el = f.default === null ? h("input", { type: "number", name: "p_" + f.name, step: U === 1 ? "0.1" : "0.01", min: "0" }) : lenIn("p_" + f.name, f.default, "0.1", 0);
       el.dataset.mmstep = "0.1";
+      if (f.name === "bottom_chamfer" && U !== 1) el.step = "0.001";   // a chamfer this small is thousandths of an inch
       return field(f.label, el, UNIT());
     }
     return field(f.label, h("input", { type: "number", name: "p_" + f.name, value: f.default ?? "", step: "any" }));

@@ -717,14 +717,14 @@ def battery_holder(cell="18650", count=1, cell_length=0.0, contact_room=6.5, con
         if len(signs) == 1:
             checks.append("one ear alone lets the holder rock: add a dab of tape or glue under the far side, or use two ears")
     elif mount == "internal holes":
-        # Countersunk holes in the floor under the cells: at a quarter and three quarters of the length, on the
-        # outer cells' centre lines (one cell: both on it), clear of the push-out hole in the middle.
-        pts = [(-il / 4, seats[0]), (il / 4, seats[-1])]
+        # Countersunk holes in the floor under every cell, at a quarter and three quarters of the length,
+        # clear of the push-out hole in the middle: use the ones that suit what it screws to.
+        pts = [(sx * il / 4, y) for y in seats for sx in (-1, 1)]
         for x, y in pts:
             body -= Pos(x, y, fl) * _csk(eh, 6.4, 20)
-        notes.append(f"two countersunk Ø{eh:g} mm holes (M3 flat head) inside, in the floor under the cells, "
-                     f"{math.hypot(pts[1][0] - pts[0][0], pts[1][1] - pts[0][1]):.1f} mm apart"
-                     + (" on a diagonal" if len(seats) > 1 else "") + f"; the floor is {fl:g} mm thick so their heads sit below the cells")
+        across = f", the rows {seats[1] - seats[0]:.1f} mm apart" if len(seats) > 1 else ""
+        notes.append(f"{len(pts)} countersunk Ø{eh:g} mm holes (M3 flat head) inside, two in the floor under each cell, {il / 2:.1f} mm apart along it{across}: "
+                     f"use whichever suit; the floor is {fl:g} mm thick so the heads sit below the cells")
         checks.append("use flat-head (countersunk) screws and check they sit flush: a proud head shorts or dents a cell")
     notes.append("print it as it stands, no supports")
     return _out(body, notes, checks, {"inside_length": round(il, 2), "outside": [round(L_out, 2), round(W_out, 2)],

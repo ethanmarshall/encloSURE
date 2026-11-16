@@ -66,7 +66,7 @@ def test_bed_edge_chamfer_on_any_part():
     cut = plate & probe
     assert cut is None or cut.volume < 1e-6
     assert hw.make("screw", bottom_chamfer=0.4)["shape"].volume == pytest.approx(hw.make("screw")["shape"].volume)   # a bought part
-    for bad in (3, -1, "x"):
+    for bad in (4, -1, "x"):
         with pytest.raises(ValueError):
             hw.make("flat_plate", bottom_chamfer=bad)
     assert all(k["fields"][-1]["name"] == "bottom_chamfer" or any(f["name"] == "bottom_chamfer" for f in k["fields"])
