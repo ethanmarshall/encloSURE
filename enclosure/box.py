@@ -49,7 +49,7 @@ PLATE_LIDS = ("screw", "friction", "snap", "hinge", "living")  # a plate on top 
 PIN_HOLE = {"M2": 2.2, "M2.5": 2.7, "M3": 3.2, "M4": 4.3}  # the board hole a pin goes through
 # Cells: (diameter, length) with a little room; AA and AAA are IEC 60086-2 maximums, 18650 and 21700
 # their names (18 x 65, 21 x 70 mm) plus room for protected cells. Check your cells.
-CELLS = {"AAA": (10.5, 44.5), "AA": (14.5, 50.5), "18650": (18.6, 67.5), "21700": (21.6, 70.5)}
+CELLS = {"AAA": (10.5, 44.5), "AA": (14.5, 50.5), "18650": (18.6, 67.5), "18650 protected": (18.9, 70.5), "21700": (21.6, 70.5)}
 CONTACT_ROOM = 7.0  # both ends' spring and button contacts (Keystone-style), mm
 DENSITY = {"PETG": 1.27, "PLA": 1.24, "ABS": 1.04, "ASA": 1.07}  # g/cm3
 FACES = ("-X", "+X", "-Y", "+Y", "lid", "floor")

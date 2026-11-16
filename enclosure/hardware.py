@@ -1324,23 +1324,28 @@ PRINTED_ONLY = {"snap_hook", "cable_clip", "tie_mount", "board_clip", "din_clip"
 # The useful printed things (brackets, clamps, holders, repair parts, fan parts) join the same list.
 from . import useful as _useful  # noqa: E402
 
+from . import more as _more  # noqa: E402
+
 KINDS.update(_useful.KINDS)
-PRINTED_ONLY |= set(_useful.KINDS) | {"thumbscrew"}
+KINDS.update(_more.KINDS)
+PRINTED_ONLY |= set(_useful.KINDS) | set(_more.KINDS) | {"thumbscrew"}
 
 # What each part is filed under on the page, and other words people look for it by.
 GROUPS = {
+    "Batteries": ["battery_holder", "battery_caddy"],
     "Fasteners": ["screw", "nut", "washer", "spacer", "insert", "thumbscrew", "dowel", "snap_ring"],
     "Springs": ["compression_spring", "extension_spring", "torsion_spring"],
     "Mounts and brackets": ["shelf_bracket", "corner_brace", "pipe_clamp", "pegboard_hook", "wall_pocket"],
     "Cable management": ["cable_clip", "tie_mount", "cable_comb", "raceway", "desk_grommet", "grommet"],
     "Workshop": ["bit_holder", "tool_rack", "sanding_block", "drill_guide"],
-    "Storage": ["gridfinity_bin", "gridfinity_baseplate", "drawer_organizer", "battery_caddy"],
-    "Electronics": ["battery_holder", "board_clip", "din_clip", "button_cap"],
+    "Storage": ["gridfinity_bin", "gridfinity_baseplate", "drawer_organizer"],
+    "Electronics": ["board_clip", "din_clip", "button_cap"],
     "Repairs": ["knob", "foot", "end_cap", "shim", "hole_plug"],
     "Labels": ["label_plate"],
     "Hinges, latches and clips": ["hinge", "latch", "snap_hook"],
     "Motion": ["spur_gear", "gt2_pulley", "wheel"],
     "Fans": ["fan_guard", "fan_adapter"],
+    **_more.GROUPS,
     "Test prints": ["test_print"],
 }
 WORDS = {
@@ -1359,7 +1364,9 @@ WORDS = {
     "fan_adapter": "fan duct reducer", "compression_spring": "coil spring", "extension_spring": "tension spring", "torsion_spring": "",
     "test_print": "tolerance calibration", "battery_holder": "battery compartment holder case 18650 aa aaa 9v cell contacts protected", "label_plate": "name plate tag sign nameplate keychain key fob plant marker valve tag text",
 }
+WORDS.update(_more.WORDS)
 GROUP_OF = {k: g for g, ks in GROUPS.items() for k in ks}
+RANK = {k: i for ks in GROUPS.values() for i, k in enumerate(ks)}       # the order within a group
 
 
 _CACHE: dict = {}
@@ -1499,13 +1506,13 @@ def catalog() -> dict:
         ("dowel", "fit"): ["press", "slip"], ("dowel", "ends"): ["both", "one", "none"], ("snap_ring", "type"): ["external", "internal"],
         ("snap_ring", "size"): sorted(set(RINGS_EXTERNAL) | set(RINGS_INTERNAL)),
         ("thumbscrew", "style"): list(THUMB_STYLES),
-        **_useful.CHOICES,
+        **_useful.CHOICES, **_more.CHOICES,
     }
     out = {}
     for kind, (fn, label, defaults) in KINDS.items():
         fields = []
         for name, default in defaults.items():
-            lab, typ = KIND_LABELS.get((kind, name)) or _useful.KIND_LABELS.get((kind, name)) or LABELS.get(name, (name.replace("_", " ").capitalize(), "len"))
+            lab, typ = KIND_LABELS.get((kind, name)) or _useful.KIND_LABELS.get((kind, name)) or _more.KIND_LABELS.get((kind, name)) or LABELS.get(name, (name.replace("_", " ").capitalize(), "len"))
             opts = choices.get((kind, name))
             if name == "wire":
                 opts = list(WIRE)
@@ -1527,5 +1534,5 @@ def catalog() -> dict:
         out[kind] = {"label": label, "fields": fields, "printed_only": kind in PRINTED_ONLY,
                      "modes": "mode" in params, "material": "material" in params,
                      "doc": " ".join((fn.__doc__ or "").strip().split("\n\n")[0].split()),
-                     "group": GROUP_OF.get(kind, "Other"), "words": WORDS.get(kind, "")}
+                     "group": GROUP_OF.get(kind, "Other"), "words": WORDS.get(kind, ""), "rank": RANK.get(kind, 999)}
     return {"kinds": out, "groups": list(GROUPS), "materials": list(PLASTIC), "wires": {k: v["name"] for k, v in WIRE.items()}}

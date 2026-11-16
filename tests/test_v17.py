@@ -27,6 +27,7 @@ VARIANTS = {
     "battery_caddy": [{}, {"cell": "9V", "rows": 1, "cols": 2}, {"cell": "18650"}],
     "fan_guard": [{}, {"fan": "120"}, {"fan": 40}],
     "battery_holder": [{}, {"cell": "18650 protected", "count": 2}, {"cell": "AA", "count": 4}, {"cell": "AAA", "count": 2, "ears": False},
+                       {"mount": "internal holes", "count": 3, "cell": "AA"}, {"ear_side": "left end only"}, {"mount": "internal holes", "cell": "9V"},
                        {"cell": "9V"}, {"cell": "9V", "count": 2}, {"cell": "21700"}],
     "label_plate": [{}, {"text": "MAIN VALVE|Shut off here", "style": "engraved", "mount": "cable tie slots"},
                     {"text": "12 V", "icon": "dc", "mount": "screw holes"}, {"text": "FUSES", "mount": "magnets", "style": "engraved"},

@@ -107,6 +107,64 @@ def build(points, circles, o: Outline | None = None) -> dict:
     return {"base": base, "lid": lid, "notes": notes, "standoffs": so}
 
 
+def build_tray(points, depth: float = 15.0, margin: float = 6.0, floor: float = 1.6, clearance: float = 0.4,
+               out_l: float = 0.0, out_w: float = 0.0, finger: bool = True) -> dict:
+    """A tray with a pocket the shape of the outline: a shadow-board insert for a drawer or a case,
+    or a holder for one odd-shaped thing. The outside follows the outline `margin` away, or is a
+    rectangle out_l x out_w when those are set (to drop into a drawer or a hinged case)."""
+    from build123d import RectangleRounded
+    if not (2 <= depth <= 120 and 0.8 <= floor <= 10 and 0 <= clearance <= 3 and 1.6 <= margin <= 60):
+        raise ValueError("tray: pocket 2 to 120 mm deep, floor 0.8 to 10, clearance 0 to 3, margin 1.6 to 60 mm")
+    clean = [points[0]]
+    for p in points[1:]:
+        if _d(p, clean[-1]) > 0.01:
+            clean.append(p)
+    xs, ys = [p[0] for p in clean], [p[1] for p in clean]
+    cx, cy = (min(xs) + max(xs)) / 2, (min(ys) + max(ys)) / 2       # centred on its bounding box, so it sits mid-tray
+    shape = Face(Wire.make_polygon([(x - cx, y - cy, 0) for x, y in clean], close=True))
+    pocket = offset(shape, amount=clearance, kind=Kind.ARC) if clearance > 0 else shape
+    w, h = max(xs) - min(xs) + 2 * clearance, max(ys) - min(ys) + 2 * clearance
+    top = floor + depth
+    if out_l > 0 or out_w > 0:
+        OL, OW = out_l or w + 2 * margin, out_w or h + 2 * margin
+        if OL < w + 3.2 or OW < h + 3.2:
+            raise ValueError(f"the outline is {w:.1f} x {h:.1f} mm with its clearance: the tray must be at least {w + 3.2:.1f} x {h + 3.2:.1f} mm")
+        outer = RectangleRounded(OL, OW, min(2.0, OL / 4, OW / 4)).face()
+        kind_ = f"a {OL:g} x {OW:g} mm tray"
+    else:
+        outer = offset(shape, amount=clearance + margin, kind=Kind.ARC)
+        OL, OW = w + 2 * margin, h + 2 * margin
+        kind_ = f"a tray {margin:g} mm bigger than the outline all round ({OL:.1f} x {OW:.1f} mm)"
+    body = extrude(outer, amount=top) - Pos(0, 0, floor) * extrude(pocket, amount=depth + 1)
+    notes = [f"shaped tray: {kind_}, {top:g} mm tall, with a pocket the shape of your outline, {depth:g} mm deep and "
+             f"{clearance:g} mm bigger all round"]
+    if finger:
+        # A finger notch each side of the pocket, where it is widest across, to lift the thing out.
+        r = min(11.0, depth * 1.2, OW / 3)
+        made = 0
+        for sx in (-1, 1):
+            x = sx * (w / 2)
+            if abs(x) + r < OL / 2 - 1.2 or out_l <= 0:
+                body -= Pos(x, 0, floor + max(0.0, depth - r * 1.2)) * Cylinder(r, depth + 5, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                made += 1
+        if made:
+            notes.append(f"{made} finger notch{'es' if made > 1 else ''} at the pocket's ends to lift it out")
+    notes.append("print it as it stands, pocket up; lay a sheet of felt or foam in the pocket for a snug, quiet fit")
+    return {"base": body, "lid": None, "notes": notes, "size": [round(OL, 2), round(OW, 2), round(top, 2)]}
+
+
+def write_tray(path_dxf, folder, **kw) -> dict:
+    from build123d import export_step, export_stl
+    pts, _ = read_dxf(path_dxf)
+    m = build_tray(pts, **kw)
+    folder = Path(folder)
+    folder.mkdir(parents=True, exist_ok=True)
+    export_step(m["base"], str(folder / "shaped_tray.step"))
+    export_stl(m["base"], str(folder / "shaped_tray.stl"))
+    (folder / "notes.md").write_text("# Tray shaped to an outline\n\n" + "\n".join(f"- {n}" for n in m["notes"]) + "\n", encoding="utf-8")
+    return m
+
+
 def write(path_dxf, folder, o: Outline | None = None) -> dict:
     from build123d import Rot, export_step, export_stl
     pts, circles = read_dxf(path_dxf)

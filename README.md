@@ -370,9 +370,25 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   holder, tool rack, sanding block, drill guide, foot, tube end cap, shim or wedge, hole plug,
   drawer organiser, battery storage block, fan guard and fan size adapter. Each is built the way
   it prints, without supports.
+- **A simpler menu**: Home (everything, searchable), Boxes (with the kind of box picked on a second
+  row), Parts and the Design guide.
+- **Measure and replace**: a bushing, a plate with holes, a slip-on cap, an edge clip and a spring clip
+  for a round handle, each from a few caliper readings.
+- **Circuit board mounts**: a standoff plate or a corner tray for a Raspberry Pi (3, 4, 5, Zero,
+  Pico), an Arduino (Uno, Mega, Nano), an ESP32 DevKit, or your own board's size and holes.
+- **T-slot extrusion kit**: end cap, corner bracket, cable guide, panel clip and handle for 80/20
+  1010, 1515 and 1530 and metric 2020, 3030 and 4040.
+- **Jigs**: shelf-pin drilling jig, clamping square, centre finder, setup blocks.
+- **Funnels and hose adapters**: a funnel to a neck size; an adapter between two hose or port sizes.
+- **Panels for trainers**: a labelled test-point or jack plate, a panel bezel, a terminal cover.
+- **Pocket tray for the hinged case**: one lift-out tray with a pocket for each thing
+  ("round 12:6, rect 40x25:2, slot 80x12"), laid out in rows.
+- **Tray shaped to an outline**: the outline DXF as a pocket in a tray, to hold a tool or a part.
 - **Battery compartments** (Parts tab): AAA, AA, 18650, 21700 or 9V, one to eight side by side. Each
   cell lies in a trough between end walls with slots for flat contact plates. The cell length is
-  settable, so a protected 18650 (68 to 70 mm) fits as well as a bare one (65 mm).
+  settable, so a protected 18650 (68 to 70 mm) fits as well as a bare one (65 mm). Fix it by
+  external screw ears (front and back, both ends, or any one side), countersunk holes inside
+  under the cells, or nothing.
 - **Labels, tags and name plates** (Parts tab): lines of text, raised, engraved, or flush in a second
   colour (the text comes as its own body, in place), with a border, an icon, and screw holes,
   cable-tie slots, a key-ring hole, magnets in the back or a stake. Text shrinks to fit a set size.

@@ -64,6 +64,9 @@ class Case:
     insert_wall: float = 1.2
     insert_scoop: bool = False  # a rounded front inside each bin, to slide small parts out
     insert_label: bool = False  # a label tab along the back of each bin
+    # Or one lift-out tray with a pocket for each thing: "round 12:6, rect 40x25:2, slot 80x12" (size : how many)
+    insert_pockets: str = ""
+    pocket_depth: float = 0.0   # 0: as deep as the case allows, up to 15 mm
 
     def check(self) -> None:
         L, W, H = self.size
@@ -85,6 +88,8 @@ class Case:
         ic, ir = int(self.insert_cols), int(self.insert_rows)
         if (ic > 0) != (ir > 0):
             raise ValueError("inserts: set the cells both ways (along the length and across the width), or neither")
+        if str(self.insert_pockets or "").strip() and (ic or int(self.dividers_x) or int(self.dividers_y)):
+            raise ValueError("a pocket tray, a grid of bins, or fixed dividers: pick one and clear the others")
         if ic:
             if not (1 <= ic <= 12 and 1 <= ir <= 12):
                 raise ValueError("inserts: 1 to 12 cells each way")
@@ -211,6 +216,66 @@ def insert_bin(w: float, d: float, h: float, wall: float = 1.2, scoop: bool = Fa
         if tabd >= 3 and h - floor > tabd + 3:
             body += _prism_yz([(idp / 2 + 0.01, h), (idp / 2 - tabd, h), (idp / 2 + 0.01, h - tabd)], -iw / 2 - 0.01, iw / 2 + 0.01)
     return body.clean()
+
+
+POCKET_SHAPES = ("round", "rect", "slot")
+
+
+def parse_pockets(text: str) -> list[tuple[str, float, float, int]]:
+    """'round 12:6, rect 40x25:2, slot 80x12' -> [(shape, a, b, how many)], sizes in mm. A round has one
+    size, its diameter; a rect and a slot (a rect with round ends) have length x width."""
+    out = []
+    for part in str(text or "").replace(";", ",").split(","):
+        part = part.strip().lower().replace("×", "x")
+        if not part:
+            continue
+        body, _, count = part.partition(":")
+        words = body.split()
+        try:
+            shape = {"round": "round", "circle": "round", "hole": "round", "rect": "rect", "rectangle": "rect", "square": "rect",
+                     "slot": "slot"}[words[0]]
+            dims = [float(v) for v in "".join(words[1:]).split("x")]
+            n = int(count) if count.strip() else 1
+            a, b = (dims[0], dims[0]) if len(dims) == 1 else (dims[0], dims[1])
+        except (KeyError, ValueError, IndexError):
+            raise ValueError(f"pockets: write each as a shape and a size, like 'round 12:6' or 'rect 40x25:2' or 'slot 80x12' (got '{part}')") from None
+        if not (2 <= min(a, b) and max(a, b) <= 400 and 1 <= n <= 60):
+            raise ValueError(f"pockets: '{part}' needs sizes of 2 mm or more and a count of 1 to 60")
+        out.append((shape, max(a, b), min(a, b), n))
+    return out
+
+
+def pocket_tray(L: float, W: float, height: float, pockets: list, depth: float):
+    """One tray L x W x height with the pockets cut `depth` into its top, laid out in rows. Returns
+    (the tray, how many pockets, a note on any that got a finger notch)."""
+    fit, gap, edge = 0.4, 3.0, 3.0
+    items = sorted(((s, a + fit, b + fit) for s, a, b, n in pockets for _ in range(n)), key=lambda it: (-it[2], -it[1]))
+    body = extrude(RectangleRounded(L, W, 1.5), amount=height)
+    body = chamfer(body.edges().group_by(Axis.Z)[0], 0.5)
+    x, y, row_h = -L / 2 + edge, W / 2 - edge, 0.0
+    z = height - depth
+    notches = 0
+    for shape, a, b in items:
+        if a > L - 2 * edge:
+            raise ValueError(f"a {a - fit:g} mm pocket is longer than the tray's {L - 2 * edge:.0f} mm of room")
+        if x + a > L / 2 - edge + 0.01:                     # the row is full: start the next one
+            x, y, row_h = -L / 2 + edge, y - row_h - gap, 0.0
+        if y - b < -W / 2 + edge - 0.01:
+            raise ValueError("the pockets don't all fit this case: fewer or smaller pockets, or a bigger case")
+        cx, cy = x + a / 2, y - b / 2
+        if shape == "round":
+            cut = Cylinder(a / 2, depth + 1, align=(Align.CENTER, Align.CENTER, Align.MIN))
+        elif shape == "slot":
+            cut = extrude(RectangleRounded(a, b, b / 2 - 0.01), amount=depth + 1)
+        else:
+            cut = extrude(RectangleRounded(a, b, min(1.0, b / 4)), amount=depth + 1)
+        body -= Pos(cx, cy, z) * cut
+        if shape != "round" and a >= 24 and b <= 30:        # a finger notch across a long, narrow pocket
+            body -= Pos(cx, cy, z + depth * 0.2) * Cylinder(min(9.0, a / 3), depth + 1, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            notches += 1
+        x += a + gap
+        row_h = max(row_h, b)
+    return body.clean(), len(items), notches
 
 
 def tab(catch: float = CATCH_MIN):
@@ -399,6 +464,23 @@ def build(c: Case) -> dict:
             notes.append(f"{empty} cell{'s' if empty > 1 else ''} of the grid left empty")
         if bh < 8:
             checks.append(f"the bins are only {bh:g} mm tall: fewer layers, or a taller case")
+
+    # ----- Or one lift-out tray with a pocket for each thing -----
+    if str(c.insert_pockets or "").strip():
+        pk = parse_pockets(c.insert_pockets)
+        room = H - 0.8
+        depth = float(c.pocket_depth) or min(15.0, room - 1.2)
+        if not 2 <= depth <= room - 1.0:
+            raise ValueError(f"pocket depth: 2 to {room - 1.0:.1f} mm in this case (it is {H:g} mm inside, and the tray needs a 1 mm floor)")
+        th = round(min(room, depth + 1.2), 2)
+        tray_, count_, notches = pocket_tray(L - 2 * INSERT_EDGE, W - 2 * INSERT_EDGE, th, pk, depth)
+        inserts.append({"name": "pocket_tray", "shape": tray_, "count": 1, "size": [round(L - 2 * INSERT_EDGE, 2), round(W - 2 * INSERT_EDGE, 2), th]})
+        insert_placed.append(Pos(0, 0, fl + 0.1) * tray_)
+        notes.append(f"a lift-out tray {L - 2 * INSERT_EDGE:.1f} x {W - 2 * INSERT_EDGE:.1f} x {th:g} mm with {count_} pockets {depth:g} mm deep, each 0.4 mm "
+                     "bigger than its size: " + ", ".join(f"{n} x {s} {a:g}" + ("" if s == "round" else f" x {b:g}") for s, a, b, n in pk)
+                     + (f"; {notches} of them have a finger notch" if notches else ""))
+        if room - th > 3:
+            notes.append(f"things may stand up to {room - th + depth:.1f} mm tall before they touch the lid; the tray leaves {room - th:.1f} mm above it")
 
     out_h = top
     notes.insert(0, f"hinged case: inside {L:g} x {W:g} x {H:g} mm ({H - c.lid_depth:g} in the tray to the parting line, "

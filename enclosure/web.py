@@ -617,13 +617,23 @@ def hinged_case(body: dict):
 @app.post("/api/outline")
 async def outline_box(dxf: UploadFile = File(...), height: float = Form(30.0), wall: float = Form(2.0),
                       floor: float = Form(2.0), lip: float = Form(3.0), standoff_height: float = Form(5.0),
-                      preview: bool = Form(False)):
-    """A box shaped to the closed outline in a DXF (circles inside it become standoffs)."""
+                      preview: bool = Form(False), make: str = Form("box"), depth: float = Form(15.0), margin: float = Form(6.0),
+                      clearance: float = Form(0.4), out_l: float = Form(0.0), out_w: float = Form(0.0)):
+    """A box shaped to the closed outline in a DXF (circles inside it become standoffs), or a tray
+    with a pocket that shape."""
     from . import outline
     try:
         with tempfile.TemporaryDirectory() as d:
             d = Path(d)
             path = await _save(dxf, d / "outline.dxf")
+            if make == "tray":
+                kw = dict(depth=depth, margin=margin, clearance=clearance, out_l=out_l, out_w=out_w)
+                if preview:
+                    pts, _ = outline.read_dxf(path)
+                    m = outline.build_tray(pts, **kw)
+                    return {"notes": m["notes"], "base": base64.b64encode(_stl(m["base"])).decode(), "lid": None, "outer": m["size"]}
+                outline.write_tray(path, d / "shaped_tray", **kw)
+                return _zip(d / "shaped_tray", "shaped_tray")
             o = outline.Outline(height=height, wall=wall, floor=floor, lip=lip, standoff_height=standoff_height)
             if not (5 <= height <= MAX_SIDE and 1 <= wall <= 10):
                 raise ValueError("height 5 mm or more, wall 1 to 10 mm")

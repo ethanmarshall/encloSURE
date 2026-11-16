@@ -34,7 +34,13 @@
   .tabs { display: flex; gap: 4px; margin-left: auto; flex-wrap: wrap; }
   .tabs button { border: 1px solid var(--line); background: none; color: var(--ink); padding: 6px 12px; border-radius: 6px; cursor: pointer; font: inherit; }
   .tabs button[aria-selected="true"] { background: var(--ink); color: var(--bg); border-color: var(--ink); }
-  main { display: grid; grid-template-columns: 420px 1fr; grid-template-rows: minmax(0, 1fr); height: calc(100vh - 53px); }
+  body { display: flex; flex-direction: column; height: 100vh; }
+  main { display: grid; grid-template-columns: 420px 1fr; grid-template-rows: minmax(0, 1fr); flex: 1; min-height: 0; }
+  .subtabs { display: flex; align-items: center; gap: 4px; padding: 6px 20px; border-bottom: 1px solid var(--line); background: var(--soft); font-size: 13px; }
+  .subtabs span { color: var(--muted); margin-right: 6px; }
+  .subtabs button { border: 1px solid transparent; background: none; color: var(--ink); padding: 4px 10px; border-radius: 999px; cursor: pointer; font: inherit; font-size: 13px; }
+  .subtabs button[aria-selected="true"] { border-color: var(--ink); font-weight: 600; }
+  .subtabs[hidden] { display: none; }
   main > * { min-height: 0; }
   form { overflow-y: auto; padding: 8px 20px 0; border-right: 1px solid var(--line); background: var(--panel); }
   .intro { font-size: 12.5px; color: var(--muted); margin: 6px 0 4px; }
@@ -109,7 +115,11 @@
   .links { display: flex; gap: 8px; flex-wrap: wrap; margin: 6px 0; }
   [hidden] { display: none !important; }
   @media (max-width: 860px) {
+    body { display: block; height: auto; }
     main { grid-template-columns: 1fr; grid-template-rows: auto; height: auto; }
+    .subtabs { padding: 6px 12px; overflow-x: auto; white-space: nowrap; scrollbar-width: none; }
+    .subtabs span { display: none; }
+    .subtabs button { flex: none; padding: 6px 10px; }
     /* The 3D view and its report first, the settings under it. */
     main > .view { order: -1; }
     form { border-right: none; padding: 8px 16px 0; }
@@ -170,15 +180,19 @@
     <input type="radio" name="units" id="u-in" value="in"><label for="u-in">inches</label>
   </div>
   <div class="tabs" role="tablist" style="margin-left:0">
-    <button role="tab" aria-selected="false" data-tab="make">Make</button>
-    <button role="tab" aria-selected="true" data-tab="box">Quick box</button>
-    <button role="tab" aria-selected="false" data-tab="fit">Fit a board</button>
-    <button role="tab" aria-selected="false" data-tab="stock">Bought box</button>
-    <button role="tab" aria-selected="false" data-tab="shapes">Other shapes</button>
+    <button role="tab" aria-selected="false" data-tab="make">Home</button>
+    <button role="tab" aria-selected="true" id="boxestab">Boxes</button>
     <button role="tab" aria-selected="false" data-tab="parts">Parts</button>
-    <button role="tab" aria-selected="false" data-tab="guide">Guide</button>
+    <button role="tab" aria-selected="false" data-tab="guide">Design guide</button>
   </div>
 </header>
+<nav class="subtabs" id="subtabs" aria-label="Kinds of box">
+  <span>Kind of box:</span>
+  <button role="tab" aria-selected="true" data-tab="box">To a size</button>
+  <button role="tab" aria-selected="false" data-tab="fit">Round a circuit board</button>
+  <button role="tab" aria-selected="false" data-tab="shapes">Hinged case, round, outline</button>
+  <button role="tab" aria-selected="false" data-tab="stock">Fit a bought box</button>
+</nav>
 <main>
 <!-- ============ QUICK BOX ============ -->
 <form id="boxform" autocomplete="off" novalidate>
@@ -410,7 +424,7 @@
 
   <fieldset>
     <legend>Batteries</legend>
-    <p class="hint">A cradle on the floor with room at the ends for spring contacts. Cell sizes are the usual maximums; check yours.</p>
+    <p class="hint">A cradle on the floor with room at the ends for spring contacts. Cell sizes are the usual maximums; check yours. For a holder on its own with slots for the contacts (AAA, AA, 18650, 21700 or 9V, any cell length), use <a href="#" id="tobatt">Battery compartment</a> on the Parts page.</p>
     <div class="rows" id="bat_rows"></div>
     <button type="button" class="add" data-add="bat">+ Add a battery cradle</button>
   </fieldset>
@@ -779,6 +793,11 @@
       <label class="check"><input type="checkbox" name="cs_iscoop"> Rounded front inside (scoop)</label>
       <label class="check"><input type="checkbox" name="cs_ilabel"> Label tab along the back</label>
     </div>
+    <p class="hint" style="margin-top:10px"><b>Or a pocket tray</b>: one lift-out tray with a pocket for each thing (sockets, bits, probes, a meter). Write each as a shape and a size, then a colon and how many: <code>round 12:6, rect 40x25:2, slot 80x12</code>. A round takes its diameter; a rect and a slot (round ends) take length x width.</p>
+    <div class="grid g2">
+      <label class="f">Pockets<input name="cs_pk" type="text" placeholder="round 12:6, slot 80x12, rect 40x25:2" autocomplete="off"></label>
+      <label class="f">Pocket depth (0: to suit)<span class="unit" data-unit="mm"><input name="cs_pkd" type="number" min="0" step="1" value="0"></span></label>
+    </div>
     <div class="links"><button class="plain" type="button" id="csshow">Show it</button><button class="go" type="button" id="csdl">Download STEP + STL</button><button class="plain" type="button" id="cskit">Print folder</button><button class="plain" type="button" id="cspreset">Save as my preset</button></div>
   </fieldset>
   <fieldset>
@@ -796,9 +815,17 @@
     <div class="links"><button class="plain" type="button" id="rbshow">Show it</button><button class="go" type="button" id="rbdl">Download STEP + STL</button></div>
   </fieldset>
   <fieldset>
-    <legend>Box from an outline (DXF)</legend>
-    <p class="hint">Draw the inside shape as one closed outline in Onshape, SolidWorks, KiCad or Inkscape and export it as DXF in mm. The walls go outside it; circles inside it become standoffs.</p>
-    <div class="grid g1"><label class="f">Outline DXF<input type="file" name="ol_dxf" accept=".dxf"></label></div>
+    <legend>Box or shaped tray from an outline (DXF)</legend>
+    <p class="hint">Draw a shape as one closed outline in Onshape, SolidWorks, KiCad or Inkscape and export it as DXF in mm. As a box, the walls go outside it and circles inside it become standoffs. As a tray, you get a block with a pocket that shape: trace a tool or a part and it becomes a holder, a drawer insert or a case insert.</p>
+    <div class="grid g2"><label class="f">Outline DXF<input type="file" name="ol_dxf" accept=".dxf"></label>
+      <label class="f">Make<select name="ol_make"><option value="box">A box with a lid</option><option value="tray">A tray with a pocket this shape</option></select></label></div>
+    <div class="grid" id="ol_tray" hidden>
+      <label class="f">Pocket depth<span class="unit" data-unit="mm"><input name="ol_depth" type="number" min="2" step="1" value="15"></span></label>
+      <label class="f">Clearance round the shape<span class="unit" data-unit="mm"><input name="ol_clear" type="number" min="0" step="0.1" value="0.4"></span></label>
+      <label class="f">Margin round the pocket<span class="unit" data-unit="mm"><input name="ol_margin" type="number" min="1.6" step="0.5" value="6"></span></label>
+      <label class="f">Tray length (0: follow the shape)<span class="unit" data-unit="mm"><input name="ol_outl" type="number" min="0" step="1" value="0"></span></label>
+      <label class="f">Tray width (0: follow the shape)<span class="unit" data-unit="mm"><input name="ol_outw" type="number" min="0" step="1" value="0"></span></label>
+    </div>
     <div class="grid">
       <label class="f">Inside height<span class="unit" data-unit="mm"><input name="ol_h" type="number" min="5" step="1" value="30"></span></label>
       <label class="f">Wall<span class="unit" data-unit="mm"><input name="ol_wall" type="number" min="1" step="0.1" value="2"></span></label>
@@ -1220,7 +1247,7 @@ function batRow(o = {}) {
   const item = h("div", { class: "item" },
     h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => { item.remove(); changed(item); } }, "×"),
     h("div", { class: "grid head" },
-      field("Cell", h("select", { name: "cell" }, ["AA", "AAA", "18650", "21700"].map(c => h("option", { selected: c === (o.cell || "AA") }, c)))),
+      field("Cell", h("select", { name: "cell" }, ["AA", "AAA", "18650", "18650 protected", "21700"].map(c => h("option", { selected: c === (o.cell || "AA") }, c)))),
       field("How many", numIn("count", o.count ?? 2, "1", "1")),
       field("Cells along", h("select", { name: "axis" }, h("option", { value: "x", selected: (o.axis || "x") === "x" }, "X"), h("option", { value: "y", selected: o.axis === "y" }, "Y")))),
     h("div", { class: "grid g2" }, field("X", lenIn("x", o.x ?? 0), "mm"), field("Y", lenIn("y", o.y ?? 0), "mm")));
@@ -1818,7 +1845,7 @@ const BOXES = [
   ["Box round a circuit board", "Fit an enclosure to a KiCad board or a board's size, with standoffs and connector openings.", "pcb kicad enclosure fit", () => selectTab("fit")],
   ["Hinged case with snap latches", "A parts-organiser case: tray, hinged lid, latch tabs, with dividers or lift-out bins.", "organiser organizer storage case inserts bins latch", () => { selectTab("shapes"); $("[name=cs_l]").closest("fieldset").scrollIntoView({ block: "start" }); }],
   ["Round box with a screw-on cap", "A threaded jar: a round body and a cap that screws on.", "jar container thread tube", () => { selectTab("shapes"); $("[name=rb_d]")?.closest("fieldset").scrollIntoView({ block: "start" }); }],
-  ["Box to an outline", "A box whose shape follows an outline you draw or import.", "custom shape dxf svg", () => { selectTab("shapes"); $("#olshow").closest("fieldset").scrollIntoView({ block: "start" }); }],
+  ["Box or tray to an outline", "A box whose shape follows an outline you draw, or a tray with a pocket that shape to hold a tool or a part.", "custom shape dxf shadow board tool holder insert foam", () => { selectTab("shapes"); $("#olshow").closest("fieldset").scrollIntoView({ block: "start" }); }],
   ["Fit a bought box", "Check a board against an off-the-shelf enclosure and get drilling templates.", "hammond stock enclosure template", () => selectTab("stock")],
 ];
 let makeBest = null;
@@ -1836,7 +1863,7 @@ function showMake() {
   const boxes = BOXES.filter(([t, d, w]) => hit(t, d, w, "boxes cases"));
   if (boxes.length) out.push(h("h3", {}, "Boxes and cases"), h("div", { class: "cards" }, boxes.map(([t, d, , go]) => card(t, d, go))));
   if (PARTS) for (const g of [...PARTS.groups, "Other"]) {
-    const kinds = Object.entries(PARTS.kinds).filter(([k, v]) => v.group === g && hit(v.label, v.doc, v.words, g, k));
+    const kinds = Object.entries(PARTS.kinds).filter(([k, v]) => v.group === g && hit(v.label, v.doc, v.words, g, k)).sort((a, b) => a[1].rank - b[1].rank);
     if (kinds.length) out.push(h("h3", {}, g), h("div", { class: "cards" }, kinds.map(([k, v]) => card(v.label, v.doc, () => { selectTab("parts"); openPart({ kind: k, params: {} }); }))));
   }
   if (!out.length) out.push(h("p", { class: "lead", style: "margin-top:16px" }, "Nothing by that name. Try another word, or clear the search."));
@@ -2163,12 +2190,13 @@ function caseBody() {
   return { size: [len(e.cs_l), len(e.cs_w), len(e.cs_h)], lid_depth: len(e.cs_lid), wall: len(e.cs_wall), floor: len(e.cs_floor),
     corner_radius: len(e.cs_r), hinges: n("cs_hinges"), latches: n("cs_latches"), dividers_x: n("cs_dx"), dividers_y: n("cs_dy"),
     lid_ribs: e.cs_ribs.checked, insert_cols: n("cs_ic"), insert_rows: n("cs_ir"), insert_layers: +e.cs_il.value, insert_wall: len(e.cs_iw),
-    insert_bins: e.cs_ibins.value.trim(), insert_fill: e.cs_ifill.checked, insert_scoop: e.cs_iscoop.checked, insert_label: e.cs_ilabel.checked };
+    insert_bins: e.cs_ibins.value.trim(), insert_fill: e.cs_ifill.checked, insert_scoop: e.cs_iscoop.checked, insert_label: e.cs_ilabel.checked,
+    insert_pockets: e.cs_pk.value.trim(), pocket_depth: len(e.cs_pkd) };
 }
 function applyCase(b) {
   const e = shapeform.elements, L = (k, v) => { if (v != null) { e[k].value = show(v); e[k].dataset.mm = String(v); } };
   L("cs_l", b.size?.[0]); L("cs_w", b.size?.[1]); L("cs_h", b.size?.[2]); L("cs_lid", b.lid_depth); L("cs_wall", b.wall); L("cs_floor", b.floor);
-  L("cs_r", b.corner_radius); L("cs_iw", b.insert_wall);
+  L("cs_r", b.corner_radius); L("cs_iw", b.insert_wall); L("cs_pkd", b.pocket_depth); if (b.insert_pockets != null) e.cs_pk.value = b.insert_pockets;
   for (const [k, f] of [["cs_hinges", "hinges"], ["cs_latches", "latches"], ["cs_dx", "dividers_x"], ["cs_dy", "dividers_y"], ["cs_ic", "insert_cols"],
                         ["cs_ir", "insert_rows"], ["cs_il", "insert_layers"], ["cs_ibins", "insert_bins"]]) if (b[f] != null) e[k].value = b[f];
   for (const [k, f] of [["cs_ribs", "lid_ribs"], ["cs_ifill", "insert_fill"], ["cs_iscoop", "insert_scoop"], ["cs_ilabel", "insert_label"]]) if (b[f] != null) e[k].checked = !!b[f];
@@ -2200,13 +2228,16 @@ function outlineForm(preview) {
   const fd = new FormData();
   fd.set("dxf", e.ol_dxf.files[0]); fd.set("height", len(e.ol_h)); fd.set("wall", len(e.ol_wall)); fd.set("lip", len(e.ol_lip));
   fd.set("standoff_height", len(e.ol_so)); fd.set("preview", preview ? "true" : "false");
+  fd.set("make", e.ol_make.value); fd.set("depth", len(e.ol_depth)); fd.set("clearance", len(e.ol_clear)); fd.set("margin", len(e.ol_margin));
+  fd.set("out_l", len(e.ol_outl)); fd.set("out_w", len(e.ol_outw));
   return fd;
 }
+shapeform.elements.ol_make.addEventListener("change", ev => { $("#ol_tray").hidden = ev.target.value !== "tray"; });
 $("#olshow").onclick = () => busy($("#olshow"), "Making...", async () => {
   let fd; try { fd = outlineForm(true); } catch (err) { report.replaceChildren(msg("err", err.message)); return; }
   const res = await fetch("api/outline", { method: "POST", body: fd });
   if (!res.ok) { report.replaceChildren(msg("err", await errorOf(res))); return; }
-  showShape(await res.json(), "Box from your outline");
+  showShape(await res.json(), shapeform.elements.ol_make.value === "tray" ? "Tray shaped to your outline" : "Box from your outline");
 });
 $("#oldl").onclick = () => busy($("#oldl"), "Making...", async () => {
   let fd; try { fd = outlineForm(false); } catch (err) { report.replaceChildren(msg("err", err.message)); return; }
@@ -2553,7 +2584,7 @@ showPlate();
 fetch("api/parts").then(r => r.json()).then(c => {
   PARTS = c;
   partform.elements.kind.replaceChildren(...[...c.groups, "Other"].map(g => [g, Object.entries(c.kinds).filter(([, v]) => v.group === g)])
-    .filter(([, ks]) => ks.length).map(([g, ks]) => h("optgroup", { label: g }, ks.map(([k, v]) => h("option", { value: k }, v.label)))));
+    .filter(([, ks]) => ks.length).map(([g, ks]) => h("optgroup", { label: g }, ks.sort((a, b) => a[1].rank - b[1].rank).map(([k, v]) => h("option", { value: k }, v.label)))));
   partform.elements.kind.value = "screw";
   showPresets(); showMake();
   partform.elements.pmaterial.replaceChildren(...c.materials.map(m => h("option", { value: m, selected: m === "PETG" }, m)));
@@ -2561,9 +2592,14 @@ fetch("api/parts").then(r => r.json()).then(c => {
 }).catch(() => {});
 
 // ---------- Tabs ----------
+const BOX_TABS = ["box", "fit", "shapes", "stock"];
+let lastBox = "box";
 function selectTab(name) {
   tab = name;
   for (const b of $$("[data-tab]")) b.setAttribute("aria-selected", b.dataset.tab === name);
+  const isBox = BOX_TABS.includes(name);
+  if (isBox) lastBox = name;
+  $("#boxestab").setAttribute("aria-selected", isBox); $("#subtabs").hidden = !isBox;
   boxform.hidden = name !== "box"; fitform.hidden = name !== "fit"; stockform.hidden = name !== "stock"; partform.hidden = name !== "parts";
   $("#shapeform").hidden = name !== "shapes"; $("#guide").hidden = name !== "guide"; $("#make").hidden = name !== "make";
   $(".view").hidden = name === "guide" || name === "make";
@@ -2581,6 +2617,8 @@ function selectTab(name) {
   else { showView(null); empty("Your bought box's holes come back as STEP and a drilling template PDF."); report.replaceChildren(); }
 }
 for (const b of $$("[data-tab]")) b.onclick = () => selectTab(b.dataset.tab);
+$("#boxestab").onclick = () => selectTab(lastBox);
+$("#tobatt").onclick = ev => { ev.preventDefault(); selectTab("parts"); openPart({ kind: "battery_holder", params: {} }); };
 
 // ---------- Start ----------
 try { if (localStorage.getItem("enclosure.units") === "in") setUnits(25.4); } catch {}
