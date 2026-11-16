@@ -43,6 +43,11 @@ PRELOAD = 0.45     # the catch sockets sit this far low, so the latch pulls the 
 RIB = 1.2          # dividers and lid ribs
 
 
+GRID = 42.0          # a Gridfinity unit
+GRID_EDGE = 0.3      # room between the grid and the tray's wall, each side
+GRID_ROOM = 0.6      # between the top of the bins and the lid
+
+
 @dataclass
 class Case:
     size: tuple = (160.0, 100.0, 30.0)  # inside length (X), width (Y) and height, floor to the lid's underside
@@ -65,6 +70,12 @@ class Case:
     insert_scoop: bool = False  # a rounded front inside each bin, to slide small parts out
     insert_label: bool = False  # a label tab along the back of each bin
     # Or one lift-out tray with a pocket for each thing: "round 12:6, rect 40x25:2, slot 80x12" (size : how many)
+    # Gridfinity inside: a baseplate built into the tray's floor and standard bins to drop into it.
+    grid_cols: int = 0         # 42 mm units along the length; 0 for none. The grid sets the inside length and width
+    grid_rows: int = 0
+    grid_bins: str = ""        # bigger bins as "units along x units across: how many"; the rest are 1 x 1
+    grid_fill: bool = True
+    grid_height: int = 0       # bin height in 7 mm units; 0 for as tall as the case allows
     insert_pockets: str = ""
     pocket_depth: float = 0.0   # 0: as deep as the case allows, up to 15 mm
 
@@ -85,6 +96,19 @@ class Case:
                 raise ValueError(f"{what}: 0 (automatic) to 6")
         if not (0 <= int(self.dividers_x) <= 12 and 0 <= int(self.dividers_y) <= 12):
             raise ValueError("dividers: 0 to 12 each way")
+        gc, gr = int(self.grid_cols), int(self.grid_rows)
+        if (gc > 0) != (gr > 0):
+            raise ValueError("Gridfinity: set the units both ways (along the length and across the width), or neither")
+        if gc:
+            if not (1 <= gc <= 9 and 1 <= gr <= 9):
+                raise ValueError("Gridfinity: 1 to 9 units each way (a unit is 42 mm)")
+            if int(self.insert_cols) or int(self.insert_rows) or int(self.dividers_x) or int(self.dividers_y) or str(self.insert_pockets or "").strip():
+                raise ValueError("Gridfinity bins, lift-out bins, a pocket tray, or fixed dividers: pick one and clear the others")
+            top = int((H - GRID_ROOM) // 7)
+            if top < 2:
+                raise ValueError(f"Gridfinity bins need an inside height of at least {14 + GRID_ROOM:g} mm (the shortest bin is 14 mm)")
+            if not 0 <= int(self.grid_height) <= top or int(self.grid_height) == 1:
+                raise ValueError(f"Gridfinity bin height: 2 to {top} units in this case (7 mm each), or 0 for the tallest that fits")
         ic, ir = int(self.insert_cols), int(self.insert_rows)
         if (ic > 0) != (ir > 0):
             raise ValueError("inserts: set the cells both ways (along the length and across the width), or neither")
@@ -312,7 +336,17 @@ def tab(catch: float = CATCH_MIN):
     return body.clean()
 
 
+def grid_size(cols: int, rows: int) -> tuple[float, float]:
+    """The inside length and width that hold a Gridfinity grid, with a little room round it."""
+    return cols * GRID + 2 * GRID_EDGE, rows * GRID + 2 * GRID_EDGE
+
+
 def build(c: Case) -> dict:
+    gc, gr = int(c.grid_cols), int(c.grid_rows)
+    asked = tuple(float(v) for v in c.size[:2])
+    if gc and gr:                                 # the grid decides the inside length and width
+        from dataclasses import replace
+        c = replace(c, size=(*grid_size(gc, gr), c.size[2]))
     c.check()
     L, W, H = (float(v) for v in c.size)
     w, fl = float(c.wall), float(c.floor)
@@ -464,6 +498,35 @@ def build(c: Case) -> dict:
             notes.append(f"{empty} cell{'s' if empty > 1 else ''} of the grid left empty")
         if bh < 8:
             checks.append(f"the bins are only {bh:g} mm tall: fewer layers, or a taller case")
+
+    # ----- Or Gridfinity: a baseplate in the floor and standard bins -----
+    if gc and gr:
+        from . import gridfinity as gf
+        plate = Pos(0, 0, fl - 0.01) * gf.baseplate(gc, gr)
+        tray += plate
+        units = int(c.grid_height) or int((H - GRID_ROOM) // 7)
+        spots = lay_out(gc, gr, parse_bins(c.grid_bins), bool(c.grid_fill))
+        shapes, count = {}, {}
+        for a, b, c0, r0 in spots:
+            key = (a, b)
+            if key not in shapes:
+                shapes[key] = gf.bin_(a, b, units, wall=float(c.insert_wall), lip=False, label=bool(c.insert_label))
+            count[key] = count.get(key, 0) + 1
+            insert_placed.append(Pos((c0 + a / 2 - gc / 2) * GRID, (r0 + b / 2 - gr / 2) * GRID, fl) * shapes[key])
+        for (a, b), sh in sorted(shapes.items()):
+            inserts.append({"name": f"gridfinity_bin_{a}x{b}x{units}", "shape": sh, "count": count[(a, b)],
+                            "size": [a * GRID - 0.5, b * GRID - 0.5, units * 7.0]})
+        empty = gc * gr - sum(a * b for a, b, _, _ in spots)
+        notes.append(f"Gridfinity inside: a {gc} x {gr} baseplate is part of the tray's floor (42 mm units), so the inside is {L:g} x {W:g} mm"
+                     + (f" (you asked for {asked[0]:g} x {asked[1]:g}; the grid sets it)" if abs(asked[0] - L) > 0.5 or abs(asked[1] - W) > 0.5 else "")
+                     + f". Bins {units} units ({units * 7:g} mm) tall, without the stacking lip so the lid shuts on them: "
+                     + ", ".join(f"{i['count']} x {i['name'][15:].rsplit('x', 1)[0]}" for i in inserts)
+                     + ". Any standard Gridfinity bin that height or shorter fits too")
+        if empty:
+            notes.append(f"{empty} unit{'s' if empty > 1 else ''} of the grid left empty for bins you already have")
+        gap = H - units * 7
+        if gap > 4:
+            checks.append(f"there are {gap:g} mm between the bins and the lid: small parts can jump bins if the case is tipped. A case {gap - GRID_ROOM:g} mm shorter, or taller bins")
 
     # ----- Or one lift-out tray with a pocket for each thing -----
     if str(c.insert_pockets or "").strip():

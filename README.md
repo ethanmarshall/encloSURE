@@ -397,6 +397,9 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   for two sizes, pillow block for a ball bearing. Also a T-slot foot and soft vise jaws.
 - **On any printed part**: a top edge chamfer, and a few words cut into the biggest flat on top
   (`top_chamfer`, `engrave_text`).
+- **Gridfinity inside the hinged case**: set the units each way and a Gridfinity baseplate becomes
+  part of the tray's floor, with standard bins (1 x 1 or bigger, no stacking lip) sized to the
+  case's height. The grid sets the inside length and width.
 - **Fit test**: for parts that have to fit something (knobs, handwheel, collar, coupler, bearing
   block, RC wheel, gear, cell holder), tick "Fit test" to get just that feature at three fits in a
   ten minute print, marked with one, two or three notches.

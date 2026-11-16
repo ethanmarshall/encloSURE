@@ -130,7 +130,7 @@ def bin_(nx: int = 1, ny: int = 1, height: int = 3, wall: float = 1.2, div_x: in
         y = -il / 2 + k * il / (div_y + 1)
         body = body.fuse(Pos(0, y, floor_top) * Box(iw + 0.02, wall, H - floor_top, align=(Align.CENTER, Align.CENTER, Align.MIN)))
     if label:
-        tab = 12.0
+        tab = min(12.0, H - floor_top)        # never down past the bin's inside floor
         from build123d import Polygon, Plane, extrude
         prof = Polygon((il / 2, H), (il / 2 - tab, H), (il / 2, H - tab), align=None)
         body = body.fuse(extrude(Plane.YZ * prof, amount=iw / 2 + 0.01, both=True))

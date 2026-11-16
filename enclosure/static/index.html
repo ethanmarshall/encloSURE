@@ -793,6 +793,14 @@
       <label class="check"><input type="checkbox" name="cs_iscoop"> Rounded front inside (scoop)</label>
       <label class="check"><input type="checkbox" name="cs_ilabel"> Label tab along the back</label>
     </div>
+    <p class="hint" style="margin-top:10px"><b>Or Gridfinity bins</b>: a Gridfinity baseplate is built into the tray's floor and standard bins drop into it, so bins move between this case and anything else Gridfinity. A unit is 42 mm; the grid sets the case's inside length and width.</p>
+    <div class="grid">
+      <label class="f">Units along the length (0: none)<input name="cs_gc" type="number" min="0" max="9" step="1" value="0"></label>
+      <label class="f">Units across the width<input name="cs_gr" type="number" min="0" max="9" step="1" value="0"></label>
+      <label class="f">Bin height, 7 mm units (0: tallest that fits)<input name="cs_gh" type="number" min="0" max="12" step="1" value="0"></label>
+    </div>
+    <label class="f">Bigger bins (units along x units across : how many)<input name="cs_gbins" type="text" placeholder="2x1:2, 2x2:1" autocomplete="off"></label>
+    <label class="check"><input type="checkbox" name="cs_gfill" checked> Fill the rest with 1 x 1 bins (untick to leave room for bins you already have)</label>
     <p class="hint" style="margin-top:10px"><b>Or a pocket tray</b>: one lift-out tray with a pocket for each thing (sockets, bits, probes, a meter). Write each as a shape and a size, then a colon and how many: <code>round 12:6, rect 40x25:2, slot 80x12</code>. A round takes its diameter; a rect and a slot (round ends) take length x width.</p>
     <div class="grid g2">
       <label class="f">Pockets<input name="cs_pk" type="text" placeholder="round 12:6, slot 80x12, rect 40x25:2" autocomplete="off"></label>
@@ -1842,7 +1850,7 @@ $("#presetsave").onclick = () => {
   savePreset({ name, type: "part", part: partBody() }); $("#preset_name").value = ""; $("#pstate").textContent = `Saved "${name}".`;
 };
 $("#cspreset").onclick = () => {
-  const b = caseBody(), name = `Case ${+(b.size[0] / U).toFixed(2)} × ${+(b.size[1] / U).toFixed(2)} × ${+(b.size[2] / U).toFixed(2)} ${UNIT()}` + (b.insert_cols ? `, ${b.insert_cols}×${b.insert_rows} bins` : "");
+  const b = caseBody(), name = `Case ${+(b.size[0] / U).toFixed(2)} × ${+(b.size[1] / U).toFixed(2)} × ${+(b.size[2] / U).toFixed(2)} ${UNIT()}` + (b.grid_cols ? `, Gridfinity ${b.grid_cols}×${b.grid_rows}` : "") + (b.insert_cols ? `, ${b.insert_cols}×${b.insert_rows} bins` : "");
   savePreset({ name, type: "case", case: b }); report.replaceChildren(msg("ok", `Saved as "${name}". It's on the Make page and under My presets on the Parts tab.`));
 };
 // The bed and the plastic are remembered too.
@@ -2205,15 +2213,17 @@ function caseBody() {
     corner_radius: len(e.cs_r), hinges: n("cs_hinges"), latches: n("cs_latches"), dividers_x: n("cs_dx"), dividers_y: n("cs_dy"),
     lid_ribs: e.cs_ribs.checked, insert_cols: n("cs_ic"), insert_rows: n("cs_ir"), insert_layers: +e.cs_il.value, insert_wall: len(e.cs_iw),
     insert_bins: e.cs_ibins.value.trim(), insert_fill: e.cs_ifill.checked, insert_scoop: e.cs_iscoop.checked, insert_label: e.cs_ilabel.checked,
-    insert_pockets: e.cs_pk.value.trim(), pocket_depth: len(e.cs_pkd) };
+    insert_pockets: e.cs_pk.value.trim(), pocket_depth: len(e.cs_pkd),
+    grid_cols: n("cs_gc"), grid_rows: n("cs_gr"), grid_height: n("cs_gh"), grid_bins: e.cs_gbins.value.trim(), grid_fill: e.cs_gfill.checked };
 }
 function applyCase(b) {
   const e = shapeform.elements, L = (k, v) => { if (v != null) { e[k].value = show(v); e[k].dataset.mm = String(v); } };
   L("cs_l", b.size?.[0]); L("cs_w", b.size?.[1]); L("cs_h", b.size?.[2]); L("cs_lid", b.lid_depth); L("cs_wall", b.wall); L("cs_floor", b.floor);
   L("cs_r", b.corner_radius); L("cs_iw", b.insert_wall); L("cs_pkd", b.pocket_depth); if (b.insert_pockets != null) e.cs_pk.value = b.insert_pockets;
   for (const [k, f] of [["cs_hinges", "hinges"], ["cs_latches", "latches"], ["cs_dx", "dividers_x"], ["cs_dy", "dividers_y"], ["cs_ic", "insert_cols"],
-                        ["cs_ir", "insert_rows"], ["cs_il", "insert_layers"], ["cs_ibins", "insert_bins"]]) if (b[f] != null) e[k].value = b[f];
-  for (const [k, f] of [["cs_ribs", "lid_ribs"], ["cs_ifill", "insert_fill"], ["cs_iscoop", "insert_scoop"], ["cs_ilabel", "insert_label"]]) if (b[f] != null) e[k].checked = !!b[f];
+                        ["cs_ir", "insert_rows"], ["cs_il", "insert_layers"], ["cs_ibins", "insert_bins"],
+                        ["cs_gc", "grid_cols"], ["cs_gr", "grid_rows"], ["cs_gh", "grid_height"], ["cs_gbins", "grid_bins"]]) if (b[f] != null) e[k].value = b[f];
+  for (const [k, f] of [["cs_ribs", "lid_ribs"], ["cs_ifill", "insert_fill"], ["cs_iscoop", "insert_scoop"], ["cs_ilabel", "insert_label"], ["cs_gfill", "grid_fill"]]) if (b[f] != null) e[k].checked = !!b[f];
 }
 $("#csshow").onclick = () => busy($("#csshow"), "Making...", async () => {
   const res = await fetch("api/case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ case: caseBody(), preview: true }) });
