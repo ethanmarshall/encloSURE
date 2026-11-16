@@ -1799,8 +1799,16 @@ function openPart(part) {
   partFields();
   for (const f of PARTS.kinds[part.kind].fields) {
     const el = partform.elements["p_" + f.name], v = params[f.name]; if (!el || v === undefined || v === null) continue;
-    if (f.type === "bool") el.checked = !!v; else if (f.type === "len" && typeof v === "number") { el.value = show(v); el.dataset.mm = String(v); } else el.value = v;
+    if (f.type === "file") continue;
+    if (f.type === "bool") el.checked = !!v; else if (f.type === "len" && typeof v === "number") { el.value = show(v); el.dataset.mm = String(v); } else if (f.type === "size" && typeof v === "number") el.value = show(v); else el.value = v;
   }
+  let files = false;
+  for (const f of PARTS.kinds[part.kind].fields) if (f.type === "file") {
+    if (params[f.name]) { partFiles[part.kind + "." + f.name] = { name: "the saved drawing", data: params[f.name], kind: params[f.name + "_kind"] || "svg" }; files = true; }
+    else delete partFiles[part.kind + "." + f.name];
+  }
+  if (files) { const keep = {}; for (const el of $$("#pfields input, #pfields select")) if (el.type !== "file") keep[el.name] = el.type === "checkbox" ? el.checked : el.value;
+    partFields(); for (const [n, v] of Object.entries(keep)) { const el = partform.elements[n]; if (el) { if (el.type === "checkbox") el.checked = v; else el.value = v; } } }
   partPreview();
 }
 // ---------- My presets (this browser) ----------
@@ -2383,11 +2391,12 @@ const partform = $("#partform");
 let PARTS = null, partData = null, partTimer = null;
 const NUMTYPE = new Set(["num"]);
 let partKind = null;
+const partFiles = {};   // drawings chosen for a part's file fields, by "kind.field"
 function partFields() {
   const kindName = partform.elements.kind.value, k = PARTS.kinds[kindName];
   // Same part, mode switched: keep what was typed.
   const keep = {};
-  if (kindName === partKind) for (const el of $$("#pfields input, #pfields select")) keep[el.name] = el.type === "checkbox" ? el.checked : el.value;
+  if (kindName === partKind) for (const el of $$("#pfields input, #pfields select")) if (el.type !== "file") keep[el.name] = el.type === "checkbox" ? el.checked : el.value;
   partKind = kindName;
   $("#pdoc").textContent = k.doc;
   $("#pmode-wrap").hidden = !k.modes;
@@ -2395,13 +2404,32 @@ function partFields() {
   $("#pclear-wrap").hidden = !printing || ["compression_spring", "extension_spring", "torsion_spring"].includes(partform.elements.kind.value);
   $("#pmat-wrap").hidden = !k.material || (k.modes && !printing);
   // Printed parts always have their threads; a pitch other than standard only matters for printing.
-  const shownFields = k.fields.filter(f => !(f.name === "threads" && printing) && !(f.name === "pitch" && !printing));
+  const shownFields = k.fields.filter(f => !(f.name === "threads" && printing) && !(f.name === "pitch" && !printing) && !(f.name === "bottom_chamfer" && k.modes && !printing));
   $("#pfields").replaceChildren(...shownFields.map(f => {
     if (f.type === "select") return field(f.label, h("select", { name: "p_" + f.name }, f.options.map(o => h("option", { value: o, selected: o === (f.default ?? "") }, PARTS.wires[o] || o || "(none)"))));
     if (f.type === "bool") return h("label", { class: "check" }, h("input", { type: "checkbox", name: "p_" + f.name, checked: !!f.default }), " " + f.label);
+    if (f.type === "file") {
+      // A drawing to read in the browser and send as text: its contents ride on the input.
+      const inp = h("input", { type: "file", name: "p_" + f.name, accept: ".svg,.dxf" });
+      const kept = partFiles[kindName + "." + f.name];
+      const state = h("span", { class: "hint" }, kept ? `Using ${kept.name}. ` : "");
+      const clear = h("button", { type: "button", class: "plain", hidden: !kept, onclick: () => { delete partFiles[kindName + "." + f.name]; inp.value = ""; partFields(); partPreview(); } }, "Remove");
+      inp.addEventListener("change", async ev => {
+        ev.stopPropagation();
+        const file = inp.files[0]; if (!file) return;
+        if (file.size > 400000) { $("#pstate").textContent = "That file is over 400 kB: simplify it, or save it as plain SVG."; inp.value = ""; return; }
+        partFiles[kindName + "." + f.name] = { name: file.name, data: await file.text(), kind: /\.dxf$/i.test(file.name) ? "dxf" : "svg" };
+        partFields(); partPreview();
+      });
+      return h("div", {}, field(f.label, inp), h("div", { class: "links", style: "align-items:center;margin-top:2px" }, state, clear));
+    }
     if (f.type === "text") {
       const id = "dl_" + f.name;
       return field(f.label, h("span", {}, h("input", { name: "p_" + f.name, value: f.default, list: id }), h("datalist", { id }, f.options.map(o => h("option", { value: o })))));
+    }
+    if (f.type === "size") {
+      // A size typed the way a shop says it: 5, 13/64, 1/4", 0.201 in. A fraction is inches; a plain number is in the page's units.
+      return field(f.label, h("input", { name: "p_" + f.name, value: f.default ? String(show(f.default)) : "0", inputmode: "text", placeholder: "5, 13/64, 0.201 in", autocomplete: "off" }));
     }
     if (f.type === "len") {
       const el = f.default === null ? h("input", { type: "number", name: "p_" + f.name, step: U === 1 ? "0.1" : "0.01", min: "0" }) : lenIn("p_" + f.name, f.default, "0.1", 0);
@@ -2414,6 +2442,12 @@ function partFields() {
     const el = partform.elements[name]; if (!el) continue;
     if (el.type === "checkbox") el.checked = v; else if (el.value !== v) { el.value = v; delete el.dataset.mm; }
   }
+  // The bottom edge chamfer is a habit, not a property of one part: the last one set carries to the next part.
+  const footEl = partform.elements.p_bottom_chamfer;
+  if (footEl && !("p_bottom_chamfer" in keep)) {
+    let foot = 0; try { foot = +localStorage.getItem("enclosure.foot") || 0; } catch {}
+    if (foot > 0) { footEl.dataset.mm = String(foot); footEl.value = show(foot); }
+  }
 }
 // The threads only mean something for screws, nuts and threaded spacers in reference mode (print always has them).
 function partBody() {
@@ -2422,7 +2456,9 @@ function partBody() {
     const el = e["p_" + f.name]; if (!el) continue;
     if (f.type === "bool") params[f.name] = el.checked;
     else if (f.type === "len") params[f.name] = el.value === "" ? null : +len(el).toFixed(4);
+    else if (f.type === "size") { const v = el.value.trim(); params[f.name] = v === "" ? null : /^\d*\.?\d+$/.test(v) ? +(parseFloat(v) * U).toFixed(4) : v; }
     else if (f.type === "num") params[f.name] = el.value === "" ? null : +el.value;
+    else if (f.type === "file") { const kept = partFiles[kind + "." + f.name]; if (kept) { params[f.name] = kept.data; params[f.name + "_kind"] = kept.kind; } }
     else params[f.name] = el.value.trim();
   }
   if (k.modes) params.mode = e.pmode.value;
@@ -2469,13 +2505,17 @@ async function partPreview() {
   m.position.set(-c.x, -c.y, -pb.min.z);  // centred, standing on the floor of the view
   g.add(m);
   if (partData.inlay) { const i2 = mesh(partData.inlay, 0x2f6fb3); i2.position.copy(m.position); g.add(i2); }  // the second colour, in place
+  if (partData.fitted) { const f2 = mesh(partData.fitted, 0x59636e); f2.position.copy(m.position); g.add(f2); }  // a bought part shown in place (a steel bushing)
   const bb = new THREE.Box3().setFromObject(g);
   views.parts = { group: g, lid: null, top: 0, size: bb.getSize(new THREE.Vector3()), framed: false };
   if (tab === "parts") { empty(""); showView(views.parts); }
   partReport();
 }
 const partSoon = () => { clearTimeout(partTimer); partTimer = setTimeout(partPreview, 350); };
-partform.addEventListener("change", ev => { if (ev.target.name === "kind" || ev.target.name === "pmode") partFields(); partSoon(); });
+partform.addEventListener("change", ev => {
+  if (ev.target.name === "p_bottom_chamfer") { try { localStorage.setItem("enclosure.foot", String(+len(ev.target).toFixed(3))); } catch {} }
+  if (ev.target.name === "kind" || ev.target.name === "pmode") partFields(); partSoon();
+});
 partform.addEventListener("input", partSoon);
 partform.addEventListener("submit", async ev => {
   ev.preventDefault();

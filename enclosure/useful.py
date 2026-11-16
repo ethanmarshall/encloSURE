@@ -356,21 +356,26 @@ def sanding_block(length=120.0, width=65.0, height=30.0):
     return _out(body, notes, [], {"paper": [W, round(Ln + 56, 0)]})
 
 
-def drill_guide(sizes="3, 4, 5, 6, 8", height=25.0, v_groove=True):
+def drill_guide(sizes="3, 4, 5, 6, 8", height=25.0, v_groove=True, corner_radius=0.0, engrave=True):
     """A drill guide block: a row of square, upright holes to start a drill straight, with a V groove
     underneath to sit it on a round bar or an edge, and marks on the hole line."""
-    try:
-        ds = [float(s) for s in str(sizes).replace(";", ",").split(",") if s.strip()]
-    except ValueError:
-        raise ValueError("sizes: drill diameters in mm, with commas between (3, 4, 5, 6)")
+    from . import sizes as sz
+    got = sz.parse_list(sizes, "sizes")
+    ds = [mm for mm, _ in got]
+    marks = [sz.short(typed, mm) for mm, typed in got]
     if not 1 <= len(ds) <= 12 or any(not 1 <= d <= 16 for d in ds):
         raise ValueError("sizes: 1 to 12 drills, each 1 to 16 mm")
     H = float(height)
     _rng("height", H, 12, 60)
     gap = 7.0
     Ln = sum(d + 0.2 for d in ds) + gap * (len(ds) + 1)
-    W = max(26.0, max(ds) + 16)
+    th = 3.2                                        # the engraved sizes run across the block, in front of each hole
+    tw = max(len(m) for m in marks) * 0.62 * th
+    W = max(26.0, max(ds) + 16, (max(ds) + 2 * (tw + 4.5)) if engrave else 0)
     body = Box(Ln, W, H, align=MIN_)
+    if float(corner_radius) > 0:
+        _rng("corner radius", float(corner_radius), 0, 6)
+        body = fillet(body.edges().filter_by(Axis.Z), float(corner_radius))
     try:
         body = chamfer(body.edges().group_by(Axis.Z)[-1], 1.0)
     except Exception:
@@ -383,14 +388,18 @@ def drill_guide(sizes="3, 4, 5, 6, 8", height=25.0, v_groove=True):
         body -= Pos(x, 0, -1) * Cylinder((d + 0.2) / 2, H + 2, align=MIN_)
         body -= Pos(x, W / 2, H / 2) * Box(0.8, 1.6, H + 2)          # a mark on each side, on the hole's centre
         body -= Pos(x, -W / 2, H / 2) * Box(0.8, 1.6, H + 2)
+        if engrave:
+            from .more import _engrave
+            body = _engrave(body, marks[len(centres) - 1], th, x, -(d / 2 + (W - d) / 4 + 0.3), H, turn=90)
         x += (d + 0.2) / 2 + gap
     if v_groove:
         vd = min(6.0, W / 4)
         body -= Pos(-Ln / 2 - 1, 0, 0) * extrude(Plane.YZ * Polygon((-vd, -0.01), (vd, -0.01), (0, vd), align=None), amount=Ln + 2, dir=(1, 0, 0))
     for s in (-1, 1):
         body -= Pos(s * Ln / 2, 0, H / 2) * Box(1.6, 0.8, H + 2)     # and on each end, on the line of holes
-    notes = [f"drill guide for {', '.join(f'{d:g}' for d in ds)} mm drills: holes {0.2:g} mm over size, {H:g} mm tall, "
-             f"{Ln:.0f} x {W:g} mm" + (", a 90° V groove underneath for round stock" if v_groove else ""),
+    notes = [f"drill guide for {', '.join(m.replace('Ø', '') + ('' if m.endswith('"') else ' mm') for m in marks)} drills: holes {0.2:g} mm over size, {H:g} mm tall, "
+             f"{Ln:.0f} x {W:g} mm" + (", a 90° V groove underneath for round stock" if v_groove else "")
+             + (", each size cut into the top by its hole" if engrave else ""),
              "print it as it stands with 4 or more walls; plastic wears, so it's good for dozens of holes, not hundreds"]
     return _out(body, notes, ["a hole under 2 mm may print closed: drill it out with its own bit"] if min(ds) < 2 else [],
                 {"centres": centres})
@@ -794,16 +803,33 @@ LABEL_STYLES = ("raised", "engraved", "flush")
 
 
 def label_plate(text="PUMP 1", text_size=8.0, style="raised", width=0.0, height=0.0, thickness=2.0, depth=0.6, bold=True,
-                border=True, corners="rounded", mount="none", icon="", two_color=False):
+                border=True, corners="rounded", mount="none", icon="", two_color=False, font="", google_font="", fit_text=True,
+                logo="", logo_kind="svg", logo_only=False):
     """A label, tag or name plate: one or more lines of text (put | between lines), raised, engraved,
-    or flush in a second colour, with a border, an icon, and a way to fix it: screw holes, cable-tie
-    slots, a key-ring hole, magnets in the back, or a stake to push into soil."""
-    from build123d import FontStyle, Text
-    from . import icons
+    or flush in a second colour, in any Google font, with a border, an icon or your own logo, and a
+    way to fix it: screw holes, cable-tie slots, a key-ring hole, magnets in the back, or a stake to
+    push into soil. Set a size and the text is sized to fill it."""
+    from build123d import FontStyle, Text, scale
+    from . import fonts, icons
     lines = [ln.strip() for ln in str(text).replace("\n", "|").split("|")]
     lines = [ln for ln in lines if ln]
-    if not lines:
-        raise ValueError("label: type some text")
+    logo = str(logo or "").strip()
+    if logo_only:
+        if not logo:
+            raise ValueError("logo only: choose a logo file first")
+        lines = []
+    if not lines and not logo:
+        raise ValueError("label: type some text, or choose a logo")
+    family = " ".join(str(google_font or "").split()) or (font if font and font != fonts.DEFAULT else "")
+    font_file, file_is_bold = fonts.path(family, bool(bold)) if family else (None, False)
+    style_ = FontStyle.BOLD if bold and not file_is_bold else FontStyle.REGULAR
+    logo_faces, logo_aspect = None, 1.0
+    if logo:
+        from . import art
+        logo_faces, (lw_, lh_) = art.shape(logo, str(logo_kind or "svg").lower(), 100.0, 3.0)
+        if lh_ <= 0:
+            raise ValueError("the logo has no height")
+        logo_aspect = lw_ / lh_
     if len(lines) > 6 or any(len(ln) > 40 for ln in lines):
         raise ValueError("label: up to 6 lines of up to 40 characters")
     if style not in LABEL_STYLES:
@@ -827,16 +853,34 @@ def label_plate(text="PUMP 1", text_size=8.0, style="raised", width=0.0, height=
         pitch = 1.35 * sz
         parts, wmax = [], 0.0
         for i, ln in enumerate(lines):
+            y = ((len(lines) - 1) / 2 - i) * pitch
+            if font_file:                            # a chosen font: drawn from the font file's own outlines
+                got, w_ = fonts.outline_faces(ln, sz, font_file)
+                parts += [Pos(0, y) * f for f in got]
+                wmax = max(wmax, w_)
+                continue
             try:
-                tx = Text(ln, sz, align=(Align.CENTER, Align.CENTER), font_style=FontStyle.BOLD if bold else FontStyle.REGULAR)
+                tx = Text(ln, sz, align=(Align.CENTER, Align.CENTER), font_style=style_)
             except Exception:
                 raise ValueError(f"the text '{ln}' has a character this font can't draw") from None
-            y = ((len(lines) - 1) / 2 - i) * pitch
-            parts.append(Pos(0, y) * tx)
+            parts += [Pos(0, y) * f for f in fonts.sound_faces(tx)]
             wmax = max(wmax, tx.bounding_box().size.X)
-        th = (len(lines) - 1) * pitch + sz
+        th = ((len(lines) - 1) * pitch + sz) if lines else 0.0
         tw = wmax
-        if icon:
+        if logo_faces is not None:               # your logo, as tall as the text block (or twice the text size on its own)
+            lh = max(th, 1.8 * sz) if lines else 2.0 * sz
+            lw = lh * logo_aspect
+            k_ = lw / 100.0
+            pic = [scale(f, by=k_) for f in logo_faces]
+            if lines:
+                gap = 0.5 * sz
+                parts = [Pos((lw + gap) / 2, 0) * p for p in parts]
+                parts += [Pos(-(tw + gap) / 2, 0) * f for f in pic]
+                tw += lw + gap
+            else:
+                parts, tw = pic, lw
+            th = max(th, lh)
+        elif icon:
             isz = min(th, 1.8 * sz)
             gap = 0.5 * sz
             parts = [Pos((isz + gap) / 2, 0) * p for p in parts]
@@ -853,14 +897,18 @@ def label_plate(text="PUMP 1", text_size=8.0, style="raised", width=0.0, height=
     parts, tw, th = layout(size)
     shrunk = None
     need_w, need_h = tw + 2 * pad + left + right, th + 2 * pad
-    if (W_ask and need_w > W_ask) or (H_ask and need_h > H_ask):
-        k = min((W_ask - 2 * pad - left - right) / tw if W_ask else 9, (H_ask - 2 * pad) / th if H_ask else 9)
+    too_big = (W_ask and need_w > W_ask) or (H_ask and need_h > H_ask)
+    fill = bool(fit_text) and (W_ask or H_ask)   # a size was set: make the text as big as fits it
+    if too_big or fill:
+        k = min((W_ask - 2 * pad - left - right) / tw if W_ask else 99, (H_ask - 2 * pad) / th if H_ask else 99)
         if k * size < 3:
             raise ValueError(f"the text doesn't fit {W_ask or need_w:g} x {H_ask or need_h:g} mm even at 3 mm tall: "
                              f"it needs {need_w:.0f} x {need_h:.0f} mm at {size:g} mm")
-        shrunk = round(size * k * 0.98, 1)
-        parts, tw, th = layout(shrunk)
-        need_w, need_h = tw + 2 * pad + left + right, th + 2 * pad
+        new = round(min(80.0, size * k * 0.98), 1)
+        if abs(new - size) > 0.05:
+            shrunk = new
+            parts, tw, th = layout(new)
+            need_w, need_h = tw + 2 * pad + left + right, th + 2 * pad
     W, H = max(W_ask, need_w), max(H_ask, need_h)
     if mount == "magnets":
         H = max(H, 6.5 + 4)
@@ -873,11 +921,11 @@ def label_plate(text="PUMP 1", text_size=8.0, style="raised", width=0.0, height=
     faces = [Pos(cx, 0) * p for p in parts]
 
     def solid(amount: float, z: float):
-        out = None
-        for f in faces:
-            sld = Pos(0, 0, z) * extrude(f, amount=amount)
-            out = sld if out is None else out + sld
-        return out
+        # Every letter's faces raised into solids and joined in one go (a letter can be several overlapping pieces).
+        # Joined flat first (letters can overlap, and a letter can be several pieces), then raised.
+        flat = faces[0] if len(faces) == 1 else faces[0].fuse(*faces[1:])
+        pieces = [Pos(0, 0, z) * extrude(f, amount=amount, dir=(0, 0, 1)) for f in flat.faces()]
+        return pieces[0] if len(pieces) == 1 else pieces[0].fuse(*pieces[1:])
 
     inlay = None
     if style == "raised":
@@ -903,12 +951,19 @@ def label_plate(text="PUMP 1", text_size=8.0, style="raised", width=0.0, height=
             body -= Pos(0, 0, t - dp) * groove
         if style == "flush":
             inlay = solid(dp, t - dp)
-    notes = [f"label {W:.1f} x {H:.1f} x {t:g} mm, {len(lines)} line{'s' if len(lines) > 1 else ''} of {(shrunk or size):g} mm text, {style}"
+    notes = [f"label {W:.1f} x {H:.1f} x {t:g} mm, {len(lines)} line{'s' if len(lines) != 1 else ''} of {(shrunk or size):g} mm text, {style}"
              + (f" {dp:g} mm" if style != "flush" else f" in a second colour, {dp:g} mm deep")
-             + (", with a border" if rim else "") + (f", {icon} icon" if icon else "")]
+             + (", with a border" if rim else "") + (", with your logo" if logo else f", {icon} icon" if icon else "")
+             + (f", in {family}" + (" Bold" if file_is_bold else "") if family else "")]
+    if not lines:
+        notes[0] = notes[0].replace(f"0 lines of {(shrunk or size):g} mm text", "your logo alone").replace(", with your logo", "")
     checks = []
     if shrunk:
-        notes.append(f"the text was shrunk from {size:g} to {shrunk:g} mm to fit the size you set")
+        notes.append(f"the text was sized to {'fill' if fill and not too_big else 'fit'} the tag you set: {shrunk:g} mm tall "
+                     f"(it was {size:g}); untick 'Fill the tag with the text' to keep your own size" if fill else
+                     f"the text was shrunk from {size:g} to {shrunk:g} mm to fit the size you set")
+    if family and bold and not file_is_bold:
+        notes.append(f"{family} has no bold of its own, so the regular weight is used")
     hx_l, hx_r = -W / 2 + left / 2, W / 2 - right / 2
     if mount == "screw holes":
         for x in (hx_l, hx_r):
@@ -954,6 +1009,11 @@ def label_plate(text="PUMP 1", text_size=8.0, style="raised", width=0.0, height=
 
 # ---------- What the page needs to know ----------
 
+def _font_names() -> list:
+    from . import fonts
+    return [fonts.DEFAULT] + sorted(fonts.FAMILIES)
+
+
 # kind -> (function, label, defaults)
 KINDS = {
     "shelf_bracket": (shelf_bracket, "Shelf bracket", {"height": 100.0, "depth": 120.0, "width": 25.0, "thickness": 5.0, "screw_d": 4.5,
@@ -969,7 +1029,7 @@ KINDS = {
     "bit_holder": (bit_holder, "Bit holder", {"rows": 2, "cols": 6, "hole": "hex", "hole_d": 6.35, "depth": 12.0}),
     "tool_rack": (tool_rack, "Tool rack", {"slots": 5, "shaft_d": 8.0, "pitch": 30.0, "reach": 30.0, "thickness": 5.0, "screw_d": 4.5}),
     "sanding_block": (sanding_block, "Sanding block", {"length": 120.0, "width": 65.0, "height": 30.0}),
-    "drill_guide": (drill_guide, "Drill guide", {"sizes": "3, 4, 5, 6, 8", "height": 25.0, "v_groove": True}),
+    "drill_guide": (drill_guide, "Drill guide", {"sizes": "3, 4, 5, 6, 8", "height": 25.0, "v_groove": True, "corner_radius": 0.0, "engrave": True}),
     "foot": (foot, "Foot", {"diameter": 30.0, "height": 15.0, "taper": 0.8, "screw_d": 4.5}),
     "end_cap": (end_cap, "Tube end cap", {"shape": "round", "outer": 25.0, "outer2": 25.0, "tube_wall": 1.5, "insert": 15.0, "cap": 3.0}),
     "shim": (shim, "Shim or wedge", {"length": 50.0, "width": 30.0, "thickness": 2.0, "thickness2": 0.0, "slot": 0.0}),
@@ -979,7 +1039,9 @@ KINDS = {
     "battery_caddy": (battery_caddy, "Battery storage block", {"cell": "AA", "rows": 2, "cols": 4, "depth_fraction": 0.5}),
     "label_plate": (label_plate, "Label, tag or name plate", {"text": "PUMP 1", "text_size": 8.0, "style": "raised", "mount": "none",
                                                                "width": 0.0, "height": 0.0, "thickness": 2.0, "depth": 0.6, "bold": True,
-                                                               "border": True, "corners": "rounded", "icon": "", "two_color": False}),
+                                                               "fit_text": True, "font": "Default (DejaVu Sans)", "google_font": "",
+                                                               "border": True, "corners": "rounded", "icon": "", "logo": "", "logo_only": False,
+                                                               "two_color": False}),
     "battery_holder": (battery_holder, "Battery compartment (with contact slots)", {"cell": "18650", "count": 1, "cell_length": 0.0,
                                                                                     "contact_room": 6.5, "contact_w": 0.0, "contact_t": 0.6,
                                                                                     "mount": "external ears", "ear_side": "front and back"}),
@@ -1009,7 +1071,8 @@ KIND_LABELS = {
     ("tool_rack", "slots"): ("Slots", "num"), ("tool_rack", "shaft_d"): ("Shaft diameter", "len"),
     ("tool_rack", "pitch"): ("Slot spacing", "len"), ("tool_rack", "reach"): ("Shelf reach from the wall", "len"),
     ("sanding_block", "height"): ("Height", "len"),
-    ("drill_guide", "sizes"): ("Drill sizes, mm (commas between)", "text"), ("drill_guide", "height"): ("Height", "len"),
+    ("drill_guide", "sizes"): ("Drill sizes: mm, or fractions for inches (3, 5, 1/4, 13/64)", "text"),
+    ("drill_guide", "corner_radius"): ("Radius on the corners you hold (0: square)", "len"), ("drill_guide", "engrave"): ("Cut each size into the top", "bool"), ("drill_guide", "height"): ("Height", "len"),
     ("drill_guide", "v_groove"): ("V groove underneath", "bool"),
     ("foot", "height"): ("Height", "len"), ("foot", "taper"): ("Floor end, as a part of the diameter", "num"),
     ("foot", "screw_d"): ("Screw hole (0 for none)", "len"),
@@ -1027,7 +1090,10 @@ KIND_LABELS = {
     ("label_plate", "width"): ("Width (0: fit the text)", "len"), ("label_plate", "height"): ("Height (0: fit the text)", "len"),
     ("label_plate", "depth"): ("Text depth or height", "len"), ("label_plate", "bold"): ("Bold", "bool"),
     ("label_plate", "border"): ("Border", "bool"), ("label_plate", "corners"): ("Corners", "select"), ("label_plate", "icon"): ("Icon", "select"),
-    ("label_plate", "two_color"): ("Two colours", "bool"),
+    ("label_plate", "two_color"): ("Two colours", "bool"), ("label_plate", "fit_text"): ("Fill the tag with the text", "bool"),
+    ("label_plate", "font"): ("Font", "select"), ("label_plate", "google_font"): ("Or any other Google font, by name", "text"),
+    ("label_plate", "logo"): ("Your logo, SVG or DXF (used instead of the icon)", "file"),
+    ("label_plate", "logo_only"): ("Logo only, no text", "bool"),
     ("battery_holder", "cell"): ("Cell", "select"), ("battery_holder", "count"): ("Cells, side by side", "num"),
     ("battery_holder", "cell_length"): ("Cell length (0: standard; a protected 18650 is 68 to 70)", "len"),
     ("battery_holder", "contact_room"): ("Room for both contacts", "len"), ("battery_holder", "contact_w"): ("Contact plate width (0: usual)", "len"),
@@ -1040,7 +1106,7 @@ KIND_LABELS = {
 CHOICES = {
     ("pipe_clamp", "ears"): [1, 2], ("pegboard_hook", "board"): list(PEGBOARDS), ("bit_holder", "hole"): ["hex", "round"],
     ("end_cap", "shape"): ["round", "square", "rectangle"], ("battery_caddy", "cell"): list(CELL_SIZES),
-    ("label_plate", "style"): list(LABEL_STYLES), ("label_plate", "mount"): list(LABEL_MOUNTS),
+    ("label_plate", "style"): list(LABEL_STYLES), ("label_plate", "mount"): list(LABEL_MOUNTS), ("label_plate", "font"): _font_names(),
     ("label_plate", "corners"): ["rounded", "square", "pill"], ("label_plate", "icon"): ["", "usb", "power", "antenna", "fan", "dc", "fuse", "lan", "onoff"],
     ("battery_holder", "cell"): list(HOLDER_CELLS) + ["9V"], ("battery_holder", "mount"): list(BATTERY_MOUNTS),
     ("battery_holder", "ear_side"): list(EAR_SIDES),

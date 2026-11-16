@@ -130,7 +130,7 @@ def test_tray_shaped_to_an_outline(tmp_path):
 
 def test_extrusion_drilling_jigs():
     one = hw.make("extrusion_offset_jig")
-    assert one["info"] == {"drill": 8.4, "offsets": [19.05], "inside_width": 38.4}        # half a 1515, on its slot line
+    assert one["info"] == {"drill": 8.4, "bushing": 0.0, "offsets": [19.05], "inside_width": 38.4}        # half a 1515, on its slot line
     assert hw.make("extrusion_offset_jig", hole="hex key access")["info"]["drill"] == 7.14  # 80/20's .281 in
     wide = hw.make("extrusion_offset_jig", profile="1530 (80/20, 1.5 x 3 in)", face="wide face", offsets="19.05, 57.15")
     assert "4 holes" in wide["notes"][0] and wide["info"]["inside_width"] == pytest.approx(76.5)

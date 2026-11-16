@@ -382,6 +382,12 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   set distances from it, one that sits anywhere along it with a sight gap for your mark, and a flat
   L that holds a joint square; plain printed guide holes, or bored for steel drill bushings.
 - **Jigs**: shelf-pin drilling jig, clamping square, centre finder, setup blocks.
+- **Drill sizes the way a shop says them**: the drilling jigs and the drill guide take 5, 13/64,
+  1/4", 0.201 in or 1-1/2 (a fraction is inches). The T-slot jigs cut their drill size into the top
+  face, show a steel bushing in the picture when you give its outside diameter (it is not in the
+  files), and can have the corners you hold rounded.
+- **Bottom edge chamfer on any part**: a 45 degree chamfer on the edge that sits on the bed, against
+  elephant's foot (`bottom_chamfer`, 0.4 is usual). The page remembers the last one you set.
 - **Funnels and hose adapters**: a funnel to a neck size; an adapter between two hose or port sizes.
 - **Panels for trainers**: a labelled test-point or jack plate, a panel bezel, a terminal cover.
 - **Pocket tray for the hinged case**: one lift-out tray with a pocket for each thing
@@ -394,7 +400,9 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   under the cells, or nothing.
 - **Labels, tags and name plates** (Parts tab): lines of text, raised, engraved, or flush in a second
   colour (the text comes as its own body, in place), with a border, an icon, and screw holes,
-  cable-tie slots, a key-ring hole, magnets in the back or a stake. Text shrinks to fit a set size.
+  cable-tie slots, a key-ring hole, magnets in the back or a stake. Set a size and the text is
+  sized to fill it. Forty-eight Google fonts to pick from, or any other Google font by name (fetched
+  from Google Fonts the first time and kept); your own logo from an SVG or DXF instead of an icon.
 - **Lift-out bins for the hinged case**: a grid of cells inside the tray, bigger bins by cells
   ("2x1:2, 2x2:1"), the rest filled with one-cell bins, one to three layers, with a scoop front and
   a label tab if wanted. They show in the tray and come out in the downloads and the print folder.

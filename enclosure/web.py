@@ -260,6 +260,8 @@ def part_preview(body: dict):
            "buy": r["buy"], "mesh": base64.b64encode(_stl(r["shape"])).decode()}
     if r.get("inlay") is not None:
         out["inlay"] = base64.b64encode(_stl(r["inlay"])).decode()
+    if r.get("fitted") is not None:                   # bought parts shown in place (a steel bushing): not in the files
+        out["fitted"] = base64.b64encode(_stl(r["fitted"])).decode()
     return _keep(key, out)
 
 

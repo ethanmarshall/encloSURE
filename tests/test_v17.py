@@ -158,3 +158,60 @@ def test_thumb_screw_is_a_cap_for_a_socket_head_screw():
     assert not cat["modes"] and "length" not in [f["name"] for f in cat["fields"]]
     with pytest.raises(ValueError):
         hw.make("thumbscrew", size="M3", head_d=6)
+
+
+LOGO = "<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 60 40'><path d='M5 35 L30 5 L55 35 Z' fill='black'/></svg>"
+
+
+def test_label_text_fills_a_set_size():
+    free = hw.make("label_plate", text="PUMP 1")
+    filled = hw.make("label_plate", text="PUMP 1", width=100, height=30)
+    kept = hw.make("label_plate", text="PUMP 1", width=100, height=30, fit_text=False)
+    assert free["info"]["text_size"] == 8 and kept["info"]["text_size"] == 8
+    assert filled["info"]["text_size"] > 15 and filled["size"][:2] == [100.0, 30.0]
+    assert "sized to fill" in " ".join(filled["notes"])
+    assert hw.make("label_plate", text="A LONG LINE OF TEXT", width=60)["info"]["text_size"] < 8
+
+
+def test_label_logo():
+    with_text = hw.make("label_plate", text="ACME", logo=LOGO)
+    assert with_text["shape"].is_valid and "with your logo" in with_text["notes"][0]
+    assert with_text["size"][0] > hw.make("label_plate", text="ACME")["size"][0]
+    alone = hw.make("label_plate", logo=LOGO, logo_only=True, style="flush")
+    assert "your logo alone" in alone["notes"][0] and alone["inlay"].is_valid
+    for bad in ({"logo_only": True}, {"logo": "<svg xmlns='http://www.w3.org/2000/svg'></svg>"}, {"logo": "x" * 500_000}):
+        with pytest.raises(ValueError):
+            hw.make("label_plate", **bad)
+
+
+def test_fonts_from_google(monkeypatch, tmp_path):
+    from enclosure import fonts
+    css = """@font-face { font-family: 'Test'; font-style: normal; font-weight: 400; src: url(https://fonts.gstatic.com/s/test/v1/a.ttf) format('truetype'); }
+             @font-face { font-family: 'Test'; font-style: italic; font-weight: 400; src: url(https://fonts.gstatic.com/s/test/v1/i.ttf) format('truetype'); }
+             @font-face { font-family: 'Test'; font-style: normal; font-weight: 700; src: url(https://fonts.gstatic.com/s/test/v1/b.ttf) format('truetype'); }
+             @font-face { font-family: 'Test'; font-weight: 400; src: url(https://evil.example/x.ttf) format('truetype'); }"""
+    assert fonts.parse_css(css) == {400: "https://fonts.gstatic.com/s/test/v1/a.ttf", 700: "https://fonts.gstatic.com/s/test/v1/b.ttf"}
+    for bad in ("../etc/passwd", "a/b", "", "x" * 60, "Roboto&text=1"):
+        if bad:
+            with pytest.raises(ValueError):
+                fonts.clean_name(bad)
+    assert fonts.path("") == (None, False) and fonts.path(fonts.DEFAULT) == (None, False)
+    monkeypatch.setattr(fonts, "_DIR", tmp_path / "fonts")
+    asked = []
+
+    def fake(url, limit):
+        asked.append(url)
+        if "googleapis" in url:
+            return css.encode()
+        return b"\x00\x01\x00\x00" + b"0" * 64
+    p, bold = fonts.path("Test Face", bold=True, fetch=fake)
+    assert bold and p.endswith("Test_Face-700.ttf") and all(u.startswith(("https://fonts.googleapis.com/", "https://fonts.gstatic.com/")) for u in asked)
+    n = len(asked)
+    assert fonts.path("Test Face", bold=False, fetch=fake)[0].endswith("Test_Face-400.ttf") and len(asked) == n     # kept on disk: not fetched again
+
+    def none(url, limit):
+        raise OSError("offline")
+    with pytest.raises(ValueError, match="no family called"):
+        fonts.path("Missing Family", fetch=none)
+    cat = {f["name"]: f for f in hw.catalog()["kinds"]["label_plate"]["fields"]}
+    assert cat["font"]["type"] == "select" and "Bebas Neue" in cat["font"]["options"] and cat["logo"]["type"] == "file"

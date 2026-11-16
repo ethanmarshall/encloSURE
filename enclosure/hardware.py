@@ -1385,6 +1385,65 @@ def make(kind: str, **params) -> dict:
     return {**r, "notes": list(r["notes"]), "checks": list(r["checks"]), "info": copy.deepcopy(r["info"])}
 
 
+def bed_chamfer(shape, size: float, rotation=None):
+    """(the shape with a 45° chamfer on the edges that sit on the bed, the size that went on or 0).
+    The bed is the bottom as modelled, or as turned for printing. Each solid that touches the bed
+    gets its own; a size the edges won't take is halved once before giving up."""
+    from build123d import Compound, Rot, Solid
+    turned = Rot(*rotation) * shape if rotation and any(rotation) else shape
+    z0 = turned.bounding_box().min.Z
+    solids = turned.solids()
+    if not solids:
+        return shape, 0.0
+    def checked(got, so):
+        if not got.is_valid or len(got.solids()) != 1 or not so.volume * 0.9 < got.volume < so.volume:
+            raise ValueError
+        return got.solids()[0]
+
+    def all_edges(so, c):
+        return checked(so.chamfer(c, None, [e for e in so.edges() if e.bounding_box().max.Z < z0 + 1e-4]), so)
+
+    def outer_edges(so, c):
+        faces = [f for f in so.faces() if f.bounding_box().max.Z < z0 + 1e-4]
+        return checked(so.chamfer(c, None, [e for f in faces for e in f.outer_wire().edges()]), so)
+
+    def by_cutting(so, c):
+        # Where the edge itself won't chamfer: cut a ring away from around each face on the bed.
+        from build123d import Face, Pos, Solid, extrude
+        got = so
+        for f in [f for f in so.faces() if f.bounding_box().max.Z < z0 + 1e-4]:
+            rim = f.outer_wire()
+            inner = rim.offset_2d(-c)
+            inner = inner if not isinstance(inner, list) else inner[0]
+            core = Solid.make_loft([inner, Pos(0, 0, c) * rim])
+            got = got - (extrude(Face(rim), amount=c, dir=(0, 0, 1)) - core)
+        return checked(got, so)
+
+    for way, c in ((all_edges, size), (outer_edges, size), (by_cutting, size), (all_edges, size / 2)):
+        out, any_done, ok = [], False, True
+        for so in solids:
+            if so.bounding_box().min.Z > z0 + 1e-4:
+                out.append(so)
+                continue
+            try:
+                out.append(way(so, c))
+                any_done = True
+            except Exception:
+                ok = False
+                break
+        if ok and any_done:
+            done = out[0] if len(out) == 1 else Compound(children=out)
+            if rotation and any(rotation):
+                done = _unturn(done, rotation)
+            return done, c
+    return shape, 0.0
+
+
+def _unturn(shape, rotation):
+    from build123d import Rot
+    return Rot(*rotation).inverse() * shape
+
+
 def _make(kind: str, **params) -> dict:
     """Build a part. Unknown settings are an error, so a typo doesn't pass silently."""
     if kind not in KINDS:
@@ -1394,6 +1453,16 @@ def _make(kind: str, **params) -> dict:
     allowed = set(inspect.signature(fn).parameters)
     # Mode, clearance and material only mean something to some parts: drop them for the rest.
     params = {k: v for k, v in params.items() if k in allowed or k not in ("mode", "clearance", "material", "threads")}
+    foot = 0.0
+    if "bottom_chamfer" not in allowed:               # every part can have its bed edge chamfered
+        try:
+            foot = float(params.pop("bottom_chamfer", 0) or 0)
+        except (TypeError, ValueError):
+            raise ValueError("bottom chamfer: a size in mm, 0 for none") from None
+        if not 0 <= foot <= 2:
+            raise ValueError("bottom chamfer: 0 to 2 mm (0.3 to 0.5 is usual)")
+        if kind not in PRINTED_ONLY and params.get("mode") != "print":
+            foot = 0.0                                # a bought part, drawn for reference
     extra = set(params) - allowed
     if extra:
         raise ValueError(f"{label}: unknown setting(s) {', '.join(sorted(extra))}")
@@ -1401,6 +1470,12 @@ def _make(kind: str, **params) -> dict:
     if clean.get("mode") not in (None, "reference", "print"):
         raise ValueError("mode: reference or print")
     r = fn(**clean)
+    if foot > 0:
+        r["shape"], done = bed_chamfer(r["shape"], foot, PRINT_ROTATION.get(kind))
+        if done:
+            r["notes"].append(f"a {done:g} mm 45° chamfer on the edge that sits on the bed, against elephant's foot")
+        else:
+            r["checks"].append("the bottom edge chamfer was left off: this shape's bottom edge wouldn't take one")
     shape = r["shape"]
     if not shape.is_valid:
         r["checks"].append("the solid came out with a modelling flaw: check it before printing")
@@ -1531,6 +1606,9 @@ def catalog() -> dict:
             fields.append(f)
         import inspect
         params = inspect.signature(fn).parameters
+        if not any(f["name"] == "bottom_chamfer" for f in fields):
+            fields.append({"name": "bottom_chamfer", "label": "Bottom edge chamfer, 45° (against elephant's foot; 0.4 is usual, 0: none)",
+                           "type": "len", "default": 0.0})
         out[kind] = {"label": label, "fields": fields, "printed_only": kind in PRINTED_ONLY,
                      "modes": "mode" in params, "material": "material" in params,
                      "doc": " ".join((fn.__doc__ or "").strip().split("\n\n")[0].split()),
