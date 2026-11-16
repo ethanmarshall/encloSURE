@@ -198,6 +198,9 @@ class BoxSpec:
     stacking: bool = False  # pins on the lid and sockets under the floor so boxes stack in line
     # Gridfinity feet under the floor so the box sits in a Gridfinity baseplate: {magnets, screws}
     gridfinity: dict | None = None
+    # Gridfinity inside: a baseplate on the floor and bins to drop in: {cols, rows (0: as many as fit),
+    # height (7 mm units, 0: the tallest that fits), bins "2x1:2, 2x2:1", fill}
+    grid_inside: dict | None = None
     # Magnets: round pockets for disc magnets: [{face (lid, floor or a wall), at [a, b], d, t, side outside|inside,
     # fit press|glue, hidden (sealed in, dropped in at a print pause: floor and lid only)}]
     magnets: list[dict] = field(default_factory=list)
@@ -1740,6 +1743,78 @@ def build(spec: BoxSpec) -> dict:
                 or any(face_name(m.get("face", "")) == "floor" and m.get("side", "outside") == "outside" and not m.get("hidden")
                        for m in spec.magnets):
             checks.append("Gridfinity: holes, vents or magnets open under the floor are covered by the feet's slab")
+
+    # Gridfinity inside: a baseplate on the floor, in the middle, and standard bins to drop into it.
+    if spec.grid_inside is not None and spec.grid_inside is not False:
+        from . import gridfinity as gf
+        from .case import lay_out, parse_bins
+        g = spec.grid_inside if isinstance(spec.grid_inside, dict) else {}
+        fit_x, fit_y = int((L - 0.6) // gf.GRID), int((W - 0.6) // gf.GRID)
+        try:
+            ask_c, ask_r, gh = int(g.get("cols") or 0), int(g.get("rows") or 0), int(g.get("height") or 0)
+        except (TypeError, ValueError):
+            raise ValueError("Gridfinity inside: whole numbers of units") from None
+        if fit_x < 1 or fit_y < 1:
+            raise ValueError(f"Gridfinity inside: the inside is {L:g} x {W:g} mm, too small for one 42 mm unit (42.6 mm each way at least)")
+        if ask_c > fit_x or ask_r > fit_y or ask_c < 0 or ask_r < 0:
+            raise ValueError(f"Gridfinity inside: {fit_x} x {fit_y} units fit an inside of {L:g} x {W:g} mm (a unit is 42 mm); "
+                             f"for {ask_c or fit_x} x {ask_r or fit_y}, make the inside {(ask_c or fit_x) * 42 + 0.6:g} x {(ask_r or fit_y) * 42 + 0.6:g} mm")
+        tallest = int((H - 0.6) // gf.HEIGHT_UNIT)
+        if tallest < 2:
+            raise ValueError("Gridfinity inside: the shortest bin is 14 mm, so the inside height must be 14.6 mm or more")
+        if gh and not 2 <= gh <= tallest:
+            raise ValueError(f"Gridfinity inside: bins 2 to {tallest} units tall fit this box (7 mm each), or 0 for the tallest")
+
+        def clear(nx: int, ny: int, u: int) -> bool:
+            # Where the bins will stand must be free of the lid's screw posts, its lip, and anything else inside.
+            room = Pos(0, 0, spec.floor + 0.2) * gf._prism(nx * gf.GRID - gf.GAP, ny * gf.GRID - gf.GAP, gf.BIN_R, u * gf.HEIGHT_UNIT - 0.2)
+            for other in (base, lid):
+                if other is not None:
+                    hit = other & room
+                    if hit is not None and hit.volume > 2.0:
+                        return False
+            return True
+
+        grids = [(ask_c or fit_x, ask_r or fit_y)]
+        if not ask_c:
+            grids += [(c_, grids[0][1]) for c_ in range(grids[0][0] - 1, 0, -1)]
+        if not ask_r:
+            grids += [(c_, r_) for c_, _ in list(grids) for r_ in range(grids[0][1] - 1, 0, -1)]
+        grids = sorted(set(grids), key=lambda q: (-q[0] * q[1], -q[0]))[:8]
+        heights = [gh] if gh else list(range(tallest, 1, -1))[:4]
+        found = next(((c_, r_, u) for c_, r_ in grids for u in heights if c_ * r_ <= 36 and clear(c_, r_, u)), None)
+        if found is None:
+            inside_things = [n for n, on in (("the board standoffs", spec.standoffs), ("the battery cradles", spec.batteries), ("the dividers", spec.dividers),
+                                            ("the card guides", spec.card_slots), ("the cable tie points", spec.tie_points)) if on]
+            if inside_things:
+                raise ValueError(f"Gridfinity inside: {grids[0][0]} x {grids[0][1]} bins run into {', '.join(inside_things)} on the floor. "
+                                 "A box of bins has no use for them: set the standoff layout to None (or clear whichever it is) and try again")
+            raise ValueError(f"Gridfinity inside: {grids[0][0]} x {grids[0][1]} bins {heights[0]} units tall run into the lid's screw posts or its lip, or something else inside. "
+                             "A screwed lid's corner posts need the inside about 16 mm longer and wider than the grid; a snap, slide or friction lid leaves the corners free. "
+                             "Or lower the bin height, or set the units to 0 to take what fits")
+        gc, gr, units = found
+        if (gc, gr) != grids[0] or units != heights[0]:
+            notes.append(f"Gridfinity inside: {grids[0][0]} x {grids[0][1]} units {heights[0]} tall would hit the lid's posts or lip, so it is {gc} x {gr} units, {units} tall")
+        base = base.fuse(Pos(0, 0, spec.floor - 0.01) * gf.baseplate(gc, gr))
+        spots = lay_out(gc, gr, parse_bins(str(g.get("bins") or "")), bool(g.get("fill", True)))
+        made_bins, tally = {}, {}
+        for a, b, c0, r0 in spots:
+            if (a, b) not in made_bins:
+                made_bins[(a, b)] = gf.bin_(a, b, units, lip=False)
+            tally[(a, b)] = tally.get((a, b), 0) + 1
+            name = f"gridfinity_bin_{a}x{b}x{units}" + (f"_{tally[(a, b)]}" if tally[(a, b)] > 1 else "")
+            extras.append((name, made_bins[(a, b)]))
+            mounted.append((name, Pos((c0 + a / 2 - gc / 2) * gf.GRID, (r0 + b / 2 - gr / 2) * gf.GRID, spec.floor) * made_bins[(a, b)], "base"))
+        spare_x, spare_y = L - gc * gf.GRID, W - gr * gf.GRID
+        notes.append(f"Gridfinity inside: a {gc} x {gr} baseplate is part of the floor, in the middle"
+                     + (f" with {spare_x / 2:.1f} mm spare each end and {spare_y / 2:.1f} mm each side" if max(spare_x, spare_y) > 2 else "")
+                     + f"; bins {units} units ({units * 7:g} mm) tall with no stacking lip, so the lid goes on over them: "
+                     + ", ".join(f"{n} x {a}x{b}" for (a, b), n in sorted(tally.items()))
+                     + ". Each bin is its own part; any standard Gridfinity bin that height or shorter fits too")
+        if max(spare_x, spare_y) > 17:
+            checks.append(f"Gridfinity inside: there is {spare_x:.0f} x {spare_y:.0f} mm of the floor round the grid that bins don't use; 'Fit the inside to the grid' sizes the box to it")
+        if spec.standoffs or spec.batteries or spec.dividers or spec.card_slots:
+            checks.append("Gridfinity inside: board standoffs, battery cradles, dividers and card guides share the floor with the baseplate and the bins: take them out, or check nothing collides")
 
     # Weight and print time, roughly.
     vol = base.volume + (lid.volume if lid is not None else 0.0) + sum(e.volume for _, e in extras)

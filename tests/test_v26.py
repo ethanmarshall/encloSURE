@@ -46,3 +46,26 @@ def test_gridfinity_case_writes_its_bins(tmp_path):
     out = case.write(case.Case(grid_cols=2, grid_rows=1), tmp_path)
     names = {p.name for p in tmp_path.iterdir()}
     assert "case_gridfinity_bin_1x1x4.stl" in names and "case_assembly.step" in names
+
+
+def test_gridfinity_inside_the_plain_box():
+    from enclosure import box
+    m = box.build(box.BoxSpec(size=(142.6, 100.6, 40.0), grid_inside={"cols": 3, "rows": 2, "bins": "2x1:1"}))
+    assert m["base"].is_valid and len(m["base"].solids()) == 1
+    names = [n for n, _ in m["extras"]]
+    assert names == ["gridfinity_bin_2x1x5", "gridfinity_bin_1x1x5", "gridfinity_bin_1x1x5_2", "gridfinity_bin_1x1x5_3", "gridfinity_bin_1x1x5_4"]
+    for _, placed, host in m["mounted"]:
+        assert host == "base" and _vol(m["base"] & placed) < 0.5 and _vol(m["lid"] & placed) < 0.5
+    assert any("Gridfinity inside: a 3 x 2 baseplate" in n for n in m["notes"])
+    # Snug in a screwed box, the corner posts are in the way: it takes what fits and says so.
+    snug = box.build(box.BoxSpec(size=(126.6, 84.6, 30.0), grid_inside={}))
+    assert any("would hit the lid's posts or lip" in n for n in snug["notes"]) and len(snug["extras"]) == 4
+    # A snap lid leaves the corners free.
+    free = box.build(box.BoxSpec(size=(126.6, 84.6, 30.0), lid="snap", grid_inside={}))
+    assert len(free["extras"]) == 6
+    for bad, word in ((dict(size=(126.6, 84.6, 30.0), grid_inside={"cols": 3, "rows": 2}), "corner posts"),
+                      (dict(size=(40, 40, 30), grid_inside={}), "too small"), (dict(size=(100, 100, 30), grid_inside={"cols": 3}), "units fit"),
+                      (dict(size=(150, 110, 40), standoffs=[[40, 20], [-40, 20], [40, -20], [-40, -20]], grid_inside={"cols": 3, "rows": 2}), "standoffs")):
+        with pytest.raises(ValueError, match=word):
+            box.build(box.BoxSpec(**bad))
+    assert "grid_inside" in box.BoxSpec.__dataclass_fields__

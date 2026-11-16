@@ -459,6 +459,18 @@
     </div>
     <button type="button" class="add" id="gf_snap">Fit the outside to the grid (42 mm units)</button>
     <p class="hint">The feet sit on a slab as big as the 42 mm grid the box needs, adding 5.95 mm under the floor. The report says how many grid and height (7 mm) units it takes. Gridfinity bins and baseplates are on the Parts tab.</p>
+    <label class="check"><input type="checkbox" id="gi_on"> Gridfinity bins inside: a baseplate on the floor and bins to drop in</label>
+    <div id="gi_opts">
+      <div class="grid">
+        <label class="f">Units along the length (0: what fits)<input id="gi_c" type="number" min="0" max="9" step="1" value="0"></label>
+        <label class="f">Units across the width (0: what fits)<input id="gi_r" type="number" min="0" max="9" step="1" value="0"></label>
+        <label class="f">Bin height, 7 mm units (0: tallest)<input id="gi_h" type="number" min="0" max="20" step="1" value="0"></label>
+      </div>
+      <label class="f">Bigger bins (units along x units across : how many)<input id="gi_bins" type="text" placeholder="2x1:2, 2x2:1" autocomplete="off"></label>
+      <label class="check"><input type="checkbox" id="gi_fill" checked> Fill the rest with 1 x 1 bins</label>
+      <button type="button" class="add" id="gi_snap">Fit the inside to the grid</button>
+      <p class="hint">A unit is 42 mm. A screwed lid's corner posts take about 8 mm at each corner, so the button leaves room for them; a snap, slide or friction lid lets the grid fill the box. The bins come as their own parts with the box. Turning this on clears the circuit board standoffs, which would be in the bins' way.</p>
+    </div>
     <label class="check"><input type="checkbox" name="lanyard"> Lanyard loop</label>
     <label class="check"><input type="checkbox" name="belt_clip"> Belt clip (its own part, screws to the floor)</label>
   </fieldset>
@@ -766,7 +778,8 @@
   <fieldset class="first">
     <legend>Hinged case, snap latches</legend>
     <p class="hint">A parts-organiser style case: a tray, a lid that snaps onto hinges along the back, and separate latch tabs that pivot on the lid and click onto the tray. Every joint is a printed ball in a printed socket, so there's nothing to buy.</p>
-    <div class="grid">
+        <p class="hint" id="cs_inside">Inside it: <button type="button" class="add" data-jump="cs_dx">Fixed dividers</button> <button type="button" class="add" data-jump="cs_ic">Lift-out bins</button> <button type="button" class="add" data-jump="cs_gc">Gridfinity bins</button> <button type="button" class="add" data-jump="cs_pk">Pocket tray</button></p>
+<div class="grid">
       <label class="f">Inside length<span class="unit" data-unit="mm"><input name="cs_l" type="number" min="45" step="1" value="160"></span></label>
       <label class="f">Inside width<span class="unit" data-unit="mm"><input name="cs_w" type="number" min="30" step="1" value="100"></span></label>
       <label class="f">Inside height<span class="unit" data-unit="mm"><input name="cs_h" type="number" min="15" step="1" value="30"></span></label>
@@ -1383,6 +1396,28 @@ function sync() {
 }
 boxform.addEventListener("change", sync); fitform.addEventListener("change", sync);
 
+// Gridfinity inside: size the inside to whole 42 mm units, with room for a screwed lid's corner posts.
+$("#gi_snap")?.addEventListener("click", () => {
+  const e = boxform.elements, inner = e.size_is.value !== "outer", wall = len(e.wall);
+  const room = ["screw", "hinge", "clamshell"].includes(e.lid.value) ? 16.6 : 0.6;
+  [["L", "#gi_c"], ["W", "#gi_r"]].forEach(([n, box]) => {
+    const inside = len(e[n]) - (inner ? 0 : 2 * wall);
+    const u = +$(box).value || Math.max(1, Math.round((inside - room) / 42)), want = u * 42 + room + (inner ? 0 : 2 * wall);
+    $(box).value = u; e[n].value = show(want); e[n].dataset.mm = String(want);
+  });
+  $("#gi_on").checked = true; $("#gi_opts").hidden = false; giBoard();
+  e.L.dispatchEvent(new Event("change", { bubbles: true }));
+});
+// A box of bins has no circuit board: its standoffs come off while Gridfinity is on, and go back when it is turned off.
+let giStandoffs = null;
+function giBoard() {
+  const st = boxform.elements.so_mode;
+  if ($("#gi_on").checked) { if (st.value !== "none") { giStandoffs = st.value; st.value = "none"; st.dispatchEvent(new Event("change", { bubbles: true })); } }
+  else if (giStandoffs != null && st.value === "none") { st.value = giStandoffs; giStandoffs = null; st.dispatchEvent(new Event("change", { bubbles: true })); }
+}
+$("#gi_on")?.addEventListener("change", () => { $("#gi_opts").hidden = !$("#gi_on").checked; giBoard(); });
+if ($("#gi_opts")) $("#gi_opts").hidden = true;
+
 // Gridfinity: grow the footprint to fill whole 42 mm units (less the 0.5 mm the grid leaves).
 $("#gf_snap")?.addEventListener("click", () => {
   const e = boxform.elements, inner = e.size_is.value !== "outer", wall = len(e.wall);
@@ -1527,6 +1562,7 @@ function boxBody() {
     din_rail: e.din_rail.checked, bottom_chamfer: len(e.bottom_chamfer), teardrop: e.teardrop.checked,
     wall_bracket: e.wall_bracket.checked, stacking: e.stacking.checked,
     gridfinity: $("#gf_on").checked ? { magnets: $("#gf_mag").checked, screws: $("#gf_screw").checked } : null,
+    grid_inside: $("#gi_on").checked ? { cols: +$("#gi_c").value || 0, rows: +$("#gi_r").value || 0, height: +$("#gi_h").value || 0, bins: $("#gi_bins").value.trim(), fill: $("#gi_fill").checked } : null,
     battery_door: $("#bd_on").checked ? { size: [len(e.bd_w), len(e.bd_l)], at: [len(e.bd_x), len(e.bd_y)], screw: e.bd_screw.value } : null,
     strain_reliefs: $$("#sr_rows .item").map(readSr),
     dividers: $$("#div_rows .item").map(readDiv),
@@ -1610,6 +1646,7 @@ function applySpec(sp) {
   set("fan_flow_cfm", sp.fan_flow_cfm);
   $("#gl_on").checked = !!sp.ground_lug; if (sp.ground_lug) { set("gl_x", sp.ground_lug[0]); set("gl_y", sp.ground_lug[1]); }
   $("#gf_on").checked = !!sp.gridfinity; $("#gf_mag").checked = !!sp.gridfinity?.magnets; $("#gf_screw").checked = !!sp.gridfinity?.screws;
+  { const gi = sp.grid_inside; $("#gi_on").checked = !!gi; $("#gi_opts").hidden = !gi; $("#gi_c").value = gi?.cols || 0; $("#gi_r").value = gi?.rows || 0; $("#gi_h").value = gi?.height || 0; $("#gi_bins").value = gi?.bins || ""; $("#gi_fill").checked = gi ? gi.fill !== false : true; }
   $("#ml_on").checked = !!sp.magnet_lid; if (sp.magnet_lid) { set("ml_d", sp.magnet_lid.d); set("ml_t", sp.magnet_lid.t); }
   $("#mag_rows").replaceChildren(); for (const m of sp.magnets || []) addRow("mag", { ...m, face: FACE_OF[m.face] || m.face, a: (m.at || [0, 0])[0], b: (m.at || [0, 0])[1] });
   $("#bd_on").checked = !!sp.battery_door;
@@ -1849,6 +1886,7 @@ $("#presetsave").onclick = () => {
   if (!name) { $("#pstate").textContent = "Give the preset a name first."; return; }
   savePreset({ name, type: "part", part: partBody() }); $("#preset_name").value = ""; $("#pstate").textContent = `Saved "${name}".`;
 };
+for (const b of $$("#cs_inside [data-jump]")) b.onclick = () => { const el = shapeform.elements[b.dataset.jump]; el.scrollIntoView({ block: "center", behavior: "smooth" }); el.focus({ preventScroll: true }); };
 $("#cspreset").onclick = () => {
   const b = caseBody(), name = `Case ${+(b.size[0] / U).toFixed(2)} × ${+(b.size[1] / U).toFixed(2)} × ${+(b.size[2] / U).toFixed(2)} ${UNIT()}` + (b.grid_cols ? `, Gridfinity ${b.grid_cols}×${b.grid_rows}` : "") + (b.insert_cols ? `, ${b.insert_cols}×${b.insert_rows} bins` : "");
   savePreset({ name, type: "case", case: b }); report.replaceChildren(msg("ok", `Saved as "${name}". It's on the Make page and under My presets on the Parts tab.`));
@@ -1863,9 +1901,11 @@ function rememberPrinter() {
 }
 // ---------- The Make page: everything there is to make, searchable ----------
 const BOXES = [
-  ["Box to a size", "An enclosure from inside sizes: lid, holes, vents, text, handles, magnets, mounting, Gridfinity feet.", "enclosure case project box lid", () => selectTab("box")],
+  ["Box to a size", "An enclosure from inside sizes: lid, holes, vents, text, handles, magnets, mounting, Gridfinity feet or bins inside.", "enclosure case project box lid", () => selectTab("box")],
   ["Box round a circuit board", "Fit an enclosure to a KiCad board or a board's size, with standoffs and connector openings.", "pcb kicad enclosure fit", () => selectTab("fit")],
-  ["Hinged case with snap latches", "A parts-organiser case: tray, hinged lid, latch tabs, with dividers or lift-out bins.", "organiser organizer storage case inserts bins latch", () => { selectTab("shapes"); $("[name=cs_l]").closest("fieldset").scrollIntoView({ block: "start" }); }],
+  ["Hinged case with snap latches", "A parts-organiser case: tray, hinged lid, latch tabs, with dividers, lift-out bins or Gridfinity bins.", "organiser organizer storage case inserts bins latch", () => { selectTab("shapes"); $("[name=cs_l]").closest("fieldset").scrollIntoView({ block: "start" }); }],
+  ["Box with Gridfinity bins inside", "A lidded box with a Gridfinity baseplate in its floor and bins to drop in.", "gridfinity bins organiser organizer storage box baseplate", () => { selectTab("box"); const c = $("#gi_on"); if (!c.checked) c.click(); c.scrollIntoView({ block: "center" }); }],
+  ["Hinged case with Gridfinity bins", "The snap-latch organiser case with a Gridfinity baseplate in the tray and bins sized to it.", "gridfinity bins organiser organizer case hinged latch", () => { selectTab("shapes"); const e = shapeform.elements; if (!+e.cs_gc.value) { e.cs_gc.value = 3; e.cs_gr.value = 2; } e.cs_gc.scrollIntoView({ block: "center" }); e.cs_gc.focus({ preventScroll: true }); }],
   ["Round box with a screw-on cap", "A threaded jar: a round body and a cap that screws on.", "jar container thread tube", () => { selectTab("shapes"); $("[name=rb_d]")?.closest("fieldset").scrollIntoView({ block: "start" }); }],
   ["Box or tray to an outline", "A box whose shape follows an outline you draw, or a tray with a pocket that shape to hold a tool or a part.", "custom shape dxf shadow board tool holder insert foam", () => { selectTab("shapes"); $("#olshow").closest("fieldset").scrollIntoView({ block: "start" }); }],
   ["Fit a bought box", "Check a board against an off-the-shelf enclosure and get drilling templates.", "hammond stock enclosure template", () => selectTab("stock")],
