@@ -397,6 +397,10 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   for two sizes, pillow block for a ball bearing. Also a T-slot foot and soft vise jaws.
 - **On any printed part**: a top edge chamfer, and a few words cut into the biggest flat on top
   (`top_chamfer`, `engrave_text`).
+- **A case for a set of things**: give the hinged case a list of sections (a space for a thing,
+  a block of upright holes with a lying slot, a number of compartments) and it lays them out side
+  by side, turns things to keep the case square, and sizes itself round them. A case can be handed
+  on as a link (`#case=...`).
 - **Gridfinity inside the plain box**: `grid_inside` puts a baseplate on the floor and gives the
   bins as extra parts. It keeps clear of a screwed lid's corner posts and the lid's lip, and takes
   the biggest grid and tallest bins that fit when you leave the units at 0.

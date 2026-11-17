@@ -778,7 +778,7 @@
   <fieldset class="first">
     <legend>Hinged case, snap latches</legend>
     <p class="hint">A parts-organiser style case: a tray, a lid that snaps onto hinges along the back, and separate latch tabs that pivot on the lid and click onto the tray. Every joint is a printed ball in a printed socket, so there's nothing to buy.</p>
-        <p class="hint" id="cs_inside">Inside it: <button type="button" class="add" data-jump="cs_dx">Fixed dividers</button> <button type="button" class="add" data-jump="cs_ic">Lift-out bins</button> <button type="button" class="add" data-jump="cs_gc">Gridfinity bins</button> <button type="button" class="add" data-jump="cs_pk">Pocket tray</button></p>
+        <p class="hint" id="cs_inside">Inside it: <button type="button" class="add" data-jump="cs_secs">Sections side by side</button> <button type="button" class="add" data-jump="cs_dx">Fixed dividers</button> <button type="button" class="add" data-jump="cs_ic">Lift-out bins</button> <button type="button" class="add" data-jump="cs_gc">Gridfinity bins</button> <button type="button" class="add" data-jump="cs_pk">Pocket tray</button></p>
 <div class="grid">
       <label class="f">Inside length<span class="unit" data-unit="mm"><input name="cs_l" type="number" min="45" step="1" value="160"></span></label>
       <label class="f">Inside width<span class="unit" data-unit="mm"><input name="cs_w" type="number" min="30" step="1" value="100"></span></label>
@@ -793,6 +793,9 @@
       <label class="f">Dividers across the width<input name="cs_dy" type="number" min="0" max="12" step="1" value="0"></label>
     </div>
     <label class="check"><input type="checkbox" name="cs_ribs" checked> Ribs under the lid over the dividers (keeps small parts in their pockets)</label>
+    <p class="hint" style="margin-top:10px"><b>Sections side by side</b>: list what goes in the case and it is laid out for you, one section after another along the length with a wall between. The sections set the case's inside length and width (and the height, if something is taller), so you only type what each thing needs.</p>
+    <div class="rows" id="cs_secs"></div>
+    <div class="links"><button type="button" class="add" data-sec="space">+ A space for a thing</button><button type="button" class="add" data-sec="holes">+ A block of holes</button><button type="button" class="add" data-sec="cells">+ Compartments</button></div>
     <p class="hint" style="margin-top:10px"><b>Lift-out inserts</b> (instead of dividers): loose bins on a grid of cells that fill the tray. They stand the full inside height, so the lid holds them and their contents down.</p>
     <div class="grid">
       <label class="f">Cells along the length (0: none)<input name="cs_ic" type="number" min="0" max="12" step="1" value="0"></label>
@@ -819,7 +822,7 @@
       <label class="f">Pockets<input name="cs_pk" type="text" placeholder="round 12:6, slot 80x12, rect 40x25:2" autocomplete="off"></label>
       <label class="f">Pocket depth (0: to suit)<span class="unit" data-unit="mm"><input name="cs_pkd" type="number" min="0" step="1" value="0"></span></label>
     </div>
-    <div class="links"><button class="plain" type="button" id="csshow">Show it</button><button class="go" type="button" id="csdl">Download STEP + STL</button><button class="plain" type="button" id="cskit">Print folder</button><button class="plain" type="button" id="cspreset">Save as my preset</button></div>
+    <div class="links"><button class="plain" type="button" id="csshow">Show it</button><button class="plain" type="button" id="cslink">Copy link</button><button class="go" type="button" id="csdl">Download STEP + STL</button><button class="plain" type="button" id="cskit">Print folder</button><button class="plain" type="button" id="cspreset">Save as my preset</button></div>
   </fieldset>
   <fieldset>
     <legend>Round box, screw-on cap</legend>
@@ -1886,7 +1889,7 @@ $("#presetsave").onclick = () => {
   if (!name) { $("#pstate").textContent = "Give the preset a name first."; return; }
   savePreset({ name, type: "part", part: partBody() }); $("#preset_name").value = ""; $("#pstate").textContent = `Saved "${name}".`;
 };
-for (const b of $$("#cs_inside [data-jump]")) b.onclick = () => { const el = shapeform.elements[b.dataset.jump]; el.scrollIntoView({ block: "center", behavior: "smooth" }); el.focus({ preventScroll: true }); };
+for (const b of $$("#cs_inside [data-jump]")) b.onclick = () => { const el = shapeform.elements[b.dataset.jump] || $("#" + b.dataset.jump).nextElementSibling; el.scrollIntoView({ block: "center", behavior: "smooth" }); el.focus({ preventScroll: true }); };
 $("#cspreset").onclick = () => {
   const b = caseBody(), name = `Case ${+(b.size[0] / U).toFixed(2)} × ${+(b.size[1] / U).toFixed(2)} × ${+(b.size[2] / U).toFixed(2)} ${UNIT()}` + (b.grid_cols ? `, Gridfinity ${b.grid_cols}×${b.grid_rows}` : "") + (b.insert_cols ? `, ${b.insert_cols}×${b.insert_rows} bins` : "");
   savePreset({ name, type: "case", case: b }); report.replaceChildren(msg("ok", `Saved as "${name}". It's on the Make page and under My presets on the Parts tab.`));
@@ -1905,6 +1908,7 @@ const BOXES = [
   ["Box round a circuit board", "Fit an enclosure to a KiCad board or a board's size, with standoffs and connector openings.", "pcb kicad enclosure fit", () => selectTab("fit")],
   ["Hinged case with snap latches", "A parts-organiser case: tray, hinged lid, latch tabs, with dividers, lift-out bins or Gridfinity bins.", "organiser organizer storage case inserts bins latch", () => { selectTab("shapes"); $("[name=cs_l]").closest("fieldset").scrollIntoView({ block: "start" }); }],
   ["Box with Gridfinity bins inside", "A lidded box with a Gridfinity baseplate in its floor and bins to drop in.", "gridfinity bins organiser organizer storage box baseplate", () => { selectTab("box"); const c = $("#gi_on"); if (!c.checked) c.click(); c.scrollIntoView({ block: "center" }); }],
+  ["Case for a set of things", "A hinged case laid out for you: list a thing to drop in, a block of holes, some compartments, and it sizes itself round them.", "organiser organizer kit case sections tool set custom layout compartments holes", () => { selectTab("shapes"); $("#cs_secs").scrollIntoView({ block: "center" }); if (!$$("#cs_secs .item").length) $("[data-sec=space]").click(); }],
   ["Hinged case with Gridfinity bins", "The snap-latch organiser case with a Gridfinity baseplate in the tray and bins sized to it.", "gridfinity bins organiser organizer case hinged latch", () => { selectTab("shapes"); const e = shapeform.elements; if (!+e.cs_gc.value) { e.cs_gc.value = 3; e.cs_gr.value = 2; } e.cs_gc.scrollIntoView({ block: "center" }); e.cs_gc.focus({ preventScroll: true }); }],
   ["Round box with a screw-on cap", "A threaded jar: a round body and a cap that screws on.", "jar container thread tube", () => { selectTab("shapes"); $("[name=rb_d]")?.closest("fieldset").scrollIntoView({ block: "start" }); }],
   ["Box or tray to an outline", "A box whose shape follows an outline you draw, or a tray with a pocket that shape to hold a tool or a part.", "custom shape dxf shadow board tool holder insert foam", () => { selectTab("shapes"); $("#olshow").closest("fieldset").scrollIntoView({ block: "start" }); }],
@@ -2247,6 +2251,56 @@ function showShape(d, title) {
     h("ul", { class: "notes" }, d.notes.map(n => h("li", {}, inUnits(n)))),
     ...(d.checks || []).map(c => msg("warn", inUnits(c))));
 }
+// Sections of the hinged case: rows the layout is worked out from.
+function secRow(kind, o = {}) {
+  const txt = (name, value, ph) => h("input", { type: "text", name, value: value || "", placeholder: ph, autocomplete: "off" });
+  const count = (name, value) => h("input", { type: "number", name, value, min: "0", step: "1" });
+  const L = (name, mm) => { const el = lenIn(name, mm); el.type = "text"; el.inputMode = "decimal"; el.removeAttribute("step"); return el; };
+  const rows = kind === "space" ? [
+    h("div", { class: "grid head" }, field("A space for (its name)", txt("sc_name", o.name, "soldering iron box")),
+      field("Turn it", h("select", { name: "sc_turn" }, [["auto", "Whichever way fits best"], ["as typed", "Long way along the case"], ["turned", "Long way across the case"]].map(([v, t]) => h("option", { value: v, selected: v === (o.turn || "auto") }, t))))),
+    h("div", { class: "grid" }, field("Its length", L("sc_x", o.x ?? 100), UNIT()), field("Its width", L("sc_y", o.y ?? 60), UNIT()), field("Its height", L("sc_z", o.z ?? 20), UNIT()))]
+  : kind === "holes" ? [
+    h("div", { class: "grid head" }, field("A block of holes for (its name)", txt("sc_name", o.name, "heat stake tips")), field("Upright holes", count("sc_count", o.count ?? 6))),
+    h("div", { class: "grid" }, field("Hole diameter", L("sc_d", o.d ?? 8), UNIT()), field("Hole depth", L("sc_depth", o.depth ?? 15), UNIT())),
+    h("div", { class: "grid" }, field("Lying slot: length (0: none)", L("sc_sl", o.slot_l ?? 0), UNIT()), field("Slot width", L("sc_sw", o.slot_w ?? 0), UNIT()), field("Slot depth (0: its width)", L("sc_sd", o.slot_d ?? 0), UNIT()))]
+  : [
+    h("div", { class: "grid head" }, field("Compartments for (their name)", txt("sc_name", o.name, "heat-set inserts")), field("How many", count("sc_count", o.count ?? 6))),
+    h("div", { class: "grid" }, field("Each at least: length", L("sc_x", o.x ?? 25.4), UNIT()), field("Width", L("sc_y", o.y ?? 25.4), UNIT()))];
+  const item = h("div", { class: "item", "data-kind": kind },
+    h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => item.remove() }, "×"), ...rows);
+  return item;
+}
+function secRows() {
+  return $$("#cs_secs .item").map(it => {
+    const g = n => it.querySelector(`[name=${n}]`), kind = it.dataset.kind, name = g("sc_name").value.trim();
+    if (kind === "space") return { kind, name, x: len(g("sc_x")), y: len(g("sc_y")), z: len(g("sc_z")), turn: g("sc_turn").value };
+    if (kind === "holes") return { kind, name, count: Math.round(num(g("sc_count").value)), d: len(g("sc_d")), depth: len(g("sc_depth")), slot_l: len(g("sc_sl")), slot_w: len(g("sc_sw")), slot_d: len(g("sc_sd")) };
+    return { kind, name, count: Math.round(num(g("sc_count").value)), x: len(g("sc_x")), y: len(g("sc_y")) };
+  });
+}
+function setSecRows(list) {
+  $("#cs_secs").replaceChildren(...(list || []).filter(o => ["space", "holes", "cells"].includes(o?.kind)).map(o => secRow(o.kind, o)));
+}
+for (const b of $$("[data-sec]")) b.onclick = () => { const it = secRow(b.dataset.sec); $("#cs_secs").append(it); it.querySelector("input")?.focus(); };
+// A case can be handed on as a link: everything about it is in the address.
+function caseLink() {
+  const bytes = new TextEncoder().encode(JSON.stringify(caseBody()));
+  return location.origin + location.pathname + "#case=" + btoa(String.fromCharCode(...bytes)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
+}
+function openCaseLink() {
+  const m = /#case=([A-Za-z0-9_-]+)/.exec(location.hash);
+  if (!m) return false;
+  try {
+    const raw = atob(m[1].replace(/-/g, "+").replace(/_/g, "/"));
+    const b = JSON.parse(new TextDecoder().decode(Uint8Array.from(raw, ch => ch.charCodeAt(0))));
+    selectTab("shapes"); applyCase(b);
+    $("[name=cs_l]").closest("fieldset").scrollIntoView({ block: "start" });
+    $("#csshow").click();
+    return true;
+  } catch { return false; }
+}
+
 function caseBody() {
   const e = shapeform.elements, n = k => Math.round(num(e[k].value) || 0);
   return { size: [len(e.cs_l), len(e.cs_w), len(e.cs_h)], lid_depth: len(e.cs_lid), wall: len(e.cs_wall), floor: len(e.cs_floor),
@@ -2254,17 +2308,20 @@ function caseBody() {
     lid_ribs: e.cs_ribs.checked, insert_cols: n("cs_ic"), insert_rows: n("cs_ir"), insert_layers: +e.cs_il.value, insert_wall: len(e.cs_iw),
     insert_bins: e.cs_ibins.value.trim(), insert_fill: e.cs_ifill.checked, insert_scoop: e.cs_iscoop.checked, insert_label: e.cs_ilabel.checked,
     insert_pockets: e.cs_pk.value.trim(), pocket_depth: len(e.cs_pkd),
-    grid_cols: n("cs_gc"), grid_rows: n("cs_gr"), grid_height: n("cs_gh"), grid_bins: e.cs_gbins.value.trim(), grid_fill: e.cs_gfill.checked };
+    grid_cols: n("cs_gc"), grid_rows: n("cs_gr"), grid_height: n("cs_gh"), grid_bins: e.cs_gbins.value.trim(), grid_fill: e.cs_gfill.checked,
+    sections: secRows().length ? secRows() : null };
 }
 function applyCase(b) {
   const e = shapeform.elements, L = (k, v) => { if (v != null) { e[k].value = show(v); e[k].dataset.mm = String(v); } };
   L("cs_l", b.size?.[0]); L("cs_w", b.size?.[1]); L("cs_h", b.size?.[2]); L("cs_lid", b.lid_depth); L("cs_wall", b.wall); L("cs_floor", b.floor);
   L("cs_r", b.corner_radius); L("cs_iw", b.insert_wall); L("cs_pkd", b.pocket_depth); if (b.insert_pockets != null) e.cs_pk.value = b.insert_pockets;
+  setSecRows(b.sections);
   for (const [k, f] of [["cs_hinges", "hinges"], ["cs_latches", "latches"], ["cs_dx", "dividers_x"], ["cs_dy", "dividers_y"], ["cs_ic", "insert_cols"],
                         ["cs_ir", "insert_rows"], ["cs_il", "insert_layers"], ["cs_ibins", "insert_bins"],
                         ["cs_gc", "grid_cols"], ["cs_gr", "grid_rows"], ["cs_gh", "grid_height"], ["cs_gbins", "grid_bins"]]) if (b[f] != null) e[k].value = b[f];
   for (const [k, f] of [["cs_ribs", "lid_ribs"], ["cs_ifill", "insert_fill"], ["cs_iscoop", "insert_scoop"], ["cs_ilabel", "insert_label"], ["cs_gfill", "grid_fill"]]) if (b[f] != null) e[k].checked = !!b[f];
 }
+$("#cslink").onclick = async () => { const url = caseLink(); try { await navigator.clipboard.writeText(url); $("#cslink").textContent = "Link copied"; } catch { history.replaceState(null, "", url); $("#cslink").textContent = "Link is in the address bar"; } setTimeout(() => { $("#cslink").textContent = "Copy link"; }, 2000); };
 $("#csshow").onclick = () => busy($("#csshow"), "Making...", async () => {
   const res = await fetch("api/case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ case: caseBody(), preview: true }) });
   if (!res.ok) { report.replaceChildren(msg("err", await errorOf(res))); return; }
@@ -2731,7 +2788,7 @@ fetch("api/presets").then(r => r.json()).then(p => {
 });
 sync();
 rememberPrinter(); showPresets();
-if (!/#d=/.test(location.hash)) selectTab("make");   // start on the list of things to make, unless a shared design was opened
+if (/#case=/.test(location.hash)) openCaseLink(); else if (!/#d=/.test(location.hash)) selectTab("make");   // start on the list of things to make, unless a shared design was opened
 </script>
 <script>
 // On a phone: buttons to jump between the 3D view (at the top) and the settings under it.

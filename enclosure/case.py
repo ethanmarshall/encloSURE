@@ -76,6 +76,12 @@ class Case:
     grid_bins: str = ""        # bigger bins as "units along x units across: how many"; the rest are 1 x 1
     grid_fill: bool = True
     grid_height: int = 0       # bin height in 7 mm units; 0 for as tall as the case allows
+    # Sections: different things side by side along the length, walled off from each other. A list of
+    #   {"kind": "space", "name", "x", "y", "z", "turn": "auto" | "as typed" | "turned", "fit"}   a thing dropped in
+    #   {"kind": "holes", "name", "count", "d", "depth", "slot_l", "slot_w", "slot_d"}            a block of holes, and a slot
+    #   {"kind": "cells", "name", "count", "x", "y"}                                              compartments
+    # The sections set the inside length and width, and the height if something is taller.
+    sections: list | None = None
     insert_pockets: str = ""
     pocket_depth: float = 0.0   # 0: as deep as the case allows, up to 15 mm
 
@@ -96,6 +102,10 @@ class Case:
                 raise ValueError(f"{what}: 0 (automatic) to 6")
         if not (0 <= int(self.dividers_x) <= 12 and 0 <= int(self.dividers_y) <= 12):
             raise ValueError("dividers: 0 to 12 each way")
+        if self.sections:
+            if (int(self.grid_cols) or int(self.grid_rows) or int(self.insert_cols) or int(self.insert_rows) or int(self.dividers_x) or int(self.dividers_y)
+                    or str(self.insert_pockets or "").strip()):
+                raise ValueError("sections, Gridfinity bins, lift-out bins, a pocket tray, or fixed dividers: pick one and clear the others")
         gc, gr = int(self.grid_cols), int(self.grid_rows)
         if (gc > 0) != (gr > 0):
             raise ValueError("Gridfinity: set the units both ways (along the length and across the width), or neither")
@@ -336,6 +346,107 @@ def tab(catch: float = CATCH_MIN):
     return body.clean()
 
 
+SECTION_KINDS = ("space", "holes", "cells")
+
+
+def _num(d: dict, key: str, default: float = 0.0) -> float:
+    try:
+        return float(d.get(key) if d.get(key) not in (None, "") else default)
+    except (TypeError, ValueError):
+        raise ValueError(f"sections: '{key}' should be a number") from None
+
+
+def plan_sections(sections: list, wall: float = RIB) -> dict:
+    """Lay the sections side by side along the length. Each gets the full width; the widest thing
+    sets the width. A space for a thing is turned whichever way makes the case most nearly square
+    (unless told), since that is what fits a printer's bed. Returns the inside length and width,
+    the height the tallest thing needs, and each section's place and make-up."""
+    import itertools
+    if not isinstance(sections, list) or not sections:
+        raise ValueError("sections: a list of the things that go inside")
+    if len(sections) > 8:
+        raise ValueError("sections: up to 8 in one case")
+    secs = []
+    for i, raw in enumerate(sections):
+        if not isinstance(raw, dict) or raw.get("kind") not in SECTION_KINDS:
+            raise ValueError(f"section {i + 1}: its kind is one of {', '.join(SECTION_KINDS)}")
+        d = dict(raw)
+        d["name"] = str(d.get("name") or "").strip()[:40] or {"space": "space", "holes": "holes", "cells": "compartments"}[d["kind"]]
+        if d["kind"] == "space":
+            d["x"], d["y"], d["z"], d["fit"] = _num(d, "x"), _num(d, "y"), _num(d, "z"), _num(d, "fit", 1.0)
+            if not (5 <= d["x"] <= 400 and 5 <= d["y"] <= 400 and 0 <= d["z"] <= 200 and 0 <= d["fit"] <= 10):
+                raise ValueError(f"section {i + 1} ({d['name']}): a thing 5 to 400 mm long and wide, up to 200 mm tall")
+            if d.get("turn") not in (None, "", "auto", "as typed", "turned"):
+                raise ValueError(f"section {i + 1}: turn is auto, as typed or turned")
+        elif d["kind"] == "holes":
+            d["count"], d["d"], d["depth"] = int(_num(d, "count", 1)), _num(d, "d", 8.0), _num(d, "depth", 15.0)
+            d["slot_l"], d["slot_w"] = _num(d, "slot_l"), _num(d, "slot_w")
+            d["slot_d"] = _num(d, "slot_d") or d["slot_w"]
+            if not (0 <= d["count"] <= 60 and 2 <= d["d"] <= 60 and 3 <= d["depth"] <= 100):
+                raise ValueError(f"section {i + 1} ({d['name']}): up to 60 holes, 2 to 60 mm across, 3 to 100 mm deep")
+            if (d["slot_l"] > 0) != (d["slot_w"] > 0) or d["slot_l"] > 400 or (d["slot_l"] and d["slot_w"] < 2):
+                raise ValueError(f"section {i + 1} ({d['name']}): give the slot a length and a width, or neither")
+            if not d["count"] and not d["slot_l"]:
+                raise ValueError(f"section {i + 1} ({d['name']}): some holes, a slot, or both")
+        else:
+            d["count"], d["x"], d["y"] = int(_num(d, "count", 1)), _num(d, "x", 25.4), _num(d, "y", 25.4)
+            if not (1 <= d["count"] <= 80 and 8 <= d["x"] <= 300 and 8 <= d["y"] <= 300):
+                raise ValueError(f"section {i + 1} ({d['name']}): 1 to 80 compartments, each 8 to 300 mm")
+        secs.append(d)
+
+    def lay(turns: tuple, wider: float = 0.0) -> dict:
+        t = iter(turns)
+        need = []
+        for d in secs:                                # the width each needs at least
+            if d["kind"] == "space":
+                d["_turned"] = next(t)
+                need.append((d["x"] if d["_turned"] else d["y"]) + d["fit"])
+            elif d["kind"] == "holes":
+                need.append(max(d["d"] + 6.0 if d["count"] else 0.0, d["slot_l"] + 6.0 if d["slot_l"] else 0.0))
+            else:
+                need.append(min(d["x"], d["y"]))
+        W = max(max(need), wider)
+        out, x0 = [], 0.0
+        for d in secs:
+            e = {k: v for k, v in d.items() if not k.startswith("_")}
+            if d["kind"] == "space":
+                e["turned"] = d["_turned"]
+                e["len"] = (d["y"] if d["_turned"] else d["x"]) + d["fit"]
+                e["across"] = (d["x"] if d["_turned"] else d["y"]) + d["fit"]
+            elif d["kind"] == "holes":
+                pitch = d["d"] + max(4.0, d["d"] * 0.35)
+                per_row = max(1, int((W - 6.0 + pitch - d["d"]) // pitch)) if d["count"] else 0
+                rows = -(-d["count"] // per_row) if d["count"] else 0
+                e.update(pitch=pitch, per_row=min(per_row, d["count"]), rows=rows)
+                e["len"] = (rows * pitch + 2.0 if rows else 0.0) + (d["slot_w"] + 4.0 if d["slot_l"] else 0.0) + (2.0 if not rows else 0.0)
+            else:
+                # Compartments run across the width in rows; the cell's two sizes go whichever way packs more in.
+                best = None
+                for cx, cy in {(d["x"], d["y"]), (d["y"], d["x"])}:
+                    per_row = max(1, int((W + wall) // (cy + wall)))
+                    per_row = min(per_row, d["count"])
+                    rows = -(-d["count"] // per_row)
+                    per_row = -(-d["count"] // rows)          # even rows: 15 in three rows is 5, 5, 5, not 7, 7, 1
+                    length = rows * cx + (rows - 1) * wall
+                    if best is None or length < best[0]:
+                        best = (length, cx, per_row, rows)
+                e["len"], e["cell_len"], e["per_row"], e["rows"] = best
+            e["x0"] = x0
+            x0 += e["len"] + wall
+            out.append(e)
+        return {"L": x0 - wall, "W": W, "sections": out}
+
+    autos = [d for d in secs if d["kind"] == "space"]
+    choices = [((False, True) if d.get("turn") in (None, "", "auto") else ((True,) if d.get("turn") == "turned" else (False,))) for d in autos]
+    plans = [lay(t) for t in itertools.product(*choices)]
+    if not autos:                                 # nothing fixes the width: try wider cases and keep the most nearly square
+        narrow = plans[0]["W"]
+        plans += [lay((), narrow + k * 2.0) for k in range(1, 140) if narrow + k * 2.0 <= 300]
+    plan = min(plans, key=lambda q: (max(q["L"], q["W"]), q["L"] * q["W"]))
+    plan["H"] = max([d["z"] + 1.5 for d in secs if d["kind"] == "space"] + [0.0])
+    return plan
+
+
 def grid_size(cols: int, rows: int) -> tuple[float, float]:
     """The inside length and width that hold a Gridfinity grid, with a little room round it."""
     return cols * GRID + 2 * GRID_EDGE, rows * GRID + 2 * GRID_EDGE
@@ -344,9 +455,16 @@ def grid_size(cols: int, rows: int) -> tuple[float, float]:
 def build(c: Case) -> dict:
     gc, gr = int(c.grid_cols), int(c.grid_rows)
     asked = tuple(float(v) for v in c.size[:2])
+    H0 = float(c.size[2])
     if gc and gr:                                 # the grid decides the inside length and width
         from dataclasses import replace
         c = replace(c, size=(*grid_size(gc, gr), c.size[2]))
+    plan = None
+    if c.sections:                                # and so do sections, and the height if something is tall
+        from dataclasses import replace
+        plan = plan_sections(c.sections)
+        tall = max(float(c.size[2]), float(math.ceil(plan["H"])))
+        c = replace(c, size=(max(45.0, round(plan["L"], 2)), max(30.0, round(plan["W"], 2)), tall))     # no smaller than the smallest case
     c.check()
     L, W, H = (float(v) for v in c.size)
     w, fl = float(c.wall), float(c.floor)
@@ -498,6 +616,78 @@ def build(c: Case) -> dict:
             notes.append(f"{empty} cell{'s' if empty > 1 else ''} of the grid left empty")
         if bh < 8:
             checks.append(f"the bins are only {bh:g} mm tall: fewer layers, or a taller case")
+
+    # ----- Or sections: different things side by side, each walled off -----
+    if plan:
+        wall_h = div_top - fl
+        said = []
+        for i, e in enumerate(plan["sections"]):
+            xa = -L / 2 + e["x0"]
+            if i:                                 # the wall between this section and the last
+                tray += Pos(xa - RIB / 2, 0, fl - 0.01) * Box(RIB, W + 0.02, wall_h, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            xm = xa + e["len"] / 2
+            if e["kind"] == "space":
+                side = (W - e["across"]) / 2
+                if side > 3:                      # the thing is narrower than the case: a wall each side keeps it from sliding
+                    for sg in (-1, 1):
+                        tray += Pos(xm, sg * (e["across"] / 2 + RIB / 2), fl - 0.01) * Box(e["len"] + 0.02, RIB, wall_h, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                a, b = (e["y"], e["x"]) if e["turned"] else (e["x"], e["y"])
+                said.append(f"{e['name']}: a space {e['len']:g} x {e['across']:g} mm for a thing {a:g} x {b:g} mm"
+                            + (f", {e['z']:g} mm tall" if e["z"] else "") + (" (turned to lie across the case)" if e["turned"] else ""))
+            elif e["kind"] == "holes":
+                bh = min(wall_h, max(e["depth"] if e["count"] else 0.0, e["slot_d"] if e["slot_l"] else 0.0) + 2.0)
+                block = Pos(xm, 0, fl - 0.01) * Box(e["len"] + 0.02, W + 0.02, bh, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                top_z = fl - 0.01 + bh
+                x_at = xa + 1.0
+                deep = min(e["depth"], bh - 1.0)
+                if e["count"]:
+                    left = e["count"]
+                    for r_ in range(e["rows"]):
+                        n_here = min(e["per_row"], left)
+                        left -= n_here
+                        for k in range(n_here):
+                            y = (k - (n_here - 1) / 2) * min(e["pitch"] * 1.6, (W - 6.0) / max(1, n_here)) if n_here > 1 else 0.0
+                            block -= Pos(x_at + e["pitch"] / 2 + r_ * e["pitch"], y, top_z - deep) * Cylinder(e["d"] / 2, deep + 1, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                    x_at += e["rows"] * e["pitch"]
+                slot_deep = 0.0
+                if e["slot_l"]:
+                    slot_deep = min(e["slot_d"], bh - 1.0)
+                    x_at += 2.0 if e["count"] else 1.0
+                    block -= Pos(x_at + e["slot_w"] / 2, 0, top_z - slot_deep) * Box(e["slot_w"], e["slot_l"], slot_deep + 1, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                tray += block
+                said.append(f"{e['name']}: a block {e['len']:g} mm long and {bh:g} mm high"
+                            + (f" with {e['count']} upright holes Ø{e['d']:g} x {deep:g} mm deep" + (f" in {e['rows']} rows" if e["rows"] > 1 else " in a row across the case") if e["count"] else "")
+                            + (f"{' and' if e['count'] else ' with'} a slot {e['slot_l']:g} x {e['slot_w']:g} mm, {slot_deep:g} mm deep, for something lying down" if e["slot_l"] else ""))
+                if e["count"] and deep < e["depth"] - 0.01:
+                    checks.append(f"{e['name']}: the holes are {deep:g} mm deep, not {e['depth']:g}: the tray is only {wall_h:g} mm deep. A taller case gives deeper holes")
+            else:
+                left, rows = e["count"], e["rows"]
+                sizes_ = []
+                for r_ in range(rows):
+                    n_here = min(e["per_row"], left)
+                    left -= n_here
+                    xr = xa + r_ * (e["cell_len"] + RIB)
+                    if r_:
+                        tray += Pos(xr - RIB / 2, 0, fl - 0.01) * Box(RIB, W + 0.02, wall_h, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                    cw = (W - (n_here - 1) * RIB) / n_here
+                    for k in range(1, n_here):
+                        tray += Pos(xr + e["cell_len"] / 2, -W / 2 + k * (cw + RIB) - RIB / 2, fl - 0.01) * Box(e["cell_len"] + 0.02, RIB, wall_h, align=(Align.CENTER, Align.CENTER, Align.MIN))
+                    sizes_.append((n_here, cw))
+                same = len({round(cw, 1) for _, cw in sizes_}) == 1
+                said.append(f"{e['name']}: {e['count']} compartments in {rows} row{'s' if rows > 1 else ''} of {e['per_row']}, each {e['cell_len']:g} x {sizes_[0][1]:.1f} mm"
+                            + ("" if same else f" (the last row has {sizes_[-1][0]}, each {sizes_[-1][1]:.1f} mm wide)") + f" and {wall_h:g} mm deep")
+        spare = L - plan["L"]
+        if spare > 3:
+            tray += Pos(-L / 2 + plan["L"] + RIB / 2, 0, fl - 0.01) * Box(RIB, W + 0.02, wall_h, align=(Align.CENTER, Align.CENTER, Align.MIN))
+            said.append(f"and {spare - RIB:g} mm of open space at the end, since a case is at least 45 mm long")
+        notes.append(f"{len(plan['sections'])} sections side by side along the length, with {RIB:g} mm walls between; they set the inside to {L:g} x {W:g} mm"
+                     + (f" (you asked for {asked[0]:g} x {asked[1]:g})" if abs(asked[0] - L) > 0.5 or abs(asked[1] - W) > 0.5 else "") + ":")
+        notes.extend("  " + t for t in said)
+        if plan["H"] > H0 + 0.01:
+            notes.append(f"the inside height went up to {H:g} mm so the tallest thing fits with the lid shut")
+        if max(L, W) + 2 * w + 20 > 256:
+            checks.append(f"the tray is about {L + 2 * w:.0f} x {W + 2 * w + 16:.0f} mm with its hinges and latches: check it against your printer's bed "
+                          "(256 mm on many; a 300 mm class bed takes more)")
 
     # ----- Or Gridfinity: a baseplate in the floor and standard bins -----
     if gc and gr:
