@@ -795,7 +795,9 @@
     <label class="check"><input type="checkbox" name="cs_ribs" checked> Ribs under the lid over the dividers (keeps small parts in their pockets)</label>
     <p class="hint" style="margin-top:10px"><b>Sections side by side</b>: list what goes in the case and it is laid out for you, one section after another along the length with a wall between. The sections set the case's inside length and width (and the height, if something is taller), so you only type what each thing needs.</p>
     <div class="rows" id="cs_secs"></div>
-    <div class="links"><button type="button" class="add" data-sec="space">+ A space for a thing</button><button type="button" class="add" data-sec="holes">+ A block of holes</button><button type="button" class="add" data-sec="cells">+ Compartments</button></div>
+    <div class="links"><button type="button" class="add" data-sec="space">+ A space for a thing</button><button type="button" class="add" data-sec="holes">+ A block of holes</button><button type="button" class="add" data-sec="cells">+ Compartments</button><button type="button" class="add" data-sec="open">+ Open space (what is left of the row)</button><button type="button" class="add" data-sec="break">+ Start a new row (nearer the latches)</button></div>
+    <label class="f">Walls between sections and compartments<span class="unit" data-unit="mm"><input name="cs_swall" type="number" min="0.8" max="6" step="0.1" value="1.2"></span></label>
+    <p class="hint">The first row runs along the back, by the hinges. Start a new row and what follows sits in front of it, nearer the latches. In a row, things with a set size keep it, compartments take as many columns as the case's length allows, and an open space takes whatever is left.</p>
     <p class="hint" style="margin-top:10px"><b>Lift-out inserts</b> (instead of dividers): loose bins on a grid of cells that fill the tray. They stand the full inside height, so the lid holds them and their contents down.</p>
     <div class="grid">
       <label class="f">Cells along the length (0: none)<input name="cs_ic" type="number" min="0" max="12" step="1" value="0"></label>
@@ -2267,20 +2269,27 @@ function secRow(kind, o = {}) {
   : [
     h("div", { class: "grid head" }, field("Compartments for (their name)", txt("sc_name", o.name, "heat-set inserts")), field("How many", count("sc_count", o.count ?? 6))),
     h("div", { class: "grid" }, field("Each at least: length", L("sc_x", o.x ?? 25.4), UNIT()), field("Width", L("sc_y", o.y ?? 25.4), UNIT()))];
+  if (kind === "break") rows.splice(0, rows.length, h("p", { class: "hint", style: "margin:0" }, h("b", {}, "New row"), ": what follows sits in front, nearer the latches."));
+  if (kind === "open") rows.splice(0, rows.length, h("div", { class: "grid head" }, field("Open space for (its name)", txt("sc_name", o.name, "catch-all"))));
+  if (kind === "space") rows.push(h("div", { class: "grid" }, field("Room round it", L("sc_fit", o.fit ?? 1), UNIT())));
+  if (kind === "holes") rows.push(h("div", { class: "grid" }, field("Section length (0: to suit)", L("sc_len", o.len ?? 0), UNIT()), field("Section depth (0: to suit)", L("sc_dep", o.dep ?? 0), UNIT())));
   const item = h("div", { class: "item", "data-kind": kind },
     h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => item.remove() }, "×"), ...rows);
   return item;
 }
 function secRows() {
   return $$("#cs_secs .item").map(it => {
-    const g = n => it.querySelector(`[name=${n}]`), kind = it.dataset.kind, name = g("sc_name").value.trim();
-    if (kind === "space") return { kind, name, x: len(g("sc_x")), y: len(g("sc_y")), z: len(g("sc_z")), turn: g("sc_turn").value };
-    if (kind === "holes") return { kind, name, count: Math.round(num(g("sc_count").value)), d: len(g("sc_d")), depth: len(g("sc_depth")), slot_l: len(g("sc_sl")), slot_w: len(g("sc_sw")), slot_d: len(g("sc_sd")) };
+    const g = n => it.querySelector(`[name=${n}]`), kind = it.dataset.kind, name = g("sc_name")?.value.trim() || "";
+    if (kind === "break") return { kind };
+    if (kind === "open") return { kind, name };
+    if (kind === "space") return { kind, name, x: len(g("sc_x")), y: len(g("sc_y")), z: len(g("sc_z")), turn: g("sc_turn").value, fit: len(g("sc_fit")) };
+    if (kind === "holes") return { kind, name, count: Math.round(num(g("sc_count").value)), d: len(g("sc_d")), depth: len(g("sc_depth")), slot_l: len(g("sc_sl")), slot_w: len(g("sc_sw")), slot_d: len(g("sc_sd")),
+                                   len: len(g("sc_len")), dep: len(g("sc_dep")) };
     return { kind, name, count: Math.round(num(g("sc_count").value)), x: len(g("sc_x")), y: len(g("sc_y")) };
   });
 }
 function setSecRows(list) {
-  $("#cs_secs").replaceChildren(...(list || []).filter(o => ["space", "holes", "cells"].includes(o?.kind)).map(o => secRow(o.kind, o)));
+  $("#cs_secs").replaceChildren(...(list || []).filter(o => ["space", "holes", "cells", "open", "break"].includes(o?.kind)).map(o => secRow(o.kind, o)));
 }
 for (const b of $$("[data-sec]")) b.onclick = () => { const it = secRow(b.dataset.sec); $("#cs_secs").append(it); it.querySelector("input")?.focus(); };
 // A case can be handed on as a link: everything about it is in the address.
@@ -2309,13 +2318,13 @@ function caseBody() {
     insert_bins: e.cs_ibins.value.trim(), insert_fill: e.cs_ifill.checked, insert_scoop: e.cs_iscoop.checked, insert_label: e.cs_ilabel.checked,
     insert_pockets: e.cs_pk.value.trim(), pocket_depth: len(e.cs_pkd),
     grid_cols: n("cs_gc"), grid_rows: n("cs_gr"), grid_height: n("cs_gh"), grid_bins: e.cs_gbins.value.trim(), grid_fill: e.cs_gfill.checked,
-    sections: secRows().length ? secRows() : null };
+    sections: secRows().length ? secRows() : null, section_wall: len(e.cs_swall) };
 }
 function applyCase(b) {
   const e = shapeform.elements, L = (k, v) => { if (v != null) { e[k].value = show(v); e[k].dataset.mm = String(v); } };
   L("cs_l", b.size?.[0]); L("cs_w", b.size?.[1]); L("cs_h", b.size?.[2]); L("cs_lid", b.lid_depth); L("cs_wall", b.wall); L("cs_floor", b.floor);
   L("cs_r", b.corner_radius); L("cs_iw", b.insert_wall); L("cs_pkd", b.pocket_depth); if (b.insert_pockets != null) e.cs_pk.value = b.insert_pockets;
-  setSecRows(b.sections);
+  setSecRows(b.sections); L("cs_swall", b.section_wall);
   for (const [k, f] of [["cs_hinges", "hinges"], ["cs_latches", "latches"], ["cs_dx", "dividers_x"], ["cs_dy", "dividers_y"], ["cs_ic", "insert_cols"],
                         ["cs_ir", "insert_rows"], ["cs_il", "insert_layers"], ["cs_ibins", "insert_bins"],
                         ["cs_gc", "grid_cols"], ["cs_gr", "grid_rows"], ["cs_gh", "grid_height"], ["cs_gbins", "grid_bins"]]) if (b[f] != null) e[k].value = b[f];
