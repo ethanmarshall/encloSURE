@@ -15,46 +15,60 @@ def _vol(x):
 
 def test_sections_plan_the_case():
     p = case.plan_sections(KIT)
-    assert (round(p["L"], 1), round(p["W"], 1)) == (213.6, 204.2)                 # the box turned across: nearly square, not 370 mm long
+    # Two rows, the box along the back: compact, and longer than deep so the hinges are on a long side.
+    assert (round(p["L"], 1), round(p["W"], 1), p["bands"], p["swap"]) == (204.2, 182.4, 2, False)
     box, holes, cells = p["sections"]
-    assert box["turned"] and box["len"] == pytest.approx(102.6) and holes["per_row"] == 7 and holes["rows"] == 1
-    assert (cells["rows"], cells["per_row"]) == (3, 5) and cells["cell_len"] == I
-    long = case.plan_sections([{**KIT[0], "turn": "as typed"}, *KIT[1:]])
-    assert long["L"] > 330 and long["W"] == pytest.approx(102.6)
+    assert not box["turned"] and box["len"] == pytest.approx(204.2) and box["band"] == 0 and holes["band"] == cells["band"] == 1
+    assert holes["per_row"] == 7 and holes["rows"] == 1 and (cells["rows"], cells["per_row"]) == (5, 3)
     loose = case.plan_sections([{"kind": "cells", "count": 10, "x": 30, "y": 20}])   # nothing fixes the width: most nearly square
-    assert max(loose["L"], loose["W"]) < 100
+    assert max(loose["L"], loose["W"]) < 100 and not loose["swap"]
+    # A layout that comes out deeper than long is turned a quarter turn, so the hinges are never on a short side.
+    for secs in ([{"kind": "holes", "count": 6, "d": 8, "depth": 15, "slot_l": 63.5, "slot_w": 12.7}],
+                 [{"kind": "space", "x": 50, "y": 120, "z": 10, "turn": "as typed"}, {"kind": "cells", "count": 4, "x": 25, "y": 25}]):
+        q = case.plan_sections(secs)
+        m = case.build(case.Case(sections=secs))
+        assert q["swap"] and m["inner"][0] > m["inner"][1] and m["base"].is_valid and len(m["base"].solids()) == 1
+        assert any("hinges are on a long side" in n for n in m["notes"])
 
 
 def test_sections_build_into_the_tray():
     from build123d import Box, Pos
     m = case.build(case.Case(sections=KIT))
     tray, L, W = m["base"], m["inner"][0], m["inner"][1]
-    assert tray.is_valid and len(tray.solids()) == 1 and m["inner"] == [213.6, 204.2, 30.0]
+    assert tray.is_valid and len(tray.solids()) == 1 and m["inner"] == [204.2, 182.4, 30.0]
     said = [n for n in m["notes"] if n.startswith("  ")]
-    assert len(said) == 3 and "7 upright holes Ø8 x 15 mm deep" in said[1] and "15 compartments, 3 along the length by 5 across" in said[2]
+    assert len(said) == 3 and "7 holes Ø8 mm going 15 mm down from its top" in said[1] and "15 compartments, 5 along the length by 3 across" in said[2]
     fl = 2.4
-    # The soldering iron box drops into its space and the lid shuts over it.
-    thing = Pos(-L / 2 + 102.6 / 2, 0, fl + 0.05 + I / 2) * Box(4 * I, 8 * I, I)
+    # The soldering iron box drops into its space along the back and the lid shuts over it.
+    thing = Pos(0, W / 2 - 102.6 / 2, fl + 0.05 + I / 2) * Box(8 * I, 4 * I, I)
     assert _vol(tray & thing) < 1e-3 and _vol(m["lid"] & thing) < 1e-3
-    # The holes block is solid between its holes and open at each hole.
-    assert _vol(tray & Pos(-L / 2 + 103.8 + 7.0, 0, fl + 10) * Box(2, 2, 2)) < 1e-3          # down the middle hole
-    assert _vol(tray & Pos(-L / 2 + 103.8 + 7.0, 9, fl + 5) * Box(2, 2, 2)) == pytest.approx(8.0)   # between two holes
-    plain = case.build(case.Case(size=(213.6, 204.2, 30.0)))
-    assert tray.volume > plain["base"].volume + 30000
+    # The block of holes is solid right up to the top of the tray, with the holes going down into it.
+    hole = next(e for e in case.plan_sections(KIT)["sections"] if e["kind"] == "holes")
+    xc, yc = -L / 2 + hole["x0"], W / 2 - hole["y0"] - hole["dep"] / 2
+    used = hole["pitch"] + 3 + hole["slot_w"]
+    hx = xc + (hole["len"] - used) / 2 + hole["pitch"] / 2
+    assert _vol(tray & Pos(hx, yc, fl + 20) * Box(2, 2, 2)) < 1e-3                       # down the middle hole
+    assert _vol(tray & Pos(hx, yc, fl + 5) * Box(2, 2, 2)) == pytest.approx(8.0)        # solid under it
+    assert _vol(tray & Pos(xc + 1.5, yc + 30, fl + 23) * Box(2, 2, 2)) == pytest.approx(8.0)   # solid near the top, away from the holes
     # A tall thing raises the case.
     tall = case.build(case.Case(sections=[{"kind": "space", "x": 60, "y": 40, "z": 55}]))
     assert tall["inner"][2] == 57.0 and any("height went up" in n for n in tall["notes"])
     small = case.build(case.Case(sections=[{"kind": "holes", "count": 2, "d": 6, "depth": 10}]))
     assert small["inner"][0] == 45.0 and small["base"].is_valid
+    # The first row can go by the latches instead.
+    flipped = case.build(case.Case(sections=KIT, sections_front=True))
+    assert _vol(flipped["base"] & Pos(0, -(W / 2 - 102.6 / 2), fl + 0.05 + I / 2) * Box(8 * I, 4 * I, I)) < 1e-3
 
 
 def test_sections_say_what_is_wrong():
     for bad in ([{"kind": "x"}], [{"kind": "space", "x": 1, "y": 2}], [{"kind": "holes", "count": 0}], [{"kind": "cells", "count": 0}], "x",
-                [{"kind": "holes", "count": 2, "slot_l": 30}], [{"kind": "space", "x": "a", "y": 2}], [KIT[0]] * 9):
+                [{"kind": "holes", "count": 2, "slot_l": 30}], [{"kind": "holes", "count": 2, "slot_w": 30}], [{"kind": "space", "x": "a", "y": 2}], [KIT[0]] * 17):
         with pytest.raises(ValueError):
             case.build(case.Case(sections=bad))
     with pytest.raises(ValueError, match="pick one"):
         case.build(case.Case(sections=KIT, grid_cols=2, grid_rows=2))
+    turned = case.plan_sections([{"kind": "holes", "count": 3, "d": 8, "slot_l": 12, "slot_w": 60}])["sections"][0]
+    assert (turned["slot_l"], turned["slot_w"], turned["slot_d"]) == (60, 12, 12)      # the longer one is the length, whichever box it was typed in
     shallow = case.build(case.Case(sections=[{"kind": "holes", "count": 4, "d": 6, "depth": 60}]))
     assert any("holes are" in c for c in shallow["checks"])
 
@@ -83,7 +97,7 @@ def test_sections_in_rows_to_set_sizes():
     assert probe(4, 3.3) == pytest.approx(1.0)        # the wall between the two rows
     assert probe(0.5, 3.85) < 1e-6 and probe(1.05, 3.85) == pytest.approx(1.0) and probe(0.5, 4.4) == pytest.approx(1.0)   # a compartment and its walls
     assert probe(6.55, 5) == pytest.approx(1.0) and probe(8, 5) < 1e-6                                        # the catch-all, walled off
-    assert any("9.50 x 6.55 in" in n for n in m["notes"])
+    assert any("they set the inside to 241.3 x 166.37 mm" in n for n in m["notes"])
     wide = case.plan_sections([{"kind": "space", "x": 50, "y": 30}, {"kind": "break"}, {"kind": "holes", "count": 3, "d": 8, "len": 80}, {"kind": "space", "x": 40, "y": 20}])
     assert wide["L"] == pytest.approx(80 + 1.2 + 41) and wide["sections"][1]["spare"]          # the longest row sets the length; the short one is left open at its end
     with pytest.raises(ValueError):

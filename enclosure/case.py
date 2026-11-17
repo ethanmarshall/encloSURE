@@ -83,6 +83,7 @@ class Case:
     # The sections set the inside length and width, and the height if something is taller.
     sections: list | None = None
     section_wall: float = RIB  # the walls between sections and compartments
+    sections_front: bool = False   # the first row along the front by the latches, not the back by the hinges
     insert_pockets: str = ""
     pocket_depth: float = 0.0   # 0: as deep as the case allows, up to 15 mm
 
@@ -387,11 +388,19 @@ def plan_sections(sections: list, wall: float = RIB) -> dict:  # noqa: C901
         elif d["kind"] == "holes":
             d["count"], d["d"], d["depth"] = int(_num(d, "count", 1)), _num(d, "d", 8.0), _num(d, "depth", 15.0)
             d["slot_l"], d["slot_w"] = _num(d, "slot_l"), _num(d, "slot_w")
-            d["slot_d"] = _num(d, "slot_d") or d["slot_w"]
             if not (0 <= d["count"] <= 60 and 2 <= d["d"] <= 60 and 3 <= d["depth"] <= 100):
                 raise ValueError(f"section {i + 1} ({d['name']}): up to 60 holes, 2 to 60 mm across, 3 to 100 mm deep")
-            if (d["slot_l"] > 0) != (d["slot_w"] > 0) or d["slot_l"] > 400 or (d["slot_l"] and d["slot_w"] < 2):
-                raise ValueError(f"section {i + 1} ({d['name']}): give the slot a length and a width, or neither")
+            if d["slot_l"] > 0 and d["slot_w"] <= 0:
+                raise ValueError(f"section {i + 1} ({d['name']}): the slot is {d['slot_l']:g} mm long but has no width. Give it a width, or set its length to 0 for no slot")
+            if d["slot_w"] > 0 and d["slot_l"] <= 0:
+                raise ValueError(f"section {i + 1} ({d['name']}): the slot is {d['slot_w']:g} mm wide but has no length. Give it a length, or set its width to 0 for no slot")
+            if d["slot_l"] > 400 or d["slot_w"] > 100:
+                raise ValueError(f"section {i + 1} ({d['name']}): a slot up to 400 mm long and 100 mm wide (yours is {d['slot_l']:g} x {d['slot_w']:g} mm)")
+            if d["slot_l"] and d["slot_w"] < 1:
+                raise ValueError(f"section {i + 1} ({d['name']}): the slot is only {d['slot_w']:g} mm wide ({d['slot_w'] / 25.4:.3f} in); 1 mm at least")
+            if d["slot_l"] and d["slot_w"] > d["slot_l"]:
+                d["slot_l"], d["slot_w"] = d["slot_w"], d["slot_l"]       # the longer of the two is its length
+            d["slot_d"] = _num(d, "slot_d") or d["slot_w"]
             if not d["count"] and not d["slot_l"]:
                 raise ValueError(f"section {i + 1} ({d['name']}): some holes, a slot, or both")
         else:
@@ -453,11 +462,26 @@ def plan_sections(sections: list, wall: float = RIB) -> dict:  # noqa: C901
     if not autos:                                 # nothing fixes the width: try wider cases and keep the most nearly square
         narrow = plans[0]["W"]
         plans += [lay((), narrow + k * 2.0) for k in range(1, 140) if narrow + k * 2.0 <= 300]
-    plan = min(plans, key=lambda q: (max(q["L"], q["W"]), q["L"] * q["W"]))
+    for q in plans:
+        for e in q["sections"]:                   # each takes the full width
+            e["y0"], e["dep"] = 0.0, q["W"]
+        q["wall"] = wall
+    # Or in two rows: the list split at each point, the second row in front of the first.
+    if len(secs) > 1:
+        for k in range(1, len(secs)):
+            for turns in itertools.product(*choices):
+                t = iter(turns)
+                copy = [dict(d, turn=("turned" if next(t) else "as typed")) if d["kind"] == "space" else dict(d) for d in secs]
+                try:
+                    plans.append(_plan_bands(copy[:k] + [{"kind": "break"}] + copy[k:], wall))
+                except ValueError:
+                    continue
+    # The best is the most compact; a case longer than it is deep has its hinges on a long side, and
+    # one that comes out deeper than long is turned a quarter turn so that it does too.
+    for q in plans:
+        q["swap"] = q["W"] > q["L"] + 0.01
+    plan = min(plans, key=lambda q: (max(q["L"], q["W"]), q["L"] * q["W"], q.get("bands", 1), q["swap"]))
     plan["H"] = max([d["z"] + 1.5 for d in secs if d["kind"] == "space"] + [0.0])
-    for e in plan["sections"]:                    # each takes the full width
-        e["y0"], e["dep"] = 0.0, plan["W"]
-    plan["wall"] = wall
     return plan
 
 
@@ -580,7 +604,8 @@ def build(c: Case) -> dict:
             raise ValueError("section walls: 0.8 to 6 mm thick")
         plan = plan_sections(c.sections, float(c.section_wall))
         tall = max(float(c.size[2]), float(math.ceil(plan["H"])))
-        c = replace(c, size=(max(45.0, round(plan["L"], 2)), max(30.0, round(plan["W"], 2)), tall))     # no smaller than the smallest case
+        along, deep_ = (plan["W"], plan["L"]) if plan.get("swap") else (plan["L"], plan["W"])
+        c = replace(c, size=(max(45.0, round(along, 2)), max(30.0, round(deep_, 2)), tall))     # no smaller than the smallest case
     c.check()
     L, W, H = (float(v) for v in c.size)
     w, fl = float(c.wall), float(c.floor)
@@ -740,10 +765,23 @@ def build(c: Case) -> dict:
         said = []
         CM = (Align.CENTER, Align.CENTER, Align.MIN)
 
-        def slab(x_lo, x_hi, y_lo, y_hi, hgt=None):
-            """A wall or block over this patch of floor; x from the left end, y from the back (the hinges)."""
-            return Pos(-L / 2 + (x_lo + x_hi) / 2, W / 2 - (y_lo + y_hi) / 2, fl - 0.01) * Box(x_hi - x_lo + 0.02, y_hi - y_lo + 0.02, hgt or wall_h, align=CM)
+        swap = bool(plan.get("swap"))
+        front = bool(c.sections_front)
+        PL, PD = (W, L) if swap else (L, W)        # the room the plan has: along its rows, and across them
 
+        def pt(px, py):
+            """Where a point of the plan is in the tray. The plan's x runs along a row from the left end,
+            its y from the first row back; turned a quarter turn, rows run front to back instead."""
+            X, Y = (-L / 2 + py, W / 2 - px) if swap else (-L / 2 + px, W / 2 - py)
+            return (X, -Y) if front else (X, Y)
+
+        def slab(x_lo, x_hi, y_lo, y_hi, hgt=None):
+            """A wall or block over this patch of the plan."""
+            X, Y = pt((x_lo + x_hi) / 2, (y_lo + y_hi) / 2)
+            dx, dy = x_hi - x_lo + 0.02, y_hi - y_lo + 0.02
+            return Pos(X, Y, fl - 0.01) * Box(dy if swap else dx, dx if swap else dy, hgt or wall_h, align=CM)
+
+        dims = lambda a, b: f"{b:g} x {a:g}" if swap else f"{a:g} x {b:g}"   # noqa: E731  along the case's length first
         seen_band, last_end = set(), {}
         for e in plan["sections"]:
             xa, xb, ya, yb = e["x0"], e["x0"] + e["len"], e["y0"], e["y0"] + e["dep"]
@@ -751,28 +789,28 @@ def build(c: Case) -> dict:
             if band not in seen_band:
                 seen_band.add(band)
                 if ya > 0.01:                     # the wall between this row and the one behind it
-                    tray += slab(0, L, ya - tw, ya)
+                    tray += slab(0, PL, ya - tw, ya)
             elif xa > 0.01:                       # the wall between this section and the last in its row
-                tray += slab(xa - tw, xa, ya, min(yb, W))
-            yb = min(yb, W)
+                tray += slab(xa - tw, xa, ya, min(yb, PD))
+            yb = min(yb, PD)
             xm = (xa + xb) / 2
             if e["kind"] == "space":
                 if e["dep"] - e["across"] > 3:    # shallower than its row: a wall in front keeps the thing from sliding
                     tray += slab(xa, xb, ya + e["across"], ya + e["across"] + tw)
                 a, b = (e["y"], e["x"]) if e["turned"] else (e["x"], e["y"])
-                said.append(f"{e['name']}: a space {e['len']:g} x {e['across']:g} mm" + (f" for a thing {a:g} x {b:g} mm" if e["fit"] else "")
-                            + (f", {e['z']:g} mm tall" if e["z"] else "") + (" (turned to lie across the case)" if e["turned"] and not plan.get("bands") else ""))
+                said.append(f"{e['name']}: a space {dims(round(e['len'], 2), round(e['across'], 2))} mm" + (f" for a thing {a:g} x {b:g} mm" if e["fit"] else "")
+                            + (f", {e['z']:g} mm tall" if e["z"] else "") + "")
             elif e["kind"] == "open":
                 if e["len"] > 0.5:
-                    said.append(f"{e['name']}: {e['len']:.1f} x {e['dep']:.1f} mm left open" + (" at the end of its row" if e.get("spare") else ""))
+                    said.append(f"{e['name']}: {dims(round(e['len'], 1), round(e['dep'], 1))} mm left open" + (" at the end of its row" if e.get("spare") else ""))
             elif e["kind"] == "holes":
-                bh = min(wall_h, max(e["depth"] if e["count"] else 0.0, e["slot_d"] if e["slot_l"] else 0.0) + 2.0)
+                bh = wall_h                       # the block fills its section to the top of the tray; the holes go down from its top
                 block = slab(xa, xb, ya, yb, bh)
                 top_z = fl - 0.01 + bh
-                yc = W / 2 - (ya + yb) / 2
+                yc = (ya + yb) / 2
                 deep = min(e["depth"], bh - 1.0)
                 used = (e["rows"] * e["pitch"] if e["count"] else 0.0) + (e["slot_w"] + (3.0 if e["count"] else 0.0) if e["slot_l"] else 0.0)
-                x_at = -L / 2 + xa + max(1.0, (e["len"] - used) / 2)          # the holes and the slot sit in the middle of the block
+                x_at = xa + max(1.0, (e["len"] - used) / 2)                   # the holes and the slot sit in the middle of the block
                 if e["count"]:
                     left = e["count"]
                     for r_ in range(e["rows"]):
@@ -780,17 +818,19 @@ def build(c: Case) -> dict:
                         left -= n_here
                         step = min(e["pitch"] * 1.6, (e["dep"] - 4.0) / max(1, n_here))
                         for k in range(n_here):
-                            y = yc + ((k - (n_here - 1) / 2) * step if n_here > 1 else 0.0)
-                            block -= Pos(x_at + e["pitch"] / 2 + r_ * e["pitch"], y, top_z - deep) * Cylinder(e["d"] / 2, deep + 1, align=CM)
+                            X, Y = pt(x_at + e["pitch"] / 2 + r_ * e["pitch"], yc + ((k - (n_here - 1) / 2) * step if n_here > 1 else 0.0))
+                            block -= Pos(X, Y, top_z - deep) * Cylinder(e["d"] / 2, deep + 1, align=CM)
                     x_at += e["rows"] * e["pitch"] + 3.0
                 slot_deep = 0.0
                 if e["slot_l"]:
                     slot_deep = min(e["slot_d"], bh - 1.0)
-                    block -= Pos(x_at + e["slot_w"] / 2 - (1.5 if e["count"] else 0.0), yc, top_z - slot_deep) * Box(e["slot_w"], min(e["slot_l"], e["dep"] - 3.0), slot_deep + 1, align=CM)
+                    X, Y = pt(x_at + e["slot_w"] / 2 - (1.5 if e["count"] else 0.0), yc)
+                    sw_, sl_ = e["slot_w"], min(e["slot_l"], e["dep"] - 3.0)
+                    block -= Pos(X, Y, top_z - slot_deep) * Box(sl_ if swap else sw_, sw_ if swap else sl_, slot_deep + 1, align=CM)
                 tray += block
-                said.append(f"{e['name']}: a block {e['len']:g} x {e['dep']:g} mm and {bh:g} mm high"
-                            + (f" with {e['count']} upright holes Ø{e['d']:g} x {deep:g} mm deep" + (f" in {e['rows']} rows" if e["rows"] > 1 else " in a row") if e["count"] else "")
-                            + (f"{' and' if e['count'] else ' with'} a slot {min(e['slot_l'], e['dep'] - 3.0):g} x {e['slot_w']:g} mm, {slot_deep:g} mm deep, for something lying down" if e["slot_l"] else ""))
+                said.append(f"{e['name']}: a solid block {dims(round(e['len'], 2), round(e['dep'], 2))} mm, level with the top of the tray ({bh:g} mm)"
+                            + (f", with {e['count']} holes Ø{e['d']:g} mm going {deep:g} mm down from its top" + (f" in {e['rows']} rows" if e["rows"] > 1 else " in a row") if e["count"] else "")
+                            + (f"{' and' if e['count'] else ', with'} a slot {min(e['slot_l'], e['dep'] - 3.0):g} x {e['slot_w']:g} mm cut {slot_deep:g} mm down into its top, for something lying down" if e["slot_l"] else ""))
                 if e["count"] and deep < e["depth"] - 0.01:
                     checks.append(f"{e['name']}: the holes are {deep:g} mm deep, not {e['depth']:g}: the tray is only {wall_h:g} mm deep. A taller case gives deeper holes")
             else:
@@ -809,17 +849,23 @@ def build(c: Case) -> dict:
                         tray += slab(xr, xr + e["cell_len"], yk - tw, yk)
                     sizes_.append((n_here, cw))
                 same = len({round(cw, 1) for _, cw in sizes_}) == 1
-                said.append(f"{e['name']}: {e['count']} compartments, {cols} along the length by {e['per_row']} across, each {e['cell_len']:.1f} x {sizes_[0][1]:.1f} mm"
+                a_, b_ = (e["per_row"], cols) if swap else (cols, e["per_row"])
+                said.append(f"{e['name']}: {e['count']} compartments, {a_} along the length by {b_} across, each {dims(round(e['cell_len'], 1), round(sizes_[0][1], 1))} mm"
                             + ("" if same else f" (the last column has {sizes_[-1][0]}, each {sizes_[-1][1]:.1f} mm)") + f" and {wall_h:g} mm deep")
             last_end[band] = xb
-        spare = L - plan["L"]
+        spare = PL - plan["L"]
         if spare > 3:
-            tray += slab(plan["L"], plan["L"] + tw, 0, W)
+            tray += slab(plan["L"], plan["L"] + tw, 0, PD)
             said.append(f"and {spare - tw:g} mm of open space at the end, since a case is at least 45 mm long")
-        rows_say = f" in {plan['bands']} rows, the first along the back by the hinges and the last by the latches" if plan.get("bands", 1) > 1 else " side by side along the length"
-        notes.append(f"{len([e for e in plan['sections'] if e['kind'] != 'open' or e['len'] > 0.5])} sections{rows_say}, with {tw:g} mm walls between; "
-                     f"they set the inside to {L:g} x {W:g} mm ({L / 25.4:.2f} x {W / 25.4:.2f} in)"
-                     + (f" (you asked for {asked[0]:g} x {asked[1]:g})" if abs(asked[0] - L) > 0.5 or abs(asked[1] - W) > 0.5 else "") + ":")
+        first, last = ("front by the latches", "hinges") if front else ("back by the hinges", "latches")
+        if swap:
+            rows_say = (f" in {plan['bands']} rows running front to back" if plan.get("bands", 1) > 1 else " one behind the other, front to back") \
+                + ", the first at the " + ("front" if front else "back") + ": laid out that way so the hinges are on a long side"
+        else:
+            rows_say = f" in {plan['bands']} rows, the first along the {first} and the last by the {last}" if plan.get("bands", 1) > 1 else " side by side along the length"
+        n_sec = len([e for e in plan["sections"] if e["kind"] != "open" or e["len"] > 0.5])
+        notes.append(f"{n_sec} section{'s' if n_sec != 1 else ''}{rows_say}, with {tw:g} mm walls between; "
+                     f"they set the inside to {L:g} x {W:g} mm:")
         notes.extend("  " + t for t in said)
         if plan["H"] > H0 + 0.01:
             notes.append(f"the inside height went up to {H:g} mm so the tallest thing fits with the lid shut")
