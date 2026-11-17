@@ -140,3 +140,30 @@ def test_lid_ribs_over_the_compartments():
     assert _vol(lid & Pos(-L / 2 + 12, y_mid, z) * Box(1, 1, 1)) < 1e-6
     assert _vol(lid & Pos(0, W / 2 - 40, z) * Box(1, 1, 1)) < 1e-6
     assert cells["rows"] == 8 and cells["per_row"] == 3 and m["inner"][2] == 38.1
+
+
+def test_finger_notch_and_the_printed_kit_case():
+    """The case as printed and corrected: the iron box along the back, tips and 18 compartments in front."""
+    from build123d import Box, Pos
+    secs = [{"kind": "space", "name": "soldering iron box", "x": 203.2, "y": 101.6, "z": I, "fit": 1, "turn": "as typed", "notch": 22},
+            {"kind": "break"},
+            {"kind": "holes", "name": "tips", "ds": [8, 8, 8, 8, 8, 8, 10], "depth": 15, "slot_l": 35.2, "slot_w": 7.4, "slot_d": 6.4},
+            {"kind": "cells", "name": "inserts", "count": 18, "x": I, "y": I}]
+    kw = dict(size=(204.2, 182.4, 38.1), sections=secs)
+    m = case.build(case.Case(**kw))
+    plain = case.build(case.Case(**{**kw, "sections": [dict(secs[0], notch=0)] + secs[1:]}))
+    tray, (L, W, H) = m["base"], m["inner"]
+    assert tray.is_valid and len(tray.solids()) == 1 and (L, W) == (204.2, 182.4)
+    p = case.plan_sections(secs)
+    cells = p["sections"][2]
+    assert (cells["rows"], cells["per_row"]) == (6, 3) and p["sections"][1]["x0"] == 0.0     # the tips are at the left of the front row
+    # The notch is in the wall between the box and the third compartment, centred on that compartment.
+    assert 300 < plain["base"].volume - tray.volume < 700 and any("finger notch 22 mm wide" in n and "compartment 3" in n for n in m["notes"])
+    xc = -L / 2 + cells["x0"] + 2 * (cells["cell_len"] + 1.2) + cells["cell_len"] / 2
+    y_wall = W / 2 - 102.6 - 0.6
+    assert _vol(tray & Pos(xc, y_wall, 2.4 + 30) * Box(4, 0.6, 2)) < 1e-6                     # cut away near the top
+    assert _vol(tray & Pos(xc, y_wall, 2.4 + 5) * Box(4, 0.6, 2)) == pytest.approx(4.8)       # still there lower down
+    assert _vol(tray & Pos(xc + 30, y_wall, 2.4 + 30) * Box(4, 0.6, 2)) == pytest.approx(4.8)  # and beside it
+    # Holes of mixed sizes keep the same plastic between each pair.
+    last = case.build(case.Case(sections=[{"kind": "space", "x": 60, "y": 40, "notch": 20}]))
+    assert any("no finger notch" in c for c in last["checks"])

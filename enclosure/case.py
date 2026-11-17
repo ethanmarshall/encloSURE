@@ -383,6 +383,9 @@ def plan_sections(sections: list, wall: float = RIB) -> dict:  # noqa: C901
             d["x"], d["y"], d["z"], d["fit"] = _num(d, "x"), _num(d, "y"), _num(d, "z"), _num(d, "fit", 1.0)
             if not (5 <= d["x"] <= 400 and 5 <= d["y"] <= 400 and 0 <= d["z"] <= 200 and 0 <= d["fit"] <= 10):
                 raise ValueError(f"section {i + 1} ({d['name']}): a thing 5 to 400 mm long and wide, up to 200 mm tall")
+            d["notch"], d["notch_depth"] = _num(d, "notch"), _num(d, "notch_depth")
+            if not (0 <= d["notch"] <= 80 and 0 <= d["notch_depth"] <= 150):
+                raise ValueError(f"section {i + 1} ({d['name']}): a finger notch up to 80 mm wide")
             if d.get("turn") not in (None, "", "auto", "as typed", "turned"):
                 raise ValueError(f"section {i + 1}: turn is auto, as typed or turned")
         elif d["kind"] == "holes":
@@ -584,7 +587,8 @@ def _plan_bands(secs: list, wall: float) -> dict:
                 room_rows = max(1, int((e["len"] - (d["slot_w"] + 4.0 if d["slot_l"] else 0.0) - 2.0) // pitch)) if d["count"] else 0
                 if d["count"] and -(-d["count"] // per_row) > room_rows:
                     per_row = -(-d["count"] // room_rows)
-                    if (D - 4.0) / per_row < d["d"] + 1.2:
+                    widest_row = max(sum((d.get("ds") or [d["d"]] * d["count"])[k:k + per_row]) for k in range(0, d["count"], per_row))
+                    if widest_row + 1.2 * per_row > D - 4.0:
                         raise ValueError(f"{d['name']}: {d['count']} holes of {d['d']:g} mm don't fit a section {e['len']:g} x {D:g} mm")
                 rows = -(-d["count"] // per_row) if d["count"] else 0
                 e.update(pitch=pitch, per_row=min(per_row, d["count"]), rows=rows)
@@ -797,6 +801,7 @@ def build(c: Case) -> dict:
             return Pos(X, Y, fl - 0.01) * Box(dy if swap else dx, dx if swap else dy, hgt or wall_h, align=CM)
 
         dims = lambda a, b: f"{b:g} x {a:g}" if swap else f"{a:g} x {b:g}"   # noqa: E731  along the case's length first
+        notches = []
         ribbed = bool(c.lid_ribs) and rib_h >= 1
         lid_ribs_over = []
 
@@ -821,6 +826,8 @@ def build(c: Case) -> dict:
             if e["kind"] == "space":
                 if e["dep"] - e["across"] > 3:    # shallower than its row: a wall in front keeps the thing from sliding
                     tray += slab(xa, xb, ya + e["across"], ya + e["across"] + tw)
+                if e.get("notch"):
+                    notches.append(e)
                 a, b = (e["y"], e["x"]) if e["turned"] else (e["x"], e["y"])
                 said.append(f"{e['name']}: a space {dims(round(e['len'], 2), round(e['across'], 2))} mm" + (f" for a thing {a:g} x {b:g} mm" if e["fit"] else "")
                             + (f", {e['z']:g} mm tall" if e["z"] else "") + "")
@@ -840,11 +847,13 @@ def build(c: Case) -> dict:
                     for r_ in range(e["rows"]):
                         n_here = min(e["per_row"], left)
                         left -= n_here
-                        step = min(e["pitch"] * 1.6, (e["dep"] - 4.0) / max(1, n_here))
-                        for k in range(n_here):
-                            X, Y = pt(x_at + e["pitch"] / 2 + r_ * e["pitch"], yc + ((k - (n_here - 1) / 2) * step if n_here > 1 else 0.0))
-                            dia = e["ds"][hole_no] if e.get("ds") else e["d"]
-                            hole_no += 1
+                        dias = [(e["ds"][hole_no + k] if e.get("ds") else e["d"]) for k in range(n_here)]
+                        hole_no += n_here
+                        gap = min(e["pitch"] * 1.6 - e["d"], (e["dep"] - 4.0 - sum(dias)) / n_here)      # the same plastic between each pair, whatever their sizes
+                        y_at = yc - (sum(dias) + gap * (n_here - 1)) / 2
+                        for dia in dias:
+                            X, Y = pt(x_at + e["pitch"] / 2 + r_ * e["pitch"], y_at + dia / 2)
+                            y_at += dia + gap
                             block -= Pos(X, Y, top_z - deep) * Cylinder(dia / 2, deep + 1, align=CM)
                     x_at += e["rows"] * e["pitch"] + 3.0
                 slot_deep = 0.0
@@ -893,6 +902,28 @@ def build(c: Case) -> dict:
                 said.append(f"{e['name']}: {e['count']} compartments, {a_} along the length by {b_} across, each {dims(round(e['cell_len'], 1), round(sizes_[0][1], 1))} mm"
                             + ("" if same else f" (the last column has {sizes_[-1][0]}, each {sizes_[-1][1]:.1f} mm)") + f" and {wall_h:g} mm deep")
             last_end[band] = xb
+        # Finger notches: the wall in front of a thing cut down for some of its length, so a finger in the
+        # compartment in front can get under the thing's edge or its lid.
+        for e in notches:
+            y_wall = e["y0"] + (e["across"] if e["dep"] - e["across"] > 3 else e["dep"])
+            if y_wall > PD - 0.5:
+                checks.append(f"{e['name']}: no finger notch, since the wall in front of it is the case's own wall")
+                continue
+            xc, wide = e["x0"] + e["len"] / 2, e["notch"]
+            ahead = [q for q in plan["sections"] if q["kind"] == "cells" and abs(q["y0"] - (y_wall + tw)) < 0.5 and q["x0"] - 0.01 <= xc <= q["x0"] + q["len"] + 0.01]
+            where = "the wall in front of it"
+            if ahead:                             # centred on the compartment in front, and no wider than it
+                q = ahead[0]
+                col = min(q["rows"] - 1, max(0, int((xc - q["x0"]) // (q["cell_len"] + tw))))
+                xc = q["x0"] + col * (q["cell_len"] + tw) + q["cell_len"] / 2
+                wide = min(wide, q["cell_len"])
+                where = f"the wall between it and compartment {col + 1} of the {q['name']}, counting from the left"
+            down = e["notch_depth"] or (wall_h - e["z"] / 2 if e["z"] else 15.0)
+            down = max(3.0, min(down, wall_h - 2.0))
+            X, Y = pt(xc, y_wall + tw / 2)
+            dx, dy = wide, tw + 0.4
+            tray -= Pos(X, Y, div_top - down) * Box(dy if swap else dx, dx if swap else dy, down + 1.0, align=CM)
+            said.append(f"a finger notch {wide:g} mm wide, cut {down:g} mm down into {where}: reach in there to lift the {e['name']} or open its lid")
         spare = PL - plan["L"]
         if spare > 3:
             tray += slab(plan["L"], plan["L"] + tw, 0, PD)
