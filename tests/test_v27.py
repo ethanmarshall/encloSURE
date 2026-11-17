@@ -119,3 +119,24 @@ def test_holes_of_different_sizes():
     for bad in ({"ds": [1]}, {"ds": "a,b"}, {"ds": [5] * 61}):
         with pytest.raises(ValueError):
             case.plan_sections([{"kind": "holes", **bad}])
+
+
+def test_lid_ribs_over_the_compartments():
+    from build123d import Box, Pos
+    secs = [{"kind": "space", "name": "irons", "x": 205.74, "y": 82.55, "z": 0, "fit": 0, "turn": "as typed"},
+            {"kind": "holes", "name": "tips", "ds": [8, 8, 8, 8, 8, 8, 10], "depth": 15, "slot_l": 27, "slot_w": 8, "slot_d": 7, "len": 33.02, "dep": 82.55},
+            {"kind": "break"}, {"kind": "cells", "name": "inserts", "count": 24, "x": I, "y": I}]
+    kw = dict(size=(241.3, 166.37, 38.1), sections=secs, section_wall=2.54)
+    m, bare = case.build(case.Case(**kw)), case.build(case.Case(**kw, lid_ribs=False))
+    lid, (L, W, H) = m["lid"], m["inner"]
+    assert lid.is_valid and len(lid.solids()) == 1 and _vol(lid & m["base"]) < 1e-3
+    assert lid.volume - bare["lid"].volume > 5000 and any("ribs 3.3 mm deep under the lid" in n for n in m["notes"])
+    assert not any("ribs" in n and "under the lid" in n for n in bare["notes"])
+    # Over a compartment wall the lid comes down to 0.3 mm above it; over a compartment, and over the irons, it doesn't.
+    cells = next(e for e in case.plan_sections(secs, 2.54)["sections"] if e["kind"] == "cells")
+    z = 2.4 + H - 2.0                                   # 2 mm under the lid's inside face
+    x_wall, y_mid = -L / 2 + cells["cell_len"] + 1.27, W / 2 - cells["y0"] - 12.7
+    assert _vol(lid & Pos(x_wall, y_mid, z) * Box(1, 1, 1)) == pytest.approx(1.0)
+    assert _vol(lid & Pos(-L / 2 + 12, y_mid, z) * Box(1, 1, 1)) < 1e-6
+    assert _vol(lid & Pos(0, W / 2 - 40, z) * Box(1, 1, 1)) < 1e-6
+    assert cells["rows"] == 8 and cells["per_row"] == 3 and m["inner"][2] == 38.1

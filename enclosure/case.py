@@ -797,6 +797,15 @@ def build(c: Case) -> dict:
             return Pos(X, Y, fl - 0.01) * Box(dy if swap else dx, dx if swap else dy, hgt or wall_h, align=CM)
 
         dims = lambda a, b: f"{b:g} x {a:g}" if swap else f"{a:g} x {b:g}"   # noqa: E731  along the case's length first
+        ribbed = bool(c.lid_ribs) and rib_h >= 1
+        lid_ribs_over = []
+
+        def rib(x_lo, x_hi, y_lo, y_hi):
+            """A rib under the lid over this patch of the plan: it meets the wall below when the lid is shut."""
+            X, Y = pt((x_lo + x_hi) / 2, (y_lo + y_hi) / 2)
+            dx, dy = x_hi - x_lo + 0.02, y_hi - y_lo + 0.02
+            return Pos(X, Y, top - fl - rib_h) * Box(dy if swap else dx, dx if swap else dy, rib_h + 0.01, align=CM)
+
         seen_band, last_end = set(), {}
         for e in plan["sections"]:
             xa, xb, ya, yb = e["x0"], e["x0"] + e["len"], e["y0"], e["y0"] + e["dep"]
@@ -860,11 +869,25 @@ def build(c: Case) -> dict:
                     xr = xa + r_ * (e["cell_len"] + tw)
                     if r_:
                         tray += slab(xr - tw, xr, ya, yb)
+                        if ribbed:
+                            lid += rib(xr - tw, xr, ya, yb)
                     cw = (e["dep"] - (n_here - 1) * tw) / n_here
                     for k in range(1, n_here):
                         yk = ya + k * (cw + tw)
                         tray += slab(xr, xr + e["cell_len"], yk - tw, yk)
+                        if ribbed:
+                            lid += rib(xr, xr + e["cell_len"], yk - tw, yk)
                     sizes_.append((n_here, cw))
+                if ribbed:                        # and over the walls round the compartments, where they are not the case's own
+                    if ya > 0.01:
+                        lid += rib(max(0.0, xa - tw), min(PL, xb + tw), ya - tw, ya)
+                    if yb < PD - 0.01:
+                        lid += rib(max(0.0, xa - tw), min(PL, xb + tw), yb, yb + tw)
+                    if xa > 0.01:
+                        lid += rib(xa - tw, xa, ya, yb)
+                    if xb < PL - 0.01:
+                        lid += rib(xb, xb + tw, ya, yb)
+                    lid_ribs_over.append(e["name"])
                 same = len({round(cw, 1) for _, cw in sizes_}) == 1
                 a_, b_ = (e["per_row"], cols) if swap else (cols, e["per_row"])
                 said.append(f"{e['name']}: {e['count']} compartments, {a_} along the length by {b_} across, each {dims(round(e['cell_len'], 1), round(sizes_[0][1], 1))} mm"
@@ -884,6 +907,9 @@ def build(c: Case) -> dict:
         notes.append(f"{n_sec} section{'s' if n_sec != 1 else ''}{rows_say}, with {tw:g} mm walls between; "
                      f"they set the inside to {L:g} x {W:g} mm:")
         notes.extend("  " + t for t in said)
+        if lid_ribs_over:
+            notes.append(f"ribs {rib_h:.1f} mm deep under the lid sit over every wall of the compartments ({', '.join(lid_ribs_over)}), "
+                         "so small parts stay in their own compartment with the lid shut, even upside down")
         if plan["H"] > H0 + 0.01:
             notes.append(f"the inside height went up to {H:g} mm so the tallest thing fits with the lid shut")
         if max(L, W) + 2 * w + 20 > 256:
