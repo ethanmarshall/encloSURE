@@ -102,3 +102,20 @@ def test_sections_in_rows_to_set_sizes():
     assert wide["L"] == pytest.approx(80 + 1.2 + 41) and wide["sections"][1]["spare"]          # the longest row sets the length; the short one is left open at its end
     with pytest.raises(ValueError):
         case.build(case.Case(sections=secs, section_wall=0.2))
+
+
+def test_holes_of_different_sizes():
+    from build123d import GeomType
+    secs = [{"kind": "holes", "name": "tips", "ds": [8, 8, 6.5, 5, 5, 4, 10], "depth": 15, "slot_l": 26, "slot_w": 12, "len": 33.02, "dep": 82.55}]
+    e = case.plan_sections(secs)["sections"][0]
+    assert e["count"] == 7 and e["d"] == 10 and e["ds"] == [8, 8, 6.5, 5, 5, 4, 10]
+    m = case.build(case.Case(sections=secs))
+    assert m["base"].is_valid and any("7 holes of Ø8 mm, Ø8 mm, Ø6.5 mm, Ø5 mm, Ø5 mm, Ø4 mm, Ø10 mm" in n and "a slot 26 x 12 mm" in n for n in m["notes"])
+    radii = sorted({round(f.radius, 2) for f in m["base"].faces() if f.geom_type == GeomType.CYLINDER and f.radius in (2.0, 2.5, 3.25, 4.0, 5.0)})
+    assert radii == [2.0, 2.5, 3.25, 4.0, 5.0]
+    assert case.plan_sections([{"kind": "holes", "ds": "8, 1/4, 5mm"}])["sections"][0]["ds"] == [8.0, 6.35, 5.0]
+    same = case.plan_sections([{"kind": "holes", "count": 3, "d": 6}])["sections"][0]
+    assert same["ds"] is None and same["count"] == 3
+    for bad in ({"ds": [1]}, {"ds": "a,b"}, {"ds": [5] * 61}):
+        with pytest.raises(ValueError):
+            case.plan_sections([{"kind": "holes", **bad}])

@@ -387,6 +387,21 @@ def plan_sections(sections: list, wall: float = RIB) -> dict:  # noqa: C901
                 raise ValueError(f"section {i + 1}: turn is auto, as typed or turned")
         elif d["kind"] == "holes":
             d["count"], d["d"], d["depth"] = int(_num(d, "count", 1)), _num(d, "d", 8.0), _num(d, "depth", 15.0)
+            # Holes of different sizes: a list of diameters, one a hole, in the order they stand. It sets the count.
+            ds = d.get("ds")
+            if isinstance(ds, str):
+                from . import sizes as _sz
+                ds = [mm for mm, _ in _sz.parse_list(ds, f"section {i + 1} hole sizes")]
+            if ds:
+                try:
+                    ds = [float(v) for v in ds]
+                except (TypeError, ValueError):
+                    raise ValueError(f"section {i + 1} ({d['name']}): hole sizes are numbers with commas between") from None
+                if len(ds) > 60 or not all(2 <= v <= 60 for v in ds):
+                    raise ValueError(f"section {i + 1} ({d['name']}): up to 60 holes, each 2 to 60 mm across")
+                d["ds"], d["count"], d["d"] = ds, len(ds), max(ds)
+            else:
+                d["ds"] = None
             d["slot_l"], d["slot_w"] = _num(d, "slot_l"), _num(d, "slot_w")
             if not (0 <= d["count"] <= 60 and 2 <= d["d"] <= 60 and 3 <= d["depth"] <= 100):
                 raise ValueError(f"section {i + 1} ({d['name']}): up to 60 holes, 2 to 60 mm across, 3 to 100 mm deep")
@@ -812,14 +827,16 @@ def build(c: Case) -> dict:
                 used = (e["rows"] * e["pitch"] if e["count"] else 0.0) + (e["slot_w"] + (3.0 if e["count"] else 0.0) if e["slot_l"] else 0.0)
                 x_at = xa + max(1.0, (e["len"] - used) / 2)                   # the holes and the slot sit in the middle of the block
                 if e["count"]:
-                    left = e["count"]
+                    left, hole_no = e["count"], 0
                     for r_ in range(e["rows"]):
                         n_here = min(e["per_row"], left)
                         left -= n_here
                         step = min(e["pitch"] * 1.6, (e["dep"] - 4.0) / max(1, n_here))
                         for k in range(n_here):
                             X, Y = pt(x_at + e["pitch"] / 2 + r_ * e["pitch"], yc + ((k - (n_here - 1) / 2) * step if n_here > 1 else 0.0))
-                            block -= Pos(X, Y, top_z - deep) * Cylinder(e["d"] / 2, deep + 1, align=CM)
+                            dia = e["ds"][hole_no] if e.get("ds") else e["d"]
+                            hole_no += 1
+                            block -= Pos(X, Y, top_z - deep) * Cylinder(dia / 2, deep + 1, align=CM)
                     x_at += e["rows"] * e["pitch"] + 3.0
                 slot_deep = 0.0
                 if e["slot_l"]:
@@ -829,7 +846,7 @@ def build(c: Case) -> dict:
                     block -= Pos(X, Y, top_z - slot_deep) * Box(sl_ if swap else sw_, sw_ if swap else sl_, slot_deep + 1, align=CM)
                 tray += block
                 said.append(f"{e['name']}: a solid block {dims(round(e['len'], 2), round(e['dep'], 2))} mm, level with the top of the tray ({bh:g} mm)"
-                            + (f", with {e['count']} holes Ø{e['d']:g} mm going {deep:g} mm down from its top" + (f" in {e['rows']} rows" if e["rows"] > 1 else " in a row") if e["count"] else "")
+                            + (f", with {e['count']} holes " + ("of " + ", ".join(f"Ø{v:g} mm" for v in e["ds"]) if e.get("ds") and len(set(e["ds"])) > 1 else f"Ø{e['d']:g} mm") + f" going {deep:g} mm down from its top" + (f" in {e['rows']} rows" if e["rows"] > 1 else " in a row") if e["count"] else "")
                             + (f"{' and' if e['count'] else ', with'} a slot {min(e['slot_l'], e['dep'] - 3.0):g} x {e['slot_w']:g} mm cut {slot_deep:g} mm down into its top, for something lying down" if e["slot_l"] else ""))
                 if e["count"] and deep < e["depth"] - 0.01:
                     checks.append(f"{e['name']}: the holes are {deep:g} mm deep, not {e['depth']:g}: the tray is only {wall_h:g} mm deep. A taller case gives deeper holes")
