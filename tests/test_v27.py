@@ -158,11 +158,17 @@ def test_finger_notch_and_the_printed_kit_case():
     cells = p["sections"][2]
     assert (cells["rows"], cells["per_row"]) == (6, 3) and p["sections"][1]["x0"] == 0.0     # the tips are at the left of the front row
     # The notch is in the wall between the box and the third compartment, centred on that compartment.
-    assert 300 < plain["base"].volume - tray.volume < 700 and any("finger notch 22 mm wide" in n and "compartment 3" in n for n in m["notes"])
+    assert 250 < plain["base"].volume - tray.volume < 400 and any("finger notch 22 mm wide, cut 12 mm down" in n and "compartment 3" in n for n in m["notes"])
     xc = -L / 2 + cells["x0"] + 2 * (cells["cell_len"] + 1.2) + cells["cell_len"] / 2
     y_wall = W / 2 - 102.6 - 0.6
     assert _vol(tray & Pos(xc, y_wall, 2.4 + 30) * Box(4, 0.6, 2)) < 1e-6                     # cut away near the top
-    assert _vol(tray & Pos(xc, y_wall, 2.4 + 5) * Box(4, 0.6, 2)) == pytest.approx(4.8)       # still there lower down
+    assert _vol(tray & Pos(xc, y_wall, 2.4 + 15) * Box(4, 0.6, 2)) == pytest.approx(4.8)      # still there lower down
+    # Its depth is yours to set, and its corners can be rounded: less comes out, and nothing sharp is left.
+    soft = case.build(case.Case(**{**kw, "sections": [dict(secs[0], notch_depth=10, notch_round=4)] + secs[1:]}))
+    assert soft["base"].is_valid and len(soft["base"].solids()) == 1 and any("cut 10 mm down" in n and "corners rounded 4 mm" in n for n in soft["notes"])
+    square = case.build(case.Case(**{**kw, "sections": [dict(secs[0], notch_depth=10)] + secs[1:]}))
+    assert 0 < soft["base"].volume - square["base"].volume < 150
+    assert _vol(soft["base"] & Pos(xc, y_wall, 2.4 + 34 - 5) * Box(4, 0.6, 2)) < 1e-6 and _vol(soft["base"] & Pos(xc, y_wall, 2.4 + 34 - 12) * Box(4, 0.6, 2)) == pytest.approx(4.8)
     assert _vol(tray & Pos(xc + 30, y_wall, 2.4 + 30) * Box(4, 0.6, 2)) == pytest.approx(4.8)  # and beside it
     # Holes of mixed sizes keep the same plastic between each pair.
     last = case.build(case.Case(sections=[{"kind": "space", "x": 60, "y": 40, "notch": 20}]))

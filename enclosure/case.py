@@ -20,7 +20,7 @@ import math
 from dataclasses import dataclass
 from pathlib import Path
 
-from build123d import Align, Box, Cylinder, Polygon, Plane, Pos, Rot, RectangleRounded, Sphere, chamfer, extrude, Axis
+from build123d import Align, Box, Cylinder, Polygon, Plane, Pos, Rot, RectangleRounded, Sphere, chamfer, extrude, fillet, Axis
 
 LIP_H = 2.4        # the lip stands this far above the shoulder
 LIP_GAP = 0.25     # between the lip and the lid's rebate, each side
@@ -383,9 +383,9 @@ def plan_sections(sections: list, wall: float = RIB) -> dict:  # noqa: C901
             d["x"], d["y"], d["z"], d["fit"] = _num(d, "x"), _num(d, "y"), _num(d, "z"), _num(d, "fit", 1.0)
             if not (5 <= d["x"] <= 400 and 5 <= d["y"] <= 400 and 0 <= d["z"] <= 200 and 0 <= d["fit"] <= 10):
                 raise ValueError(f"section {i + 1} ({d['name']}): a thing 5 to 400 mm long and wide, up to 200 mm tall")
-            d["notch"], d["notch_depth"] = _num(d, "notch"), _num(d, "notch_depth")
-            if not (0 <= d["notch"] <= 80 and 0 <= d["notch_depth"] <= 150):
-                raise ValueError(f"section {i + 1} ({d['name']}): a finger notch up to 80 mm wide")
+            d["notch"], d["notch_depth"], d["notch_round"] = _num(d, "notch"), _num(d, "notch_depth"), _num(d, "notch_round")
+            if not (0 <= d["notch"] <= 80 and 0 <= d["notch_depth"] <= 150 and 0 <= d["notch_round"] <= 40):
+                raise ValueError(f"section {i + 1} ({d['name']}): a finger notch up to 80 mm wide and 150 mm deep, its corners rounded up to 40 mm")
             if d.get("turn") not in (None, "", "auto", "as typed", "turned"):
                 raise ValueError(f"section {i + 1}: turn is auto, as typed or turned")
         elif d["kind"] == "holes":
@@ -918,12 +918,24 @@ def build(c: Case) -> dict:
                 xc = q["x0"] + col * (q["cell_len"] + tw) + q["cell_len"] / 2
                 wide = min(wide, q["cell_len"])
                 where = f"the wall between it and compartment {col + 1} of the {q['name']}, counting from the left"
-            down = e["notch_depth"] or (wall_h - e["z"] / 2 if e["z"] else 15.0)
-            down = max(3.0, min(down, wall_h - 2.0))
+            down = e["notch_depth"] or 12.0
+            down = max(2.0, min(down, wall_h - 2.0))
+            rr = min(e["notch_round"], wide / 4, down - 0.5)
+            inner = wide - 2 * rr if rr >= 0.5 else wide       # the width typed is the opening at the top
+            # Drawn looking at the wall, then pushed through it: square, or with its two bottom corners
+            # rounded and its top corners eased over, so there is no sharp edge to catch a finger.
+            cut = Box(inner, tw + 0.4, down + 1.0, align=CM)
+            if rr >= 0.5:
+                low = [ed for ed in cut.edges().filter_by(Axis.Y) if ed.center().Z < 0.01]
+                cut = fillet(low, rr)
+                ease = Pos(0, 0, down - rr) * Box(wide, tw + 0.4, rr + 1.0, align=CM)
+                for sg in (-1, 1):
+                    ease -= Pos(sg * wide / 2, 0, down - rr) * (Rot(90, 0, 0) * Cylinder(rr, tw + 2, align=(Align.CENTER, Align.CENTER, Align.CENTER)))
+                cut += ease
             X, Y = pt(xc, y_wall + tw / 2)
-            dx, dy = wide, tw + 0.4
-            tray -= Pos(X, Y, div_top - down) * Box(dy if swap else dx, dx if swap else dy, down + 1.0, align=CM)
-            said.append(f"a finger notch {wide:g} mm wide, cut {down:g} mm down into {where}: reach in there to lift the {e['name']} or open its lid")
+            tray -= Pos(X, Y, div_top - down) * ((Rot(0, 0, 90) * cut) if swap else cut)
+            round_say = f", its corners rounded {rr:g} mm" if rr >= 0.5 else ""
+            said.append(f"a finger notch {wide:g} mm wide, cut {down:g} mm down into {where}{round_say}: reach in there to lift the {e['name']} or open its lid")
         spare = PL - plan["L"]
         if spare > 3:
             tray += slab(plan["L"], plan["L"] + tw, 0, PD)

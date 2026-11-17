@@ -2273,7 +2273,8 @@ function secRow(kind, o = {}) {
     h("div", { class: "grid" }, field("Each at least: length", L("sc_x", o.x ?? 25.4), UNIT()), field("Width", L("sc_y", o.y ?? 25.4), UNIT()))];
   if (kind === "break") rows.splice(0, rows.length, h("p", { class: "hint", style: "margin:0" }, h("b", {}, "New row"), ": what follows sits in front, nearer the latches."));
   if (kind === "open") rows.splice(0, rows.length, h("div", { class: "grid head" }, field("Open space for (its name)", txt("sc_name", o.name, "catch-all"))));
-  if (kind === "space") rows.push(h("div", { class: "grid" }, field("Room round it", L("sc_fit", o.fit ?? 1), UNIT()), field("Finger notch in the wall in front of it: width (0: none)", L("sc_notch", o.notch ?? 0), UNIT())));
+  if (kind === "space") rows.push(h("div", { class: "grid" }, field("Room round it", L("sc_fit", o.fit ?? 1), UNIT()), field("Finger notch in the wall in front of it: width (0: none)", L("sc_notch", o.notch ?? 0), UNIT())),
+    h("div", { class: "grid" }, field("Notch depth, down from the top of the wall (0: 12 mm)", L("sc_notchd", o.notch_depth ?? 0), UNIT()), field("Round the notch's corners by (0: square)", L("sc_notchr", o.notch_round ?? 0), UNIT())));
   if (kind === "holes") rows.push(h("div", { class: "grid" }, field("Section length (0: to suit)", L("sc_len", o.len ?? 0), UNIT()), field("Section depth (0: to suit)", L("sc_dep", o.dep ?? 0), UNIT())));
   const item = h("div", { class: "item", "data-kind": kind },
     h("button", { type: "button", class: "del", title: "Remove", "aria-label": "Remove", onclick: () => item.remove() }, "×"), ...rows);
@@ -2284,7 +2285,7 @@ function secRows() {
     const g = n => it.querySelector(`[name=${n}]`), kind = it.dataset.kind, name = g("sc_name")?.value.trim() || "";
     if (kind === "break") return { kind };
     if (kind === "open") return { kind, name };
-    if (kind === "space") return { kind, name, x: len(g("sc_x")), y: len(g("sc_y")), z: len(g("sc_z")), turn: g("sc_turn").value, fit: len(g("sc_fit")), notch: len(g("sc_notch")) };
+    if (kind === "space") return { kind, name, x: len(g("sc_x")), y: len(g("sc_y")), z: len(g("sc_z")), turn: g("sc_turn").value, fit: len(g("sc_fit")), notch: len(g("sc_notch")), notch_depth: len(g("sc_notchd")), notch_round: len(g("sc_notchr")) };
     // Each hole's size: a plain number is in the page's units, a fraction is inches, and mm, cm or in can be said.
     const each = t => { const m = /^(.*?)(mm|cm|in|")?$/.exec(t.trim().toLowerCase()), v = num(m[1]); return +(v * (m[2] === "mm" ? 1 : m[2] === "cm" ? 10 : m[2] ? 25.4 : /\//.test(m[1]) ? 25.4 : U)).toFixed(3); };
     if (kind === "holes") return { kind, name, ds: g("sc_ds").value.split(/[,;]/).filter(t => t.trim()).map(each), count: Math.round(num(g("sc_count").value)), d: len(g("sc_d")), depth: len(g("sc_depth")), slot_l: len(g("sc_sl")), slot_w: len(g("sc_sw")), slot_d: len(g("sc_sd")),
