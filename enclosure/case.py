@@ -805,6 +805,7 @@ def build(c: Case) -> dict:
 
         dims = lambda a, b: f"{b:g} x {a:g}" if swap else f"{a:g} x {b:g}"   # noqa: E731  along the case's length first
         notches = []
+        tests = []
         ribbed = bool(c.lid_ribs) and rib_h >= 1
         lid_ribs_over = []
 
@@ -866,6 +867,8 @@ def build(c: Case) -> dict:
                     sw_, sl_ = e["slot_w"], min(e["slot_l"], e["dep"] - 3.0)
                     block -= Pos(X, Y, top_z - slot_deep) * Box(sl_ if swap else sw_, sw_ if swap else sl_, slot_deep + 1, align=CM)
                 tray += block
+                (Xa, Ya), (Xb, Yb) = pt(xa, ya), pt(xb, yb)
+                tests.append((e["name"], min(Xa, Xb), max(Xa, Xb), min(Ya, Yb), max(Ya, Yb), max(deep if e["count"] else 0.0, slot_deep) + 2.0))
                 said.append(f"{e['name']}: a solid block {dims(round(e['len'], 2), round(e['dep'], 2))} mm, level with the top of the tray ({bh:g} mm)"
                             + (f", with {e['count']} holes " + ("of " + ", ".join(f"Ø{v:g} mm" for v in e["ds"]) if e.get("ds") and len(set(e["ds"])) > 1 else f"Ø{e['d']:g} mm") + f" going {deep:g} mm down from its top" + (f" in {e['rows']} rows" if e["rows"] > 1 else " in a row") if e["count"] else "")
                             + (f"{' and' if e['count'] else ', with'} a slot {min(e['slot_l'], e['dep'] - 3.0):g} x {e['slot_w']:g} mm cut {slot_deep:g} mm down into its top, for something lying down" if e["slot_l"] else ""))
@@ -1035,10 +1038,27 @@ def build(c: Case) -> dict:
                       "make the tray deeper")
     checks.append("the snap joints are modelled on a printed case that works, but this one hasn't been printed: print one "
                   "tab and try it on the lid before printing a set")
-    return {"base": tray.clean(), "lid": lid.clean(), "tab": one, "tabs": mounted, "n_tabs": n_l, "n_hinges": n_h, "notes": notes,
+    # A test piece for each block of holes: just the block's top, as deep as its holes and slot, cut from
+    # the real tray, to print in a few minutes and try the fit before printing the whole case.
+    test_pieces = []
+    if plan:
+        for name, X0, X1, Y0, Y1, deep_ in tests:
+            deep_ = min(deep_, div_top - fl)
+            cut = tray & (Pos((X0 + X1) / 2, (Y0 + Y1) / 2, div_top - deep_) * Box(X1 - X0, Y1 - Y0, deep_, align=(Align.CENTER, Align.CENTER, Align.MIN)))
+            if cut is not None and cut.solids():
+                piece = max(cut.solids(), key=lambda q: q.volume)
+                pb = piece.bounding_box()
+                test_pieces.append({"name": name, "shape": Pos(-(pb.min.X + pb.max.X) / 2, -(pb.min.Y + pb.max.Y) / 2, -pb.min.Z) * piece,
+                                    "size": [round(pb.size.X, 2), round(pb.size.Y, 2), round(pb.size.Z, 2)]})
+    return {"test_pieces": test_pieces, "base": tray.clean(), "lid": lid.clean(), "tab": one, "tabs": mounted, "n_tabs": n_l, "n_hinges": n_h, "notes": notes,
             "inserts": inserts, "insert_placed": insert_placed,
             "checks": checks, "inner": [L, W, H], "outer": [round(oL, 2), round(oW + HINGE_E + HINGE_R + POST_D, 2), round(out_h, 2)],
             "parting": Hs, "top": top}
+
+
+def _slug(name: str) -> str:
+    import re
+    return re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_") or "holes"
 
 
 def write(c: Case, folder) -> dict:
@@ -1055,10 +1075,14 @@ def write(c: Case, folder) -> dict:
     for i in m["inserts"]:
         export_stl(i["shape"], str(folder / f"case_{i['name']}.stl"))
         export_step(i["shape"], str(folder / f"case_{i['name']}.step"))
+    for t in m["test_pieces"]:
+        export_stl(t["shape"], str(folder / f"test_piece_{_slug(t['name'])}.stl"))
     from build123d import Compound
     export_step(Compound(children=[m["base"], m["lid"], *m["tabs"], *m["insert_placed"]]), str(folder / "case_assembly.step"))
+    tests_say = "".join(f"\nPrint test_piece_{_slug(t['name'])}.stl first ({t['size'][0]:g} x {t['size'][1]:g} x {t['size'][2]:g} mm): it is the top of the "
+                        f"{t['name']} block, to try the holes and the slot before printing the tray." for t in m["test_pieces"])
     text = "# Hinged case\n\n" + "\n".join(f"- {n}" for n in m["notes"]) + \
            f"\n\nPrint {m['n_tabs']} of case_latch_tab.stl." + \
-           "".join(f"\nPrint {i['count']} of case_{i['name']}.stl." for i in m["inserts"]) + "\n\n## Check\n\n" + "\n".join(f"- {n}" for n in m["checks"]) + "\n"
+           "".join(f"\nPrint {i['count']} of case_{i['name']}.stl." for i in m["inserts"]) + tests_say + "\n\n## Check\n\n" + "\n".join(f"- {n}" for n in m["checks"]) + "\n"
     (folder / "notes.md").write_text(text, encoding="utf-8")
     return m

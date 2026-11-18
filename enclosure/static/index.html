@@ -825,7 +825,7 @@
       <label class="f">Pockets<input name="cs_pk" type="text" placeholder="round 12:6, slot 80x12, rect 40x25:2" autocomplete="off"></label>
       <label class="f">Pocket depth (0: to suit)<span class="unit" data-unit="mm"><input name="cs_pkd" type="number" min="0" step="1" value="0"></span></label>
     </div>
-    <div class="links"><button class="plain" type="button" id="csshow">Show it</button><button class="plain" type="button" id="cslink">Copy link</button><button class="go" type="button" id="csdl">Download STEP + STL</button><button class="plain" type="button" id="cskit">Print folder</button><button class="plain" type="button" id="cspreset">Save as my preset</button></div>
+    <div class="links"><button class="plain" type="button" id="csshow">Show it</button><button class="plain" type="button" id="cslink">Copy link</button><button class="go" type="button" id="csdl">Download STEP + STL</button><button class="plain" type="button" id="cstest" title="Just the top of each block of holes, with its holes and slot: a few minutes to print, to try the fit before printing the whole case">Download the test piece (holes and slot only)</button><button class="plain" type="button" id="cskit">Print folder</button><button class="plain" type="button" id="cspreset">Save as my preset</button></div>
   </fieldset>
   <fieldset>
     <legend>Round box, screw-on cap</legend>
@@ -2342,6 +2342,10 @@ $("#csshow").onclick = () => busy($("#csshow"), "Making...", async () => {
   if (!res.ok) { report.replaceChildren(msg("err", await errorOf(res))); return; }
   const d = await res.json();
   showShape(d, `Hinged case: inside ${d.inner.map(v => +(v / U).toFixed(2)).join(" × ")} ${UNIT()}`);
+});
+$("#cstest").onclick = () => busy($("#cstest"), "Making...", async () => {
+  const r = await download(await fetch("api/case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ case: caseBody(), test: true }) }), "case_test_piece.stl");
+  if (r.error) report.replaceChildren(msg("err", r.error));
 });
 $("#csdl").onclick = () => busy($("#csdl"), "Making...", async () => {
   const r = await download(await fetch("api/case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ case: caseBody() }) }), "hinged_case.zip");

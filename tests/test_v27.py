@@ -196,3 +196,35 @@ def test_scoops_at_the_front_of_each_compartment():
     assert turned["base"].is_valid and turned["base"].volume == pytest.approx(tray.volume, rel=1e-4)
     with pytest.raises(ValueError):
         case.plan_sections(kit(40))
+
+
+def test_test_piece_is_just_the_block_of_holes(tmp_path):
+    from build123d import GeomType
+    secs = [{"kind": "space", "name": "box", "x": 205.74, "y": 82.8, "fit": 0, "turn": "as typed"}, {"kind": "break"},
+            {"kind": "holes", "name": "heat stake tips", "ds": [8, 8, 8, 8, 8, 8, 10], "depth": 15, "slot_l": 35.2, "slot_w": 7.4, "slot_d": 6.4},
+            {"kind": "cells", "name": "inserts", "count": 18, "x": I, "y": I}]
+    m = case.build(case.Case(size=(205.74, 164.2, 38.1), sections=secs))
+    [t] = m["test_pieces"]
+    piece = t["shape"]
+    assert t["name"] == "heat stake tips" and piece.is_valid and len(piece.solids()) == 1
+    assert t["size"][2] == 17.0 and t["size"][0] < 30 and 75 < t["size"][1] < 82          # the block's top 17 mm: 15 mm holes and 2 under them
+    assert piece.volume < m["base"].volume * 0.12 and piece.bounding_box().min.Z == pytest.approx(0)
+    radii = sorted(round(f.radius, 2) for f in piece.faces() if f.geom_type == GeomType.CYLINDER and f.radius > 2)
+    assert radii == [4.0] * 6 + [5.0]                                                      # the same seven holes as in the tray
+    case.write(case.Case(size=(205.74, 164.2, 38.1), sections=secs), tmp_path)
+    assert (tmp_path / "test_piece_heat_stake_tips.stl").exists() and "test_piece_heat_stake_tips.stl first" in (tmp_path / "notes.md").read_text()
+    assert case.build(case.Case())["test_pieces"] == []
+
+
+def test_test_piece_from_the_server():
+    from fastapi.testclient import TestClient
+    from enclosure import web
+    c = TestClient(web.app)
+    one = [{"kind": "holes", "name": "tips", "ds": [8, 10], "depth": 15, "slot_l": 30, "slot_w": 8}, {"kind": "cells", "count": 4, "x": I, "y": I}]
+    r = c.post("/api/case", json={"case": {"sections": one}, "test": True})
+    assert r.status_code == 200 and 'filename="test_piece_tips.stl"' in r.headers["content-disposition"] and len(r.content) > 2000
+    two = c.post("/api/case", json={"case": {"sections": one + [{"kind": "holes", "name": "bits", "count": 3, "d": 6}]}, "test": True})
+    assert two.status_code == 200 and "case_test_pieces.zip" in two.headers["content-disposition"]
+    none = c.post("/api/case", json={"case": {}, "test": True})
+    assert none.status_code >= 400 and "nothing to test-print" in none.text
+    assert c.post("/api/case", json={"case": {"sections": one}, "preview": True}).json()["test_pieces"][0]["name"] == "tips"

@@ -608,7 +608,21 @@ def hinged_case(body: dict):
                         "mounted": [{"name": f"latch_tab_{i + 1}", "host": "lid", "mesh": enc(t)} for i, t in enumerate(m["tabs"])]
                         + [{"name": f"bin_{i + 1}", "host": "base", "mesh": enc(t)} for i, t in enumerate(m["insert_placed"])],
                         "inserts": [{"name": i["name"], "count": i["count"], "size": i["size"]} for i in m["inserts"]],
-                        "inner": m["inner"], "outer": m["outer"]})
+                        "inner": m["inner"], "outer": m["outer"],
+                        "test_pieces": [{"name": t["name"], "size": t["size"]} for t in m["test_pieces"]]})
+            if body.get("test"):                     # only the test pieces: the tops of the blocks of holes
+                m = case.build(c)
+                if not m["test_pieces"]:
+                    raise ValueError("there is nothing to test-print in this case: a test piece is made for each block of holes")
+                if len(m["test_pieces"]) == 1:
+                    t = m["test_pieces"][0]
+                    return _keep(key, Response(_stl(t["shape"]), media_type="model/stl",
+                                               headers={"Content-Disposition": f'attachment; filename="test_piece_{case._slug(t["name"])}.stl"'}))
+                with tempfile.TemporaryDirectory() as d:
+                    from build123d import export_stl
+                    for t in m["test_pieces"]:
+                        export_stl(t["shape"], str(Path(d) / f"test_piece_{case._slug(t['name'])}.stl"))
+                    return _keep(key, _zip(Path(d), "case_test_pieces"))
             with tempfile.TemporaryDirectory() as d:
                 case.write(c, Path(d) / "case")
                 return _keep(key, _zip(Path(d) / "case", "hinged_case"))
