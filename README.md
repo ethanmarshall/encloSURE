@@ -397,6 +397,9 @@ assembly, CAD workflow, sheet metal (with RMFG's published limits) and moulding.
   for two sizes, pillow block for a ball bearing. Also a T-slot foot and soft vise jaws.
 - **On any printed part**: a top edge chamfer, and a few words cut into the biggest flat on top
   (`top_chamfer`, `engrave_text`).
+- **Cut a test piece**: on any box, hinged case, round box or part, "Cut a test piece" lets you
+  drag a box round the part that has to fit, trim its height, and export just that as STL and STEP
+  (`/api/cut`), cut from the real model.
 - **A case for a set of things**: give the hinged case a list of sections (a space for a thing,
   a block of upright holes with a lying slot, a number of compartments) and it lays them out side
   by side, turns things to keep the case square, and sizes itself round them. A case can be handed

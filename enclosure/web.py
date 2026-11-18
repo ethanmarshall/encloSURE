@@ -630,6 +630,76 @@ def hinged_case(body: dict):
         _bad(e)
 
 
+def cut_piece(shape, region, flip: bool = False):
+    """The part of a solid inside a box [x0, y0, z0, x1, y1, z1], set down on the bed at the middle of
+    the plate: a test piece. A lid's piece is turned over, since a lid prints top down."""
+    from build123d import Align, Box, Compound, Pos, Rot
+    try:
+        x0, y0, z0, x1, y1, z1 = (float(v) for v in region)
+    except (TypeError, ValueError):
+        raise ValueError("the area to cut out is six numbers: x, y and z from, then x, y and z to") from None
+    x0, x1, y0, y1, z0, z1 = min(x0, x1), max(x0, x1), min(y0, y1), max(y0, y1), min(z0, z1), max(z0, z1)
+    if min(x1 - x0, y1 - y0, z1 - z0) < 1.0:
+        raise ValueError("the area to cut out is under 1 mm one way: draw it bigger")
+    got = shape & (Pos(x0, y0, z0) * Box(x1 - x0, y1 - y0, z1 - z0, align=(Align.MIN, Align.MIN, Align.MIN)))
+    solids = [q for q in (got.solids() if got is not None else []) if q.volume > 0.5]
+    if not solids:
+        raise ValueError("there is nothing of the part inside that area: draw it over the part")
+    piece = solids[0] if len(solids) == 1 else Compound(children=solids)
+    if flip:
+        piece = Rot(180, 0, 0) * piece
+    bb = piece.bounding_box()
+    return Pos(-(bb.min.X + bb.max.X) / 2, -(bb.min.Y + bb.max.Y) / 2, -bb.min.Z) * piece
+
+
+@app.post("/api/cut")
+def cut_test_piece(body: dict):
+    """A test piece: any part of what is on screen, cut from the real model, as STL and STEP.
+    {api: box | case | round | part, request: what was sent to draw it, target: base | lid, region: [x0, y0, z0, x1, y1, z1]}"""
+    from build123d import export_step, export_stl
+    key = _key("cut", body)
+    hit = _kept(key)
+    if hit is not None:
+        return hit
+    api, req, target = body.get("api"), body.get("request") or {}, body.get("target") or "base"
+    try:
+        if target not in ("base", "lid"):
+            raise ValueError("cut from the base or the lid")
+        with _PART_LOCK:
+            if api == "box":
+                made = boxmod.build(spec_from(req))
+                shape = made.get(target)
+            elif api == "case":
+                from . import case
+                fields_ = case.Case.__dataclass_fields__
+                shape = case.build(case.Case(**{k: v for k, v in (req.get("case") or {}).items() if k in fields_}))[target]
+            elif api == "round":
+                from . import roundbox
+                fields_ = roundbox.Round.__dataclass_fields__
+                shape = roundbox.build(roundbox.Round(**{k: v for k, v in (req.get("round") or {}).items() if k in fields_}))[target]
+            elif api == "part":
+                from . import hardware
+                kind, params = _part_params(req)
+                shape = hardware.make(kind, **params)["shape"]
+            else:
+                raise ValueError("a test piece can be cut from a box, a hinged case, a round box or a part")
+            if shape is None:
+                raise ValueError("this has no lid to cut from")
+            piece = cut_piece(shape, body.get("region"), flip=target == "lid")
+            bb = piece.bounding_box()
+            with tempfile.TemporaryDirectory() as d:
+                export_stl(piece, str(Path(d) / "test_piece.stl"), tolerance=0.05, angular_tolerance=0.3)
+                export_step(piece, str(Path(d) / "test_piece.step"))
+                (Path(d) / "notes.txt").write_text(
+                    f"Test piece, {bb.size.X:.1f} x {bb.size.Y:.1f} x {bb.size.Z:.1f} mm, cut from the {target if api != 'part' else 'part'}.\n"
+                    "It is the real model inside the area you drew, nothing changed, set down flat"
+                    + (" and turned over, as a lid prints" if target == "lid" else "") + ".\n"
+                    "Print it with the same plastic, layer height and walls as the whole thing: fit changes with all three.\n", encoding="utf-8")
+                return _keep(key, _zip(Path(d), "test_piece"))
+    except (ValueError, RuntimeError, TypeError, KeyError) as e:
+        _bad(e)
+
+
 @app.post("/api/outline")
 async def outline_box(dxf: UploadFile = File(...), height: float = Form(30.0), wall: float = Form(2.0),
                       floor: float = Form(2.0), lip: float = Form(3.0), standoff_height: float = Form(5.0),

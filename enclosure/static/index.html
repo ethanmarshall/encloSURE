@@ -96,6 +96,10 @@
   .status { position: absolute; top: 10px; left: 12px; font-size: 12px; color: var(--muted); }
   .viewopts { position: absolute; top: 8px; right: 12px; display: flex; gap: 10px; }
   .viewopts label.check { margin: 0; font-size: 12.5px; }
+  .cutbar { padding: 6px 12px 0; }
+  .cutbar #cutpanel { border: 1px solid var(--line, #8884); border-radius: 8px; padding: 8px 10px; margin-top: 6px; }
+  .cutbar .grid { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+  @media (max-width: 760px) { .cutbar .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   .empty { position: absolute; inset: 0; display: grid; place-items: center; color: var(--muted); font-size: 13px; text-align: center; padding: 20px; }
   .report { padding: 10px 20px 14px; border-top: 1px solid var(--line); background: var(--panel); max-height: 38vh; overflow-y: auto; }
   .dims { font-variant-numeric: tabular-nums; }
@@ -871,6 +875,22 @@
     <label class="check"><input id="explode" type="checkbox" checked> Lift lid</label>
     <label class="check"><input id="showlid" type="checkbox" checked> Show lid</label>
   </div>
+  <div class="cutbar" id="cutbar" hidden>
+    <button class="plain" type="button" id="cutopen" title="Pick any part of the model and get just that as STL and STEP, to print and try before printing the whole thing">Cut a test piece</button>
+    <div id="cutpanel" hidden>
+      <p class="hint" style="margin:0 0 6px"><b>Cut a test piece.</b> Drag on the model to box in the part that has to fit. Then set the heights to keep only the layers that matter, and export it. It is cut from the real model, nothing changed.</p>
+      <div class="links" style="align-items:center">
+        <label class="check" style="margin:0"><input type="checkbox" id="cutdraw" checked> Drag draws the area (untick to turn the view)</label>
+        <label class="f" id="cutwhichwrap" style="margin:0">Cut from <select id="cutwhich"><option value="base">the base</option><option value="lid">the lid</option></select></label>
+      </div>
+      <div class="grid" style="margin-top:6px">
+        <label class="f">Left to right: from<input id="cut_x0" type="text" inputmode="decimal"></label><label class="f">to<input id="cut_x1" type="text" inputmode="decimal"></label>
+        <label class="f">Front to back: from<input id="cut_y0" type="text" inputmode="decimal"></label><label class="f">to<input id="cut_y1" type="text" inputmode="decimal"></label>
+        <label class="f">Height: from<input id="cut_z0" type="text" inputmode="decimal"></label><label class="f">to<input id="cut_z1" type="text" inputmode="decimal"></label>
+      </div>
+      <div class="links" style="margin-top:6px"><button class="go" type="button" id="cutgo">Export this piece (STL + STEP)</button><button class="plain" type="button" id="cutall">Whole footprint</button><button class="plain" type="button" id="cutclose">Close</button><span class="hint" id="cutsay"></span></div>
+    </div>
+  </div>
   <div class="report" id="report"></div>
 </section>
 <article id="make" hidden>
@@ -1490,8 +1510,8 @@ function showView(v) {
   if (current) world.remove(current.group);
   current = v;
   $("#viewopts").hidden = !v || !v.lid;
-  if (!v) return;
-  world.add(v.group); placeLid();
+  if (!v) { cutRefresh(); return; }
+  world.add(v.group); placeLid(); cutRefresh();
   if (!v.framed) {
     const r = v.size.length();
     camera.position.set(r * 1.2, r * 1.0, r * 1.4); controls.target.set(0, v.size.z / 2, 0); v.framed = true;
@@ -1502,8 +1522,94 @@ function placeLid() {
   const z = $("#explode").checked ? Math.max(15, current.top * 0.5) : 0, vis = $("#showlid").checked;
   for (const m of [current.lid, ...(current.onLid || [])]) { m.position.z = z; m.visible = vis; }
 }
-$("#explode").onchange = placeLid; $("#showlid").onchange = placeLid;
+$("#explode").onchange = () => { placeLid(); cutDraw(); }; $("#showlid").onchange = placeLid;
 function empty(text) { $("#empty").hidden = !text; $("#empty").textContent = text || ""; }
+
+// ---------- Cut a test piece: box in any part of the model on screen and export just that ----------
+// A view that can be cut carries v.cut = { api, request, offset }: what drew it, and where its mesh sits in the view.
+const cutter = { on: false, box: null, r: null, drag: null };
+const cutEl = k => $("#cut_" + k);
+function cutTarget() {
+  const lid = $("#cutwhich").value === "lid" && current?.lid;
+  return lid ? current.lid : current?.group.children[0];
+}
+function cutBounds() {                               // the target's box in the view's own frame (Z up), as it sits when shut
+  const m = cutTarget(); m.geometry.computeBoundingBox();
+  const b = m.geometry.boundingBox, o = m === current.lid ? new THREE.Vector3(0, 0, 0) : m.position;
+  return { x0: b.min.x + o.x, x1: b.max.x + o.x, y0: b.min.y + o.y, y1: b.max.y + o.y, z0: b.min.z + o.z, z1: b.max.z + o.z };
+}
+function cutDraw() {
+  const r = cutter.r;
+  if (cutter.box) { cutter.box.parent?.remove(cutter.box); cutter.box.geometry.dispose(); cutter.box = null; }
+  if (!cutter.on || !r || !current) return;
+  const lift = cutTarget() === current.lid ? current.lid.position.z : 0;
+  const g = new THREE.BoxGeometry(Math.max(0.1, r.x1 - r.x0), Math.max(0.1, r.y1 - r.y0), Math.max(0.1, r.z1 - r.z0));
+  cutter.box = new THREE.Mesh(g, new THREE.MeshBasicMaterial({ color: 0xff7a1a, transparent: true, opacity: 0.28, depthWrite: false }));
+  cutter.box.add(new THREE.LineSegments(new THREE.EdgesGeometry(g), new THREE.LineBasicMaterial({ color: 0xff7a1a })));
+  cutter.box.position.set((r.x0 + r.x1) / 2, (r.y0 + r.y1) / 2, (r.z0 + r.z1) / 2 + lift);
+  cutter.box.userData.noPick = true; cutter.box.renderOrder = 5;
+  current.group.add(cutter.box);
+}
+function cutFields() {
+  for (const k of ["x0", "x1", "y0", "y1", "z0", "z1"]) cutEl(k).value = +(cutter.r[k] / U).toFixed(U === 1 ? 1 : 3);
+  const r = cutter.r;
+  $("#cutsay").textContent = `${+((r.x1 - r.x0) / U).toFixed(2)} × ${+((r.y1 - r.y0) / U).toFixed(2)} × ${+((r.z1 - r.z0) / U).toFixed(2)} ${UNIT()}`;
+}
+function cutSet(r) { cutter.r = r; cutFields(); cutDraw(); }
+function cutMode(on) {
+  cutter.on = !!on && !!current?.cut;
+  $("#cutpanel").hidden = !cutter.on; $("#cutopen").hidden = cutter.on;
+  controls.enabled = !(cutter.on && $("#cutdraw").checked);
+  renderer.domElement.style.cursor = cutter.on && $("#cutdraw").checked ? "crosshair" : "";
+  if (cutter.on) {
+    $("#cutwhichwrap").hidden = !current.lid;
+    if (!current.lid) $("#cutwhich").value = "base";
+    cutSet(cutBounds());
+  } else cutDraw();
+}
+function cutRefresh() {                              // a new model on screen: the tool is offered if it can be cut, and starts closed
+  $("#cutbar").hidden = !current?.cut;
+  if (cutter.box) { cutter.box.parent?.remove(cutter.box); cutter.box = null; }
+  cutMode(false);
+}
+$("#cutopen").onclick = () => cutMode(true);
+$("#cutclose").onclick = () => cutMode(false);
+$("#cutall").onclick = () => cutSet(cutBounds());
+$("#cutdraw").onchange = () => cutMode(cutter.on);
+$("#cutwhich").onchange = () => { if (cutter.on) cutSet(cutBounds()); };
+for (const k of ["x0", "x1", "y0", "y1", "z0", "z1"]) cutEl(k).onchange = () => {
+  const r = { ...cutter.r }; r[k] = num(cutEl(k).value) * U;
+  cutSet({ x0: Math.min(r.x0, r.x1), x1: Math.max(r.x0, r.x1), y0: Math.min(r.y0, r.y1), y1: Math.max(r.y0, r.y1), z0: Math.min(r.z0, r.z1), z1: Math.max(r.z0, r.z1) });
+};
+// Dragging draws the area on the target's top: where the pointer's ray meets that level, in the model's own left-right and front-back.
+function cutPoint(ev) {
+  const rect = renderer.domElement.getBoundingClientRect();
+  const ray = new THREE.Raycaster();
+  ray.setFromCamera(new THREE.Vector2((ev.clientX - rect.left) / rect.width * 2 - 1, -((ev.clientY - rect.top) / rect.height) * 2 + 1), camera);
+  const b = cutBounds(), lift = cutTarget() === current.lid ? current.lid.position.z : 0;
+  const hit = ray.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), -(b.z1 + lift)), new THREE.Vector3());   // the view's up is three's Y
+  return hit ? { x: hit.x, y: -hit.z } : null;
+}
+renderer.domElement.addEventListener("pointerdown", ev => {
+  if (!cutter.on || !$("#cutdraw").checked || ev.button !== 0) return;
+  const p = cutPoint(ev); if (!p) return;
+  cutter.drag = p; renderer.domElement.setPointerCapture(ev.pointerId); ev.preventDefault();
+});
+renderer.domElement.addEventListener("pointermove", ev => {
+  if (!cutter.drag) return;
+  const p = cutPoint(ev); if (!p) return;
+  const b = cutBounds(), a = cutter.drag, clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+  cutSet({ ...cutter.r, x0: clamp(Math.min(a.x, p.x), b.x0, b.x1), x1: clamp(Math.max(a.x, p.x), b.x0, b.x1),
+           y0: clamp(Math.min(a.y, p.y), b.y0, b.y1), y1: clamp(Math.max(a.y, p.y), b.y0, b.y1) });
+});
+for (const t of ["pointerup", "pointercancel"]) renderer.domElement.addEventListener(t, () => { cutter.drag = null; });
+$("#cutgo").onclick = () => busy($("#cutgo"), "Cutting...", async () => {
+  const c = current.cut, r = cutter.r, o = c.offset || { x: 0, y: 0, z: 0 };
+  const region = [r.x0 - o.x, r.y0 - o.y, r.z0 - o.z, r.x1 - o.x, r.y1 - o.y, r.z1 - o.z].map(v => +v.toFixed(3));
+  const got = await download(await fetch("api/cut", { method: "POST", headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ api: c.api, request: c.request, target: $("#cutwhich").value, region }) }), "test_piece.zip");
+  $("#cutsay").textContent = got.error ? got.error : "Saved test_piece.zip (STL and STEP).";
+});
 
 // ---------- Report panel ----------
 const report = $("#report");
@@ -1588,11 +1694,13 @@ async function refresh() {
   const mine = ++seq;
   if (tab === "box") $("#status").textContent = "Building...";
   try {
-    const res = await fetch("api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(boxBody()) });
+    const sent = boxBody();
+    const res = await fetch("api/preview", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(sent) });
     if (mine !== seq) return;
     if (!res.ok) { const err = await errorOf(res); boxData = { error: err }; if (tab === "box") { boxReport(null, err); $("#status").textContent = "Not built"; } return; }
     const data = await res.json();
     const old = views.box; views.box = makeView(data);
+    views.box.cut = { api: "box", request: sent };
     if (old && !reframe) views.box.framed = true;
     reframe = false;
     boxData = data;
@@ -2248,8 +2356,8 @@ function roundBody() {
     side_holes: triples(e.rb_side.value, "0, 15, 8").map(([angle, height, d]) => ({ angle, height: height * U, d: d * U })),
     cap_holes: triples(e.rb_cap.value, "0, 0, 12").map(([x, y, d]) => ({ at: [x * U, y * U], d: d * U })) };
 }
-function showShape(d, title) {
-  views.shapes = makeView(d); empty(""); showView(views.shapes);
+function showShape(d, title, cut) {
+  views.shapes = makeView(d); views.shapes.cut = cut || null; empty(""); showView(views.shapes);
   report.replaceChildren(h("div", { class: "dims" }, title, d.outer ? h("span", { class: "hint" }, ` · outside ${d.outer.map(v => +(v / U).toFixed(2)).join(" × ")} ${UNIT()}`) : null),
     h("ul", { class: "notes" }, d.notes.map(n => h("li", {}, inUnits(n)))),
     ...(d.checks || []).map(c => msg("warn", inUnits(c))));
@@ -2338,10 +2446,11 @@ function applyCase(b) {
 }
 $("#cslink").onclick = async () => { const url = caseLink(); try { await navigator.clipboard.writeText(url); $("#cslink").textContent = "Link copied"; } catch { history.replaceState(null, "", url); $("#cslink").textContent = "Link is in the address bar"; } setTimeout(() => { $("#cslink").textContent = "Copy link"; }, 2000); };
 $("#csshow").onclick = () => busy($("#csshow"), "Making...", async () => {
-  const res = await fetch("api/case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ case: caseBody(), preview: true }) });
+  const sent = caseBody();
+  const res = await fetch("api/case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ case: sent, preview: true }) });
   if (!res.ok) { report.replaceChildren(msg("err", await errorOf(res))); return; }
   const d = await res.json();
-  showShape(d, `Hinged case: inside ${d.inner.map(v => +(v / U).toFixed(2)).join(" × ")} ${UNIT()}`);
+  showShape(d, `Hinged case: inside ${d.inner.map(v => +(v / U).toFixed(2)).join(" × ")} ${UNIT()}`, { api: "case", request: { case: sent } });
 });
 $("#cstest").onclick = () => busy($("#cstest"), "Making...", async () => {
   const r = await download(await fetch("api/case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ case: caseBody(), test: true }) }), "case_test_piece.stl");
@@ -2355,7 +2464,7 @@ $("#rbshow").onclick = () => busy($("#rbshow"), "Making...", async () => {
   let body; try { body = { round: roundBody(), preview: true }; } catch (err) { report.replaceChildren(msg("err", err.message)); return; }
   const res = await fetch("api/roundbox", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
   if (!res.ok) { report.replaceChildren(msg("err", await errorOf(res))); return; }
-  showShape(await res.json(), "Round box");
+  showShape(await res.json(), "Round box", { api: "round", request: { round: body.round } });
 });
 $("#rbdl").onclick = () => busy($("#rbdl"), "Making...", async () => {
   let body; try { body = { round: roundBody() }; } catch (err) { report.replaceChildren(msg("err", err.message)); return; }
@@ -2641,7 +2750,8 @@ async function partPreview() {
   if (partData.inlay) { const i2 = mesh(partData.inlay, 0x2f6fb3); i2.position.copy(m.position); g.add(i2); }  // the second colour, in place
   if (partData.fitted) { const f2 = mesh(partData.fitted, 0x59636e); f2.position.copy(m.position); g.add(f2); }  // a bought part shown in place (a steel bushing)
   const bb = new THREE.Box3().setFromObject(g);
-  views.parts = { group: g, lid: null, top: 0, size: bb.getSize(new THREE.Vector3()), framed: false };
+  views.parts = { group: g, lid: null, top: 0, size: bb.getSize(new THREE.Vector3()), framed: false,
+                  cut: { api: "part", request: { kind: body.kind, params: body.params }, offset: { x: m.position.x, y: m.position.y, z: m.position.z } } };
   if (tab === "parts") { empty(""); showView(views.parts); }
   partReport();
 }
