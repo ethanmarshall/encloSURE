@@ -425,6 +425,9 @@ def plan_sections(sections: list, wall: float = RIB) -> dict:  # noqa: C901
             d["count"], d["x"], d["y"] = int(_num(d, "count", 1)), _num(d, "x", 25.4), _num(d, "y", 25.4)
             if not (1 <= d["count"] <= 80 and 8 <= d["x"] <= 300 and 8 <= d["y"] <= 300):
                 raise ValueError(f"section {i + 1} ({d['name']}): 1 to 80 compartments, each 8 to 300 mm")
+            d["scoop"] = _num(d, "scoop")
+            if not 0 <= d["scoop"] <= 30:
+                raise ValueError(f"section {i + 1} ({d['name']}): a scoop radius up to 30 mm, or 0 for none")
         d["len"], d["dep"] = _num(d, "len"), _num(d, "dep")
         if not (0 <= d["len"] <= 400 and 0 <= d["dep"] <= 400):
             raise ValueError(f"section {i + 1} ({d['name']}): a section up to 400 mm long and deep")
@@ -871,7 +874,7 @@ def build(c: Case) -> dict:
             else:
                 # Columns along the length, each split across the depth.
                 left, cols = e["count"], e["rows"]
-                sizes_ = []
+                sizes_, scooped = [], 0.0
                 for r_ in range(cols):
                     n_here = min(e["per_row"], left)
                     left -= n_here
@@ -887,6 +890,19 @@ def build(c: Case) -> dict:
                         if ribbed:
                             lid += rib(xr, xr + e["cell_len"], yk - tw, yk)
                     sizes_.append((n_here, cw))
+                    if e.get("scoop"):
+                        # A curved ramp where each compartment's floor meets its front wall (the one nearer the
+                        # latches), so a fingertip slides small parts up and out instead of chasing them into a corner.
+                        for k in range(n_here):
+                            (X0, Y0), (X1, Y1) = pt(xr, ya + k * (cw + tw)), pt(xr + e["cell_len"], ya + k * (cw + tw) + cw)
+                            X0, X1, Y0, Y1 = min(X0, X1), max(X0, X1), min(Y0, Y1), max(Y0, Y1)
+                            sr = min(e["scoop"], (Y1 - Y0) * 0.6, wall_h - 1.0)
+                            if sr < 1:
+                                continue
+                            ramp = Box(X1 - X0 + 0.02, sr, sr, align=(Align.CENTER, Align.MIN, Align.MIN))
+                            ramp -= Pos(0, sr, sr) * (Rot(0, 90, 0) * Cylinder(sr, X1 - X0 + 2, align=(Align.CENTER, Align.CENTER, Align.CENTER)))
+                            tray += Pos((X0 + X1) / 2, Y0 - 0.01, fl - 0.01) * ramp
+                            scooped = sr
                 if ribbed:                        # and over the walls round the compartments, where they are not the case's own
                     if ya > 0.01:
                         lid += rib(max(0.0, xa - tw), min(PL, xb + tw), ya - tw, ya)
@@ -900,7 +916,8 @@ def build(c: Case) -> dict:
                 same = len({round(cw, 1) for _, cw in sizes_}) == 1
                 a_, b_ = (e["per_row"], cols) if swap else (cols, e["per_row"])
                 said.append(f"{e['name']}: {e['count']} compartments, {a_} along the length by {b_} across, each {dims(round(e['cell_len'], 1), round(sizes_[0][1], 1))} mm"
-                            + ("" if same else f" (the last column has {sizes_[-1][0]}, each {sizes_[-1][1]:.1f} mm)") + f" and {wall_h:g} mm deep")
+                            + ("" if same else f" (the last column has {sizes_[-1][0]}, each {sizes_[-1][1]:.1f} mm)") + f" and {wall_h:g} mm deep"
+                            + (f"; each has a scoop of {scooped:g} mm radius where its floor meets its front wall, to slide small parts out with a fingertip" if scooped else ""))
             last_end[band] = xb
         # Finger notches: the wall in front of a thing cut down for some of its length, so a finger in the
         # compartment in front can get under the thing's edge or its lid.

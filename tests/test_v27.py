@@ -173,3 +173,26 @@ def test_finger_notch_and_the_printed_kit_case():
     # Holes of mixed sizes keep the same plastic between each pair.
     last = case.build(case.Case(sections=[{"kind": "space", "x": 60, "y": 40, "notch": 20}]))
     assert any("no finger notch" in c for c in last["checks"])
+
+
+def test_scoops_at_the_front_of_each_compartment():
+    from build123d import Box, Pos
+    def kit(scoop):
+        return [{"kind": "space", "name": "box", "x": 205.74, "y": 82.8, "fit": 0, "turn": "as typed"}, {"kind": "break"},
+                {"kind": "cells", "name": "inserts", "count": 18, "x": I, "y": I, "scoop": scoop}]
+    flat, m = case.build(case.Case(sections=kit(0))), case.build(case.Case(sections=kit(8)))
+    tray, (L, W, H) = m["base"], m["inner"]
+    assert tray.is_valid and len(tray.solids()) == 1 and tray.volume > flat["base"].volume + 4000
+    assert any("scoop of 8 mm radius" in n for n in m["notes"])
+    cells = case.plan_sections(kit(8))["sections"][1]
+    cw = (cells["dep"] - 2 * 1.2) / 3
+    xc = -L / 2 + cells["cell_len"] / 2
+    front = W / 2 - cells["y0"] - cw                      # the first compartment's wall nearer the latches
+    probe = lambda y, z: _vol(tray & Pos(xc, y, 2.4 + z) * Box(1, 0.4, 0.4))
+    assert probe(front + 1.0, 1.0) == pytest.approx(0.16)    # filled in the corner by the front wall
+    assert probe(front + 7.0, 5.0) < 1e-6                    # open above the curve
+    assert probe(front + cw - 1.0, 1.0) < 1e-6               # and no ramp at the back wall
+    turned = case.build(case.Case(sections=kit(8), sections_front=True))
+    assert turned["base"].is_valid and turned["base"].volume == pytest.approx(tray.volume, rel=1e-4)
+    with pytest.raises(ValueError):
+        case.plan_sections(kit(40))

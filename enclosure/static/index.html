@@ -2270,7 +2270,8 @@ function secRow(kind, o = {}) {
     h("div", { class: "grid" }, field("Lying slot: length (0: none)", L("sc_sl", o.slot_l ?? 0), UNIT()), field("Slot width", L("sc_sw", o.slot_w ?? 0), UNIT()), field("Slot depth (0: its width)", L("sc_sd", o.slot_d ?? 0), UNIT()))]
   : [
     h("div", { class: "grid head" }, field("Compartments for (their name)", txt("sc_name", o.name, "heat-set inserts")), field("How many", count("sc_count", o.count ?? 6))),
-    h("div", { class: "grid" }, field("Each at least: length", L("sc_x", o.x ?? 25.4), UNIT()), field("Width", L("sc_y", o.y ?? 25.4), UNIT()))];
+    h("div", { class: "grid" }, field("Each at least: length", L("sc_x", o.x ?? 25.4), UNIT()), field("Width", L("sc_y", o.y ?? 25.4), UNIT()),
+      field("Scoop at the front of each floor: radius (0: none)", L("sc_scoop", o.scoop ?? 0), UNIT()))];
   if (kind === "break") rows.splice(0, rows.length, h("p", { class: "hint", style: "margin:0" }, h("b", {}, "New row"), ": what follows sits in front, nearer the latches."));
   if (kind === "open") rows.splice(0, rows.length, h("div", { class: "grid head" }, field("Open space for (its name)", txt("sc_name", o.name, "catch-all"))));
   if (kind === "space") rows.push(h("div", { class: "grid" }, field("Room round it", L("sc_fit", o.fit ?? 1), UNIT()), field("Finger notch in the wall in front of it: width (0: none)", L("sc_notch", o.notch ?? 0), UNIT())),
@@ -2290,7 +2291,7 @@ function secRows() {
     const each = t => { const m = /^(.*?)(mm|cm|in|")?$/.exec(t.trim().toLowerCase()), v = num(m[1]); return +(v * (m[2] === "mm" ? 1 : m[2] === "cm" ? 10 : m[2] ? 25.4 : /\//.test(m[1]) ? 25.4 : U)).toFixed(3); };
     if (kind === "holes") return { kind, name, ds: g("sc_ds").value.split(/[,;]/).filter(t => t.trim()).map(each), count: Math.round(num(g("sc_count").value)), d: len(g("sc_d")), depth: len(g("sc_depth")), slot_l: len(g("sc_sl")), slot_w: len(g("sc_sw")), slot_d: len(g("sc_sd")),
                                    len: len(g("sc_len")), dep: len(g("sc_dep")) };
-    return { kind, name, count: Math.round(num(g("sc_count").value)), x: len(g("sc_x")), y: len(g("sc_y")) };
+    return { kind, name, count: Math.round(num(g("sc_count").value)), x: len(g("sc_x")), y: len(g("sc_y")), scoop: len(g("sc_scoop")) };
   });
 }
 function setSecRows(list) {
