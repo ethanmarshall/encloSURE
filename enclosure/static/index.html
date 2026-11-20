@@ -2402,10 +2402,30 @@ function secRows() {
     return { kind, name, count: Math.round(num(g("sc_count").value)), x: len(g("sc_x")), y: len(g("sc_y")), scoop: len(g("sc_scoop")) };
   });
 }
+// With sections, the case's inside length and width are worked out from them: those two boxes show the
+// result and can't be typed in, and each space says how big it comes out once its room is added.
+function secSync() {
+  const e = shapeform.elements, on = $$("#cs_secs .item").length > 0;
+  for (const el of [e.cs_l, e.cs_w]) { el.readOnly = on; el.style.opacity = on ? "0.6" : ""; el.title = on ? "Worked out from the sections below" : ""; }
+  let note = $("#cs_secnote");
+  if (!note) { note = h("p", { class: "hint", id: "cs_secnote", style: "margin:2px 0 8px" }); e.cs_l.closest(".grid").after(note); }
+  note.hidden = !on;
+  note.textContent = "Inside length and width are worked out from the sections below (each thing plus its room, and the walls). They update when you press Show it.";
+  for (const it of $$("#cs_secs .item[data-kind=space]")) {
+    const g = n => it.querySelector(`[name=${n}]`), room = len(g("sc_fit"));
+    let say = it.querySelector(".sc_say");
+    if (!say) { say = h("p", { class: "hint sc_say", style: "margin:4px 0 0" }); it.append(say); }
+    const f = v => +(v / U).toFixed(U === 1 ? 2 : 3);
+    say.textContent = `Its space comes out ${f(len(g("sc_x")) + room)} × ${f(len(g("sc_y")) + room)} ${UNIT()}: the thing plus the room round it.`;
+  }
+}
 function setSecRows(list) {
   $("#cs_secs").replaceChildren(...(list || []).filter(o => ["space", "holes", "cells", "open", "break"].includes(o?.kind)).map(o => secRow(o.kind, o)));
+  secSync();
 }
-for (const b of $$("[data-sec]")) b.onclick = () => { const it = secRow(b.dataset.sec); $("#cs_secs").append(it); it.querySelector("input")?.focus(); };
+for (const b of $$("[data-sec]")) b.onclick = () => { const it = secRow(b.dataset.sec); $("#cs_secs").append(it); it.querySelector("input")?.focus(); secSync(); };
+$("#cs_secs").addEventListener("input", () => setTimeout(secSync, 0));
+$("#cs_secs").addEventListener("click", ev => { if (ev.target.closest(".del")) setTimeout(secSync, 0); });
 // A case can be handed on as a link: everything about it is in the address.
 function caseLink() {
   const bytes = new TextEncoder().encode(JSON.stringify(caseBody()));
@@ -2450,6 +2470,10 @@ $("#csshow").onclick = () => busy($("#csshow"), "Making...", async () => {
   const res = await fetch("api/case", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ case: sent, preview: true }) });
   if (!res.ok) { report.replaceChildren(msg("err", await errorOf(res))); return; }
   const d = await res.json();
+  if (sent.sections || sent.grid_cols) {             // the size boxes show what the sections or the grid came to
+    const e = shapeform.elements;
+    [["cs_l", 0], ["cs_w", 1], ["cs_h", 2]].forEach(([k, i]) => { e[k].value = show(d.inner[i]); e[k].dataset.mm = String(d.inner[i]); });
+  }
   showShape(d, `Hinged case: inside ${d.inner.map(v => +(v / U).toFixed(2)).join(" × ")} ${UNIT()}`, { api: "case", request: { case: sent } });
 });
 $("#cstest").onclick = () => busy($("#cstest"), "Making...", async () => {
